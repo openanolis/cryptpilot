@@ -1,0 +1,4 @@
+# Configuration related to cryptpilot boot service.
+[boot]
+# Enable this option if you want to see more log when running cryptpilot boot service in initrd stage and in system stage.
+verbose = false

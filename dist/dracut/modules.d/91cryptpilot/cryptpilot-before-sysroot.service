@@ -1,0 +1,19 @@
+[Unit]
+Description=Cryptpilot Service (before /sysroot mount)
+DefaultDependencies=no
+ConditionPathExists=/etc/initrd-release
+Requires=network-online.target
+After=network-online.target
+Before=initrd-root-device.target
+Wants=attestation-agent.service
+After=attestation-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/bin/cryptpilot boot-service --stage initrd-before-sysroot
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+RequiredBy=initrd-root-device.target

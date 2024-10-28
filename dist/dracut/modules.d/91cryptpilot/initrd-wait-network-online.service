@@ -1,0 +1,12 @@
+[Unit]
+DefaultDependencies=no
+Before=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/cryptpilot/bin/initrd-wait-network-online.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=initrd.target
+WantedBy=network-online.target

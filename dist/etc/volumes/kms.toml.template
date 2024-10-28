@@ -1,0 +1,32 @@
+# The name of resulting volume with decrypted data, which will be set up below `/dev/mapper/`.
+volume = "data0"
+# The path to the underlying encrypted device.
+dev = "/dev/nvme1n1p1"
+# Whether or not to open the LUKS2 device and set up mapping during booting. The default value is false.
+auto_open = true
+# The file system to initialize on the volume. Allowed values are ["swap", "ext4", "xfs", "vfat"]. If is not specified, or the device is not "empty", i.e. it contains any signature, the operation will be skipped.
+makefs = "ext4"
+# Whether or not to enable support for data integrity. The default value is false. Note that integrity cannot prevent a replay (rollback) attack.
+integrity = true
+
+# Aliyun KMS
+[encrypt.kms]
+# The id of KMS instance
+kms_instance_id = "kst-XXXXXXXXX"
+# The name of the secret store in the KMS instance.
+secret_name = "XXXXXXXXX"
+# Content of the clientKey_****.json file.
+client_key = '''
+{
+  "KeyId": "KAAP.XXXXXXXXX",
+  "PrivateKeyData": "XXXXXXXXX"
+}'''
+# Content of the clientKey_****_Password.txt file.
+client_key_password = "XXXXXXXXX"
+# The CA cert of the KMS (the content of PrivateKmsCA_kst-******.pem file).
+kms_cert_pem = """
+-----BEGIN CERTIFICATE-----
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+-----END CERTIFICATE-----
+"""

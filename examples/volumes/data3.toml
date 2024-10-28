@@ -1,0 +1,7 @@
+volume = "data3"
+dev = "/dev/nvme1n1p4"
+auto_open = true
+makefs = "xfs"
+integrity = true
+
+[encrypt.otp]

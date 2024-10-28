@@ -1,0 +1,13 @@
+- [ ] fix .spec file for rust musl target
+- [ ] add "Copyright (c) 2023 Alibaba Cloud" to each file
+- [ ] may be able to set some metadata in luks slot, see https://man7.org/linux/man-pages/man8/cryptsetup-token.8.html and https://gitlab.com/cryptsetup/cryptsetup/-/issues/772
+- [ ] use libcryptsetup-rs = "0.11.0" instead of cryptsetup binary
+- [ ] requires systemd 246
+- [ ] add a "check" command
+- [ ] add lock on device write operation
+- [ ] Fix /etc/fstab not mount when integrity=true. Maybe it is because systemd-udevd cannot recongnize the device correctly.
+- [ ] Setup a systemd generator for generating service for each volume and control the order with something like Before=systemd-fsck@dev-mapper-data1.service and Before=remote-fs-pre.target. Can debug with systemctl show -p Requires,Wants,Requisite,BindsTo,PartOf,Before,After cryptpilot.service
+- [ ] Generate man page with pandoc and markdown https://eddieantonio.ca/blog/2015/12/18/authoring-manpages-in-markdown-with-pandoc/
+- [ ] "Additional recommended options" for dm-verity in https://wiki.archlinux.org/title/Dm-verity
+- [ ] Show progress bar in disk converter
+- [ ] Fix unknown user volumes when cryptpilot show

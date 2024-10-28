@@ -1,0 +1,25 @@
+[rootfs]
+rw_overlay = "disk"
+
+[rootfs.encrypt.kbs]
+kbs_url = "https://1.2.3.4:8080"
+key_uri = "kbs:///default/mykey/rootfs_partition"
+kbs_root_cert = """
+-----BEGIN CERTIFICATE-----
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+-----END CERTIFICATE-----
+"""
+
+[data]
+integrity = true
+
+[data.encrypt.kbs]
+kbs_url = "https://1.2.3.4:8080"
+key_uri = "kbs:///default/mykey/data_partition"
+kbs_root_cert = """
+-----BEGIN CERTIFICATE-----
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+-----END CERTIFICATE-----
+"""

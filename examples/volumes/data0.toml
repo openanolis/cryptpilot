@@ -1,0 +1,7 @@
+volume = "data0"
+dev = "/dev/nvme1n1p1"
+auto_open = true
+makefs = "ext4"
+integrity = true
+
+[encrypt.otp]
