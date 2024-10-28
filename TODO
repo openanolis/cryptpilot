@@ -1,0 +1,2 @@
+- [ ] update cryptpilot.spec
+- [ ] fix .spec file for rust musl target 
