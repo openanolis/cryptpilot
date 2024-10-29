@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use lazy_static::lazy_static;
@@ -47,7 +50,7 @@ pub async fn get_config_dir() -> PathBuf {
 }
 
 pub async fn load_volume_configs() -> Result<Vec<VolumeConfig>> {
-    let mut configs = Vec::new();
+    let mut volume_configs = Vec::new();
     let config_dir = get_config_dir().await.join("volumes");
 
     debug!("Loading volume configs from: {config_dir:?}");
@@ -55,23 +58,38 @@ pub async fn load_volume_configs() -> Result<Vec<VolumeConfig>> {
         bail!("Directory not found: {}", config_dir.display());
     }
 
+    let mut volume_names = HashSet::<String>::new();
+
     let mut entries = tokio::fs::read_dir(config_dir).await?;
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
 
         if path.is_file() && path.extension().map_or(false, |ext| ext == "conf") {
-            let content = tokio::fs::read_to_string(&path)
+            let volume_config = tokio::fs::read_to_string(&path)
                 .await
-                .with_context(|| format!("Failed to read file: {}", path.display()))?;
+                .map_err(Into::into)
+                .and_then(|content| {
+                    toml::from_str::<VolumeConfig>(&content)
+                        .context("Failed to parse content as TOML")
+                })
+                .and_then(|volume_config| {
+                    if volume_names.contains(&volume_config.volume) {
+                        bail!(
+                            "Volume `{}` is already defined in other volume config files. Please checking your volume config files.",
+                            volume_config.volume
+                        )
+                    }
 
-            let config: VolumeConfig = toml::from_str(&content)
-                .with_context(|| format!("Failed to parse TOML from file: {}", path.display()))?;
+                    volume_names.insert(volume_config.volume.to_owned());
+                    Ok(volume_config)
+                })
+                .with_context(|| format!("Failed to loading volume config file: {}", path.display()))?;
 
-            configs.push(config);
+            volume_configs.push(volume_config);
         }
     }
 
-    Ok(configs)
+    Ok(volume_configs)
 }
 
 pub async fn load_volume_config(volume: &str) -> Result<VolumeConfig> {
