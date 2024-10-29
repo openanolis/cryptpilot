@@ -3,8 +3,8 @@ use comfy_table::modifiers::UTF8_ROUND_CORNERS;
 use comfy_table::presets::UTF8_FULL;
 use comfy_table::*;
 
-pub fn cmd_show() -> Result<()> {
-    let volume_configs = crate::config::load_volume_configs()?;
+pub async fn cmd_show() -> Result<()> {
+    let volume_configs = crate::config::load_volume_configs().await?;
 
     let mut table = Table::new();
     table

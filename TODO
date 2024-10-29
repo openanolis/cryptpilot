@@ -1,2 +1,7 @@
 - [ ] update cryptpilot.spec
 - [ ] fix .spec file for rust musl target 
+- [ ] add "Copyright (c) 2023 Alibaba Cloud" to each file
+- [ ] convert to async
+- [ ] may be able to set some metadata in luks slot, see https://man7.org/linux/man-pages/man8/cryptsetup-token.8.html and https://gitlab.com/cryptsetup/cryptsetup/-/issues/772
+- [ ] use libcryptsetup-rs = "0.11.0" instead of cryptsetup binary
+- [ ] requires systemd 246
