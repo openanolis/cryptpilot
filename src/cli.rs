@@ -14,8 +14,31 @@ pub struct Args {
 pub enum Command {
     #[command(name = "show")]
     Show(ShowOptions),
+
+    #[command(name = "init")]
+    Init(InitOptions),
+
+    #[command(name = "open")]
+    Open(OpenOptions),
+
+    #[command(name = "close")]
+    Close(CloseOptions),
 }
 
 #[derive(Parser, Debug)]
 pub struct ShowOptions {}
 
+#[derive(Parser, Debug)]
+pub struct InitOptions {
+    pub volume: String,
+}
+
+#[derive(Parser, Debug)]
+pub struct OpenOptions {
+    pub volume: String,
+}
+
+#[derive(Parser, Debug)]
+pub struct CloseOptions {
+    pub volume: String,
+}

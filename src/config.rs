@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use lazy_static::lazy_static;
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -74,9 +74,22 @@ pub async fn load_volume_configs() -> Result<Vec<VolumeConfig>> {
     Ok(configs)
 }
 
+pub async fn load_volume_config(volume: &str) -> Result<VolumeConfig> {
+    crate::config::load_volume_configs()
+        .await
+        .and_then(|volume_configs| {
+            let volume_config = volume_configs
+                .into_iter()
+                .find(|volume_config| volume_config.volume == volume)
+                .ok_or_else(|| anyhow!("Unknown volume name: {volume}"))?;
+
+            Ok(volume_config)
+        })
+        .with_context(|| format!("Failed to load config for volume name: {}", volume))
+}
+
 #[cfg(test)]
 pub mod tests {
-    use anyhow::Result;
 
     #[allow(unused_imports)]
     use super::*;

@@ -24,6 +24,9 @@ async fn main() -> Result<()> {
 
     match args.command {
         cli::Command::Show(_) => cmd::show::cmd_show().await?,
+        cli::Command::Init(init_options) => cmd::init::cmd_init(&init_options).await?,
+        cli::Command::Open(open_options) => cmd::open::cmd_open(&open_options).await?,
+        cli::Command::Close(close_options) => cmd::close::cmd_close(&close_options).await?,
     };
 
     Ok(())
