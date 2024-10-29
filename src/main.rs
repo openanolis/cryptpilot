@@ -2,7 +2,6 @@ pub(crate) mod cli;
 pub(crate) mod cmd;
 pub(crate) mod config;
 pub(crate) mod provider;
-pub(crate) mod socket;
 
 use anyhow::Result;
 use clap::Parser as _;
@@ -24,13 +23,7 @@ async fn main() -> Result<()> {
     debug!("Using config dir: {:?}", config::get_config_dir().await);
 
     match args.command {
-        cli::Command::CrypttabGen(options) => {
-            cmd::crypttab_gen::cmd_crypttab_gen(options).await?
-        }
         cli::Command::Show(_) => cmd::show::cmd_show().await?,
-        cli::Command::CrypttabKeySupplier(options) => {
-            cmd::crypttab_key_supplier::cmd_crypttab_key_supplier(options).await?
-        }
     };
 
     Ok(())
