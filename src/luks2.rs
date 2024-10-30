@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use log::info;
 use run_script::ScriptOptions;
+use tokio::fs::OpenOptions;
 
 use crate::types::Passphrase;
 
@@ -109,4 +110,15 @@ pub async fn is_initialized(dev: &str) -> Result<bool> {
 
 pub fn is_active(volume: &str) -> bool {
     PathBuf::from(format!("/dev/mapper/{}", volume)).exists()
+}
+
+pub async fn is_dev_in_use(dev: &str) -> Result<bool> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    options.custom_flags(libc::O_EXCL);
+    match options.open(dev).await {
+        Ok(_) => Ok(false),
+        Err(e) if e.raw_os_error() == Some(libc::EBUSY) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }

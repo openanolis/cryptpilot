@@ -24,6 +24,10 @@ pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
         return Ok(());
     }
 
+    if crate::luks2::is_dev_in_use(&volume_config.dev).await? {
+        bail!("The device {} is currently in use", volume_config.dev);
+    }
+
     match volume_config.key_provider {
         crate::config::KeyProviderOptions::Temp(temp_options) => {
             let provider = temp_options.into_provider();

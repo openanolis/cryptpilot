@@ -1,10 +1,10 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
+use dialoguer::Confirm;
 use log::info;
-use run_script::ScriptOptions;
 
 use crate::{
     cli::InitOptions,
-    provider::{kms::KmsKeyProvider, IntoProvider, KeyProvider as _},
+    provider::{IntoProvider, KeyProvider as _},
 };
 
 pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
@@ -16,10 +16,31 @@ pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
     );
     match volume_config.key_provider {
         crate::config::KeyProviderOptions::Temp(_temp_options) => {
-            info!("No need to initialize");
+            info!("Not required to initialize");
             return Ok(());
         }
         crate::config::KeyProviderOptions::Kms(kms_options) => {
+            if crate::luks2::is_initialized(&volume_config.dev).await? && !init_options.force_reinit
+            {
+                bail!("The device {} is already initialized", volume_config.dev);
+            }
+
+            if !init_options.yes
+                && !Confirm::new()
+                    .with_prompt(format!(
+                        "All of the data on {} will be lost. Do you want to continue?",
+                        volume_config.dev
+                    ))
+                    .default(false)
+                    .interact()?
+            {
+                bail!("Operation canceled");
+            }
+
+            if crate::luks2::is_dev_in_use(&volume_config.dev).await? {
+                bail!("The device {} is currently in use", volume_config.dev);
+            }
+
             info!("Fetching passphrase for volume {}", volume_config.volume);
             let provider = kms_options.into_provider();
             let passphrase = provider.get_key().await?;

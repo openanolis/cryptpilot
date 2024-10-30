@@ -31,6 +31,12 @@ pub struct ShowOptions {}
 #[derive(Parser, Debug)]
 pub struct InitOptions {
     pub volume: String,
+
+    #[clap(long, default_value = "false")]
+    pub force_reinit: bool,
+
+    #[clap(long, short = 'y', default_value = "false")]
+    pub yes: bool,
 }
 
 #[derive(Parser, Debug)]
