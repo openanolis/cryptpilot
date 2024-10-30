@@ -5,9 +5,10 @@ use log::info;
 use rand::RngCore as _;
 use run_script::ScriptOptions;
 
-use crate::cli::OpenOptions;
-
-const GENERATED_PASSPHRASE_LEN: usize = 64;
+use crate::{
+    cli::OpenOptions,
+    provider::{kms::KmsKeyProvider, IntoProvider, KeyProvider as _},
+};
 
 pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
     let volume_config = crate::config::load_volume_config(&open_options.volume).await?;
@@ -23,54 +24,33 @@ pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
     }
 
     match volume_config.key_provider {
-        crate::config::KeyProviderOptions::Temp(_temp_options) => {
-            tokio::task::spawn_blocking(move || -> Result<_> {
-                // TODO: store passphrase with auto clean container
-                let mut passphrase = [0u8; GENERATED_PASSPHRASE_LEN / 2];
-                let mut rng = rand::thread_rng();
-                rng.fill_bytes(&mut passphrase);
-                let passphrase = hex::encode(passphrase);
-                info!("Generated temporary passphrase: {passphrase}");
+        crate::config::KeyProviderOptions::Temp(temp_options) => {
+            let provider = temp_options.into_provider();
+            let passphrase = provider.get_key().await?;
+            info!("Generated temporary passphrase: {passphrase:?}");
 
-                info!("Formatting and setting up mapping now");
-                let mut ops = ScriptOptions::new();
-                ops.exit_on_error = true;
-                run_script::run_script!(
-                    format!(
-                        r#"
-                        echo -n {passphrase} | cryptsetup luksFormat --type luks2 {} -
-                        echo -n {passphrase} | cryptsetup open {} {}
-                     "#,
-                        volume_config.dev, volume_config.dev, volume_config.volume
-                    ),
-                    ops
-                )
-                .map_err(Into::into)
-                .and_then(|(code, output, error)| {
-                    if code != 0 {
-                        bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
-                    } else {
-                        Ok((output, error))
-                    }
-                })
-                .with_context(|| {
-                    format!(
-                        "Failed to setup LUKS2 for volume `{}`",
-                        volume_config.volume
-                    )
-                })?;
-
-                Ok(passphrase)
-            })
-            .await
-            .context("background task failed")??;
+            crate::luks2::format(&volume_config.dev, &passphrase).await?;
+            crate::luks2::open(&volume_config.volume, &volume_config.dev, &passphrase).await?;
         }
-        crate::config::KeyProviderOptions::Kms(kms_options) => todo!(),
+        crate::config::KeyProviderOptions::Kms(kms_options) => {
+            if !crate::luks2::is_initialized(&volume_config.dev).await? {
+                bail!(
+                    "{} is not a valid LUKS2 volume, should be initialized before opening it",
+                    volume_config.dev
+                );
+            }
+
+            info!("Fetching passphrase for volume {}", volume_config.volume);
+            let provider = kms_options.into_provider();
+            let passphrase = provider.get_key().await?;
+
+            crate::luks2::open(&volume_config.volume, &volume_config.dev, &passphrase).await?;
+        }
         crate::config::KeyProviderOptions::Kbs(kbs_options) => todo!(),
         crate::config::KeyProviderOptions::Tpm2(tpm2_options) => todo!(),
     }
 
-    info!("The mapping is ready now");
+    info!("The mapping is active now");
 
     Ok(())
 }

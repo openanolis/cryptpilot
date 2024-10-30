@@ -5,9 +5,9 @@ Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
 License: Alibaba
 URL: www.alibaba.com
-Requires: dracut lvm2 cryptsetup
+Requires: dracut lvm2 cryptsetup coreutils
 
-BuildRequires: cargo, rust
+BuildRequires: cargo, rust, protobuf-compiler
 BuildArch: x86_64
 
 %define dracut_dst %{_prefix}/lib/dracut/modules.d/91crypt-luks/

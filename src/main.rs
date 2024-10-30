@@ -1,7 +1,9 @@
 pub(crate) mod cli;
 pub(crate) mod cmd;
 pub(crate) mod config;
+pub(crate) mod luks2;
 pub(crate) mod provider;
+pub(crate) mod types;
 
 use anyhow::Result;
 use clap::Parser as _;
