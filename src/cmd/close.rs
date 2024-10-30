@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use anyhow::{bail, Context as _, Result};
 use log::info;
 use run_script::ScriptOptions;

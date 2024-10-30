@@ -1,34 +1,37 @@
-use std::path::{Path, PathBuf};
-
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use log::info;
-use rand::RngCore as _;
-use run_script::ScriptOptions;
 
 use crate::{
     cli::OpenOptions,
+    config::VolumeConfig,
     luks2,
-    provider::{kms::KmsKeyProvider, IntoProvider, KeyProvider as _},
+    provider::{IntoProvider, KeyProvider as _},
 };
 
 pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
     let volume_config = crate::config::load_volume_config(&open_options.volume).await?;
 
+    open_for_specific_volume(&volume_config).await?;
+
+    info!("The mapping is active now");
+
+    Ok(())
+}
+
+pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()> {
     info!(
         "The key_provider type is \"{}\"",
         serde_variant::to_variant_name(&volume_config.key_provider)?
     );
-
     if luks2::is_active(&volume_config.volume) {
         info!("The mapping for {} already exists", volume_config.volume);
         return Ok(());
     }
-
     if crate::luks2::is_dev_in_use(&volume_config.dev).await? {
         bail!("The device {} is currently in use", volume_config.dev);
     }
-
-    match volume_config.key_provider {
+    let volume_config = volume_config.to_owned();
+    Ok(match volume_config.key_provider {
         crate::config::KeyProviderOptions::Temp(temp_options) => {
             let provider = temp_options.into_provider();
             let passphrase = provider.get_key().await?;
@@ -51,11 +54,7 @@ pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
 
             crate::luks2::open(&volume_config.volume, &volume_config.dev, &passphrase).await?;
         }
-        crate::config::KeyProviderOptions::Kbs(kbs_options) => todo!(),
-        crate::config::KeyProviderOptions::Tpm2(tpm2_options) => todo!(),
-    }
-
-    info!("The mapping is active now");
-
-    Ok(())
+        crate::config::KeyProviderOptions::Kbs(_kbs_options) => todo!(),
+        crate::config::KeyProviderOptions::Tpm2(_tpm2_options) => todo!(),
+    })
 }

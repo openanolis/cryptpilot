@@ -47,8 +47,8 @@ pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
 
             crate::luks2::format(&volume_config.dev, &passphrase).await?;
         }
-        crate::config::KeyProviderOptions::Kbs(kbs_options) => todo!(),
-        crate::config::KeyProviderOptions::Tpm2(tpm2_options) => todo!(),
+        crate::config::KeyProviderOptions::Kbs(_kbs_options) => todo!(),
+        crate::config::KeyProviderOptions::Tpm2(_tpm2_options) => todo!(),
     }
 
     info!("The volume is initialized now");

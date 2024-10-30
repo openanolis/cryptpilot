@@ -24,8 +24,19 @@ pub struct VolumeConfig {
     /// The identifier of the underlying encrypted device.
     pub dev: String,
 
+    #[serde(flatten)]
+    pub extra_options: ExtraOptions,
+
     /// The key provider specific options
     pub key_provider: KeyProviderOptions,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct ExtraOptions {
+    /// Whether or not to open the LUKS2 device and set up mapping during system booting phase (the phase after initrd phase)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_in_system: Option<bool>,
+    // pub open_in_initrd: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -130,6 +141,9 @@ pub mod tests {
                 volume: "data".into(),
                 dev: "/dev/nvme1n1p1".into(),
                 key_provider: KeyProviderOptions::Temp(crate::provider::temp::TempOptions {}),
+                extra_options: ExtraOptions {
+                    open_in_system: None
+                }
             }
         );
         Ok(())
@@ -206,6 +220,9 @@ nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
             dev: "/dev/nvme1n1p2
             "
             .into(),
+            extra_options: ExtraOptions {
+                open_in_system: None,
+            },
             key_provider: KeyProviderOptions::Kms(crate::provider::kms::KmsOptions {
                 client_key: r#"{
   "KeyId": "KAAP.f4c8****",

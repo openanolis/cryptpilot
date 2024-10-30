@@ -102,7 +102,7 @@ pub async fn is_initialized(dev: &str) -> Result<bool> {
             };
             Ok(initialized)
         })
-        .with_context(|| format!("Failed to check {dev} as LUKS2 volume"))
+        .with_context(|| format!("Failed to check initialization status of device {dev}"))
     })
     .await
     .context("background task failed")?

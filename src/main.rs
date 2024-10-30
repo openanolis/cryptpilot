@@ -29,6 +29,9 @@ async fn main() -> Result<()> {
         cli::Command::Init(init_options) => cmd::init::cmd_init(&init_options).await?,
         cli::Command::Open(open_options) => cmd::open::cmd_open(&open_options).await?,
         cli::Command::Close(close_options) => cmd::close::cmd_close(&close_options).await?,
+        cli::Command::SystemdService(systemd_service_options) => {
+            cmd::systemd_service::cmd_systemd_service(&systemd_service_options).await?
+        }
     };
 
     Ok(())

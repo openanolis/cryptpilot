@@ -1,5 +1,4 @@
 use anyhow::Result;
-use log::info;
 use rand::RngCore as _;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +12,7 @@ const GENERATED_PASSPHRASE_LEN: usize = 64;
 pub struct TempOptions {}
 
 pub struct TempKeyProvider {
+    #[allow(dead_code)]
     options: TempOptions,
 }
 

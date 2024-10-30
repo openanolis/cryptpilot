@@ -28,6 +28,10 @@ pub enum Command {
     /// Close an open volume.
     #[command(name = "close")]
     Close(CloseOptions),
+
+    /// Run as a systemd service.
+    #[command(name = "systemd-service")]
+    SystemdService(SystemdServiceOptions),
 }
 
 #[derive(Parser, Debug)]
@@ -58,3 +62,6 @@ pub struct CloseOptions {
     /// Name of the volume to close.
     pub volume: String,
 }
+
+#[derive(Parser, Debug)]
+pub struct SystemdServiceOptions {}
