@@ -4,12 +4,12 @@ use anyhow::{bail, Context as _, Result};
 use log::info;
 use run_script::ScriptOptions;
 
-use crate::cli::CloseOptions;
+use crate::{cli::CloseOptions, luks2};
 
 pub async fn cmd_close(close_options: &CloseOptions) -> Result<()> {
     let volume = close_options.volume.to_owned();
 
-    if !PathBuf::from(format!("/dev/mapper/{}", volume)).exists() {
+    if !luks2::is_active(&volume) {
         info!("The mapping for {} is not active, nothing to do", volume);
         return Ok(());
     }

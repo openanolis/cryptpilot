@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{bail, Context, Result};
 use log::info;
 use run_script::ScriptOptions;
@@ -103,4 +105,8 @@ pub async fn is_initialized(dev: &str) -> Result<bool> {
     })
     .await
     .context("background task failed")?
+}
+
+pub fn is_active(volume: &str) -> bool {
+    PathBuf::from(format!("/dev/mapper/{}", volume)).exists()
 }

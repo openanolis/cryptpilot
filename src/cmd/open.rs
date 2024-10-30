@@ -7,6 +7,7 @@ use run_script::ScriptOptions;
 
 use crate::{
     cli::OpenOptions,
+    luks2,
     provider::{kms::KmsKeyProvider, IntoProvider, KeyProvider as _},
 };
 
@@ -18,7 +19,7 @@ pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
         serde_variant::to_variant_name(&volume_config.key_provider)?
     );
 
-    if PathBuf::from(format!("/dev/mapper/{}", volume_config.volume)).exists() {
+    if luks2::is_active(&volume_config.volume) {
         info!("The mapping for {} already exists", volume_config.volume);
         return Ok(());
     }
