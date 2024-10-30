@@ -25,8 +25,8 @@ tokio = {version = "1.41.0", features = ["rt", "macros", "signal", "rt-multi-thr
 toml = "0.8.19"
 
 [features]
-default = ["provider-kbs", "provider-kms", "provider-temp", "provider-tpm2"]
+default = ["provider-kbs", "provider-kms", "provider-otp", "provider-tpm2"]
 provider-kbs = []
 provider-kms = ["dep:kms"]
-provider-temp = []
+provider-otp = []
 provider-tpm2 = []

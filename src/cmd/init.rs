@@ -15,7 +15,7 @@ pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
         serde_variant::to_variant_name(&volume_config.key_provider)?
     );
     match volume_config.key_provider {
-        crate::config::KeyProviderOptions::Temp(_temp_options) => {
+        crate::config::KeyProviderOptions::Otp(_otp_options) => {
             info!("Not required to initialize");
             return Ok(());
         }

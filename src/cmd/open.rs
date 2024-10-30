@@ -32,8 +32,8 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
     }
     let volume_config = volume_config.to_owned();
     Ok(match volume_config.key_provider {
-        crate::config::KeyProviderOptions::Temp(temp_options) => {
-            let provider = temp_options.into_provider();
+        crate::config::KeyProviderOptions::Otp(otp_options) => {
+            let provider = otp_options.into_provider();
             let passphrase = provider.get_key().await?;
             info!("Generated temporary passphrase: {passphrase:?}");
 

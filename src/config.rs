@@ -42,8 +42,8 @@ pub struct ExtraOptions {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum KeyProviderOptions {
-    #[cfg(feature = "provider-temp")]
-    Temp(crate::provider::temp::TempOptions),
+    #[cfg(feature = "provider-otp")]
+    Otp(crate::provider::otp::OtpOptions),
     #[cfg(feature = "provider-kms")]
     Kms(crate::provider::kms::KmsOptions),
     #[cfg(feature = "provider-kbs")]
@@ -126,12 +126,12 @@ pub mod tests {
     use super::*;
 
     #[test]
-    fn test_deserialize_temp() -> Result<()> {
+    fn test_deserialize_otp() -> Result<()> {
         let raw = r#"
         dev = "/dev/nvme1n1p1"
         volume = "data"
 
-        [key_provider.temp]
+        [key_provider.otp]
         "#;
 
         let config: VolumeConfig = toml::from_str(raw)?;
@@ -140,7 +140,7 @@ pub mod tests {
             VolumeConfig {
                 volume: "data".into(),
                 dev: "/dev/nvme1n1p1".into(),
-                key_provider: KeyProviderOptions::Temp(crate::provider::temp::TempOptions {}),
+                key_provider: KeyProviderOptions::Otp(crate::provider::otp::OtpOptions {}),
                 extra_options: ExtraOptions {
                     open_in_system: None
                 }

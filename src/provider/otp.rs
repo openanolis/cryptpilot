@@ -9,22 +9,22 @@ use super::{IntoProvider, KeyProvider};
 const GENERATED_PASSPHRASE_LEN: usize = 64;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub struct TempOptions {}
+pub struct OtpOptions {}
 
-pub struct TempKeyProvider {
+pub struct OtpKeyProvider {
     #[allow(dead_code)]
-    options: TempOptions,
+    options: OtpOptions,
 }
 
-impl IntoProvider for TempOptions {
-    type Provider = TempKeyProvider;
+impl IntoProvider for OtpOptions {
+    type Provider = OtpKeyProvider;
 
     fn into_provider(self) -> Self::Provider {
-        TempKeyProvider { options: self }
+        OtpKeyProvider { options: self }
     }
 }
 
-impl KeyProvider for TempKeyProvider {
+impl KeyProvider for OtpKeyProvider {
     async fn get_key(&self) -> Result<Passphrase> {
         // TODO: store passphrase with auto clean container
         let mut passphrase = [0u8; GENERATED_PASSPHRASE_LEN / 2];

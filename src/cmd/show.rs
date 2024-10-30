@@ -43,7 +43,7 @@ pub async fn print_volume_configs_as_table(volume_configs: &[VolumeConfig]) -> R
                 }
             },
             {
-                if let KeyProviderOptions::Temp(_) = volume_config.key_provider {
+                if let KeyProviderOptions::Otp(_) = volume_config.key_provider {
                     Cell::new("Not Required").fg(Color::Green)
                 } else {
                     if crate::luks2::is_initialized(&volume_config.dev).await? {
