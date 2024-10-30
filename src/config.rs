@@ -89,6 +89,8 @@ pub async fn load_volume_configs() -> Result<Vec<VolumeConfig>> {
         }
     }
 
+    volume_configs.sort_by(|a, b| a.volume.cmp(&b.volume));
+
     Ok(volume_configs)
 }
 
