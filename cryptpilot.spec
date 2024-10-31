@@ -5,9 +5,10 @@ Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
 License: Alibaba
 URL: www.alibaba.com
-Requires: dracut lvm2 cryptsetup coreutils
+Requires: dracut lvm2 cryptsetup coreutils systemd
 
-BuildRequires: cargo, rust, protobuf-compiler
+# BuildRequires: cargo, rust, protobuf-compiler
+BuildRequires: protobuf-compiler
 BuildArch: x86_64
 
 %define dracut_dst %{_prefix}/lib/dracut/modules.d/91crypt-luks/
@@ -19,13 +20,11 @@ A utility for protecting data at rest in confidential environment, with setting 
 # https://stackoverflow.com/a/48484540/15011229
 find . -mindepth 1 -delete
 cp -af %{expand:%%(pwd)}/. .
-tree -L 3 ../
 
 %build
-pwd
-tree -L 3 ../
 rustup target add x86_64-unknown-linux-musl
-cargo build --release --target x86_64-unknown-linux-musl
+# cargo build --release --target x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl --config target.x86_64-unknown-linux-musl.linker=\"/opt/x86-64--musl--stable-2024.05-1/bin/x86_64-buildroot-linux-musl-gcc\"
 
 %install
 mkdir -p %{buildroot}%{_prefix}/bin
@@ -33,14 +32,40 @@ cp target/x86_64-unknown-linux-musl/release/cryptpilot %{buildroot}%{_prefix}/bi
 chmod 755 %{buildroot}%{_prefix}/bin/cryptpilot
 rm -rf %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{dracut_dst}
-install -p -m 755 dracut/modules.d/91luks-agent/module-setup.sh %{buildroot}%{dracut_dst}
+# install -p -m 755 dist/dracut/modules.d/91luks-agent/module-setup.sh %{buildroot}%{dracut_dst}
+install -d -p %{buildroot}%{_prefix}/lib/systemd/system
+install -p -m 644 dist/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/system/cryptpilot.service
+install -d -p %{buildroot}/etc/cryptpilot
+install -p -m 600 dist/etc/cryptpilot.conf %{buildroot}/etc/cryptpilot/cryptpilot.conf
+install -d -p %{buildroot}/etc/cryptpilot/volumes
+install -p -m 600 dist/etc/volumes/data0.conf.template %{buildroot}/etc/cryptpilot/volumes/data0.conf.template
 
 %clean
 rm -rf %{buildroot}
 
 %files
 %{_prefix}/bin/cryptpilot
-%{dracut_dst}module-setup.sh
+%{_prefix}/lib/systemd/system/cryptpilot.service
+/etc/cryptpilot/cryptpilot.conf
+/etc/cryptpilot/volumes
+/etc/cryptpilot/volumes/data0.conf.template
+# %{dracut_dst}module-setup.sh
+
+%post
+systemctl daemon-reload
+
+%preun
+if [ $1 == 0 ]; then #uninstall
+  systemctl unmask %{name}.service
+  systemctl stop %{name}.service
+  systemctl disable %{name}.service
+fi
+
+%postun
+if [ $1 == 0 ]; then #uninstall
+  systemctl daemon-reload
+  systemctl reset-failed
+fi
 
 %changelog
 * Mon Oct 28 2024 Kun Lai <laikun@linux.alibaba.com> - 0.1.0-1

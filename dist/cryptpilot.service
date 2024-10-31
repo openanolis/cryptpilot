@@ -1,0 +1,12 @@
+[Unit]
+Description=A utility for protecting data at rest in confidential environment
+DefaultDependencies=no
+After=network-online.target
+Before=remote-cryptsetup.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cryptpilot systemd-service
+
+[Install]
+WantedBy=remote-cryptsetup.target

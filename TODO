@@ -6,3 +6,6 @@
 - [ ] use libcryptsetup-rs = "0.11.0" instead of cryptsetup binary
 - [ ] requires systemd 246
 - [ ] add a "check" command
+- [ ] add lock on device write operation
+- [ ] setup a generator
+- [ ] x-systemd.makefs for otp device

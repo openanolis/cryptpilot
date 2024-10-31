@@ -8,9 +8,22 @@ yum install rpm-build
 rpmbuild -ba cryptpilot.spec
 yum-builddep cryptpilot.spec
 
+rpm -qlp /root/rpmbuild/RPMS/x86_64/cryptpilot-0.1.0-1.al8.x86_64.rpm
+rpm -i /root/rpmbuild/RPMS/x86_64/cryptpilot-0.1.0-1.al8.x86_64.rpm
+rpmquery -l nginx
+
+LC_ALL=C rpmbuild -ba cryptpilot.spec
 
 /usr/lib/systemd/systemd-cryptsetup attach data0 /dev/nvme1n1p1 /var/run/cryptpilot.sock
 
+systemd-analyze plot > /tmp/seq.svg
+systemd-analyze dot --to-pattern='*.target' --from-pattern='*.target' --to-pattern='*.service' --from-pattern='*.service' \
+      | dot -Tsvg >/tmp/targets.svg
+
+musl-gcc或者：
+https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64/tarballs/x86-64--musl--stable-2024.05-1.tar.xz
+
+findmnt
 
 ## Test
 
@@ -30,7 +43,7 @@ sudo mkswap /dev/nvme1n1p3
 
 # Force the UUID values for easy testing
 sudo tune2fs -U cf60541e-9ffd-4dc6-b0b8-8d20fbf51c68 /dev/nvme1n1p1
-sudo tune2fs -U 07f5f317-242c-4707-9d90-c8db72ae2a64 /dev/nvme1n1p1
+sudo tune2fs -U 07f5f317-242c-4707-9d90-c8db72ae2a64 /dev/nvme1n1p2
 sudo mkswap -U 6f0e01bd-8155-424d-a2c5-befd83325070 /dev/nvme1n1p3
 
 # Append to /etc/fstab
