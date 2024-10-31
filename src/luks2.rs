@@ -1,15 +1,12 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use log::info;
 use run_script::ScriptOptions;
 use tokio::fs::OpenOptions;
 
-use crate::types::Passphrase;
+use crate::{config::MakeFsType, types::Passphrase};
 
 pub async fn format(dev: &str, passphrase: &Passphrase) -> Result<()> {
-    info!("Formatting {dev} as LUKS2 volume now",);
-
     let dev = dev.to_owned();
     let passphrase = passphrase.to_owned();
     tokio::task::spawn_blocking(move || -> Result<_> {
@@ -42,8 +39,6 @@ pub async fn format(dev: &str, passphrase: &Passphrase) -> Result<()> {
 }
 
 pub async fn open(volume: &str, dev: &str, passphrase: &Passphrase) -> Result<(), anyhow::Error> {
-    info!("Setting up mapping for volume {volume} now");
-
     let dev = dev.to_owned();
     let volume = volume.to_owned();
     let passphrase = passphrase.to_owned();
@@ -121,4 +116,59 @@ pub async fn is_dev_in_use(dev: &str) -> Result<bool> {
         Err(e) if e.raw_os_error() == Some(libc::EBUSY) => Ok(true),
         Err(e) => Err(e.into()),
     }
+}
+
+pub async fn close(volume: &str) -> Result<()> {
+    let mut ops = ScriptOptions::new();
+    ops.exit_on_error = true;
+    run_script::run_script!(
+        format!(
+            r#"
+            cryptsetup close {volume}
+         "#
+        ),
+        ops
+    )
+    .map_err(Into::into)
+    .and_then(|(code, output, error)| {
+        if code != 0 {
+            bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
+        } else {
+            Ok((output, error))
+        }
+    })
+    .with_context(|| format!("Failed to close mapping for volume `{volume}`"))?;
+    Ok(())
+}
+
+pub async fn makefs_if_empty(volume: &str, makefs: &MakeFsType) -> Result<()> {
+    let volume = volume.to_owned();
+    let makefs = makefs.to_owned();
+
+    // There is no need to check volume here since systemd-makefs will check it.
+    tokio::task::spawn_blocking(move || -> Result<_> {
+        let mut ops = ScriptOptions::new();
+        ops.exit_on_error = true;
+
+        run_script::run_script!(
+            format!(
+                r#"
+                /usr/lib/systemd/systemd-makefs {} /dev/mapper/{}
+                "#,
+                makefs.to_systemd_makefs_fstype(),
+                volume,
+            ),
+            ops
+        )
+        .with_context(|| {
+            format!(
+                "Failed to initialize {} fs on volume {volume}",
+                serde_variant::to_variant_name(&makefs).unwrap_or("unknown")
+            )
+        })?;
+
+        Ok(())
+    })
+    .await
+    .context("background task failed")?
 }

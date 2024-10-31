@@ -45,7 +45,21 @@ pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
             let provider = kms_options.into_provider();
             let passphrase = provider.get_key().await?;
 
+            info!("Formatting {} as LUKS2 volume now", volume_config.dev);
             crate::luks2::format(&volume_config.dev, &passphrase).await?;
+
+            if let Some(makefs) = volume_config.extra_options.makefs {
+                info!(
+                    "Initializing {} fs on volume {}",
+                    serde_variant::to_variant_name(&makefs)?,
+                    volume_config.volume
+                );
+
+                let tmp_volume_name = format!(".{}", volume_config.volume);
+                crate::luks2::open(&tmp_volume_name, &volume_config.dev, &passphrase).await?;
+                crate::luks2::makefs_if_empty(&tmp_volume_name, &makefs).await?;
+                crate::luks2::close(&tmp_volume_name).await?;
+            }
         }
         crate::config::KeyProviderOptions::Kbs(_kbs_options) => todo!(),
         crate::config::KeyProviderOptions::Tpm2(_tpm2_options) => todo!(),

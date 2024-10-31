@@ -37,8 +37,20 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
             let passphrase = provider.get_key().await?;
             info!("Generated temporary passphrase: {passphrase:?}");
 
+            info!("Formatting {} as LUKS2 volume now", volume_config.dev);
             crate::luks2::format(&volume_config.dev, &passphrase).await?;
+
+            info!("Setting up mapping for volume {} now", volume_config.volume);
             crate::luks2::open(&volume_config.volume, &volume_config.dev, &passphrase).await?;
+
+            if let Some(makefs) = volume_config.extra_options.makefs {
+                info!(
+                    "Initializing {} fs on volume {}",
+                    serde_variant::to_variant_name(&makefs)?,
+                    volume_config.volume
+                );
+                crate::luks2::makefs_if_empty(&volume_config.volume, &makefs).await?;
+            }
         }
         crate::config::KeyProviderOptions::Kms(kms_options) => {
             if !crate::luks2::is_initialized(&volume_config.dev).await? {
@@ -52,6 +64,7 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
             let provider = kms_options.into_provider();
             let passphrase = provider.get_key().await?;
 
+            info!("Setting up mapping for volume {} now", volume_config.volume);
             crate::luks2::open(&volume_config.volume, &volume_config.dev, &passphrase).await?;
         }
         crate::config::KeyProviderOptions::Kbs(_kbs_options) => todo!(),

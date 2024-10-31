@@ -1,6 +1,5 @@
-use anyhow::{bail, Context as _, Result};
+use anyhow::Result;
 use log::info;
-use run_script::ScriptOptions;
 
 use crate::{cli::CloseOptions, luks2};
 
@@ -13,27 +12,7 @@ pub async fn cmd_close(close_options: &CloseOptions) -> Result<()> {
     }
 
     info!("Removing mapping for {volume}");
-
-    let mut ops = ScriptOptions::new();
-    ops.exit_on_error = true;
-    run_script::run_script!(
-        format!(
-            r#"
-            cryptsetup close {volume}
-         "#
-        ),
-        ops
-    )
-    .map_err(Into::into)
-    .and_then(|(code, output, error)| {
-        if code != 0 {
-            bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
-        } else {
-            Ok((output, error))
-        }
-    })
-    .with_context(|| format!("Failed to close mapping for volume `{volume}`"))?;
-
+    crate::luks2::close(&volume).await?;
     info!("The mapping is removed now");
 
     Ok(())
