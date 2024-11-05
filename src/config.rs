@@ -6,6 +6,7 @@ use std::{
 use anyhow::{anyhow, bail, Context as _, Result};
 use lazy_static::lazy_static;
 use log::debug;
+use run_script::ScriptOptions;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
@@ -41,6 +42,10 @@ pub struct ExtraOptions {
     /// The file system to initialize on the volume. If is not specified, or the device is not "empty", i.e. it contains any signature, the operation will be skipped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub makefs: Option<MakeFsType>,
+
+    /// Whether or not to enable support for data integrity. The default value is false. Note that integrity cannot prevent a replay (rollback) attack.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -60,6 +65,64 @@ impl MakeFsType {
             MakeFsType::Xfs => "xfs",
             MakeFsType::Vfat => "vfat",
         }
+    }
+
+    pub fn mkfs_on_no_wipe_volume_blocking(&self, volume_path: &str) -> Result<()> {
+        let mut ops = ScriptOptions::new();
+        ops.exit_on_error = true;
+        match self {
+            MakeFsType::Swap => {
+                run_script::run_script!(
+                    format!(
+                        r#"
+                        dd if=/dev/zero of={volume_path} count=1 seek=0 bs=4096
+                        mkswap {volume_path}
+                        "#,
+                    ),
+                    ops
+                )
+            }
+            MakeFsType::Ext4 => {
+                run_script::run_script!(
+                    format!(
+                        r#"
+                        BLOCKS=$(mkfs.ext4 -n {volume_path} | tail -n 4 | grep -Eo '[0-9]{{4,}}' | sort -n)
+                        BLOCKS="0 $BLOCKS"
+
+                        for BLOCK_NUM in $BLOCKS
+                        do
+                            dd if=/dev/zero of={volume_path} count=1 seek=$BLOCK_NUM bs=4096
+                            dd if={volume_path}  count=1 skip=$BLOCK_NUM  bs=4096 | hexdump 
+                        done
+                        mkfs.ext4 {volume_path}
+                        "#,
+                    ),
+                    ops
+                )
+            }
+            MakeFsType::Xfs => {
+                run_script::run_script!(
+                    format!(
+                        r#"
+                        dd if=/dev/zero of={volume_path} count=1 seek=0 bs=4096
+                        mkfs.xfs -f {volume_path}
+                        "#,
+                    ),
+                    ops
+                )
+            }
+            MakeFsType::Vfat => {
+                bail!("The option `makefs=vfat` and `integrity=true` is not currently supported")
+            }
+        }
+        .map_err(Into::into)
+        .and_then(|(code, output, error)| {
+            if code != 0 {
+                bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
+            } else {
+                Ok(())
+            }
+        })
     }
 }
 
@@ -168,6 +231,7 @@ pub mod tests {
                 extra_options: ExtraOptions {
                     open_in_system: None,
                     makefs: None,
+                    integrity: None,
                 }
             }
         );
@@ -248,6 +312,7 @@ nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
             extra_options: ExtraOptions {
                 open_in_system: None,
                 makefs: None,
+                integrity: None,
             },
             key_provider: KeyProviderOptions::Kms(crate::provider::kms::KmsOptions {
                 client_key: r#"{

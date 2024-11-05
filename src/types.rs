@@ -28,3 +28,10 @@ impl From<Vec<u8>> for Passphrase {
         Self(value)
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum IntegrityType {
+    None,
+    Journal,
+    NoJournal,
+}

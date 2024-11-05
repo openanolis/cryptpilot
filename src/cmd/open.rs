@@ -6,6 +6,7 @@ use crate::{
     config::VolumeConfig,
     luks2,
     provider::{IntoProvider, KeyProvider as _},
+    types::IntegrityType,
 };
 
 pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
@@ -38,10 +39,20 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
             info!("Generated temporary passphrase: {passphrase:?}");
 
             info!("Formatting {} as LUKS2 volume now", volume_config.dev);
-            crate::luks2::format(&volume_config.dev, &passphrase).await?;
+            let integrity = match volume_config.extra_options.integrity {
+                Some(true) => IntegrityType::NoJournal,
+                Some(false) | None => IntegrityType::None,
+            };
+            crate::luks2::format(&volume_config.dev, &passphrase, integrity).await?;
 
             info!("Setting up mapping for volume {} now", volume_config.volume);
-            crate::luks2::open(&volume_config.volume, &volume_config.dev, &passphrase).await?;
+            crate::luks2::open(
+                &volume_config.volume,
+                &volume_config.dev,
+                &passphrase,
+                integrity,
+            )
+            .await?;
 
             if let Some(makefs) = volume_config.extra_options.makefs {
                 info!(
@@ -49,7 +60,7 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
                     serde_variant::to_variant_name(&makefs)?,
                     volume_config.volume
                 );
-                crate::luks2::makefs_if_empty(&volume_config.volume, &makefs).await?;
+                crate::luks2::makefs_if_empty(&volume_config.volume, &makefs, integrity).await?;
             }
         }
         crate::config::KeyProviderOptions::Kms(kms_options) => {
@@ -65,7 +76,17 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
             let passphrase = provider.get_key().await?;
 
             info!("Setting up mapping for volume {} now", volume_config.volume);
-            crate::luks2::open(&volume_config.volume, &volume_config.dev, &passphrase).await?;
+            let integrity = match volume_config.extra_options.integrity {
+                Some(true) => IntegrityType::NoJournal,
+                Some(false) | None => IntegrityType::None,
+            };
+            crate::luks2::open(
+                &volume_config.volume,
+                &volume_config.dev,
+                &passphrase,
+                integrity,
+            )
+            .await?;
         }
         crate::config::KeyProviderOptions::Kbs(_kbs_options) => todo!(),
         crate::config::KeyProviderOptions::Tpm2(_tpm2_options) => todo!(),
