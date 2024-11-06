@@ -22,9 +22,9 @@ pub async fn cmd_systemd_service(_systemd_service_options: &SystemdServiceOption
 
     info!("Opening volumes according to volume configs");
     for volume_config in &volume_configs {
-        if volume_config.extra_options.open_in_system != Some(true) {
+        if volume_config.extra_options.auto_open != Some(true) {
             info!(
-                "The open_in_system option is not enabled for volume {}, skip now",
+                "The auto_open option is not enabled for volume {}, skip now",
                 volume_config.volume
             );
             continue;

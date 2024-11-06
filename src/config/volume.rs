@@ -28,7 +28,7 @@ pub struct VolumeConfig {
 pub struct ExtraOptions {
     /// Whether or not to open the LUKS2 device and set up mapping during system booting phase (the phase after initrd phase)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub open_in_system: Option<bool>,
+    pub auto_open: Option<bool>,
 
     // pub open_in_initrd: Option<bool>,
     /// The file system to initialize on the volume. If is not specified, or the device is not "empty", i.e. it contains any signature, the operation will be skipped.
@@ -151,7 +151,7 @@ pub mod tests {
                 dev: "/dev/nvme1n1p1".into(),
                 key_provider: KeyProviderOptions::Otp(crate::provider::otp::OtpOptions {}),
                 extra_options: ExtraOptions {
-                    open_in_system: None,
+                    auto_open: None,
                     makefs: None,
                     integrity: None,
                 }
@@ -229,7 +229,7 @@ nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
             volume: "data1".into(),
             dev: "/dev/nvme1n1p2".into(),
             extra_options: ExtraOptions {
-                open_in_system: None,
+                auto_open: None,
                 makefs: None,
                 integrity: None,
             },

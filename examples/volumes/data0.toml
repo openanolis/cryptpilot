@@ -1,6 +1,6 @@
 dev = "/dev/nvme1n1p1"
 volume = "data0"
-open_in_system = true
+auto_open = true
 makefs = "ext4"
 integrity = true
 
