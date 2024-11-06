@@ -33,10 +33,10 @@ example-clean:
 
 example-run: example-clean
 	cryptpilot init data0 && cryptpilot open data0 && mkdir -p /mnt/data0 && mount -t ext4 /dev/mapper/data0 /mnt/data0
-	cryptpilot init data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t xfs /dev/mapper/data1 /mnt/data1 && echo -n test > /mnt/data1/testfile
-	umount /mnt/data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t xfs /dev/mapper/data1 /mnt/data1 && [[ `cat /mnt/data1/testfile` == "test" ]]
+	cryptpilot init data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t ext4 /dev/mapper/data1 /mnt/data1 && echo -n test > /mnt/data1/testfile
+	umount /mnt/data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t ext4 /dev/mapper/data1 /mnt/data1 && [[ `cat /mnt/data1/testfile` == "test" ]]
 	cryptpilot init data2 && cryptpilot open data2 && mkdir -p /mnt/data2 && mount -t ext4 /dev/mapper/data2 /mnt/data2
-	cryptpilot init data3 && cryptpilot open data3 && mkdir -p /mnt/data3 && mount -t ext4 /dev/mapper/data3 /mnt/data3
+	cryptpilot init data3 && cryptpilot open data3 && mkdir -p /mnt/data3 && mount -t xfs /dev/mapper/data3 /mnt/data3
 	cryptpilot init swap0 && cryptpilot open swap0 && swapon /dev/mapper/swap0
 	$(info All is done. Now you can check with 'findmnt' and 'swapon')
 
