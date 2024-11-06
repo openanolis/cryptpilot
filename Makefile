@@ -25,16 +25,16 @@ example-prepare: example-clean
 	rsync -avp ./examples/ /etc/cryptpilot/
 
 example-clean:
-	umount /mnt/data0 ; cryptpilot close data0 ; dd if=/dev/urandom of=/dev/nvme1n1p1 count=16 seek=0 bs=4096 ;
-	umount /mnt/data1 ; cryptpilot close data1 ; dd if=/dev/urandom of=/dev/nvme1n1p2 count=16 seek=0 bs=4096 ;
-	umount /mnt/data2 ; cryptpilot close data2 ; dd if=/dev/urandom of=/dev/nvme1n1p3 count=16 seek=0 bs=4096 ;
-	umount /mnt/data3 ; cryptpilot close data3 ; dd if=/dev/urandom of=/dev/nvme1n1p4 count=16 seek=0 bs=4096 ;
-	[ -e /dev/mapper/swap0 ] && swapoff /dev/mapper/swap0 ; cryptpilot close swap0 ; dd if=/dev/urandom of=/dev/nvme1n1p5 count=16 seek=0 bs=4096 ;
+	umount /mnt/data0 ; dmsetup remove data0 ; dmsetup remove data0_dif ; dd if=/dev/urandom of=/dev/nvme1n1p1 count=16 seek=0 bs=4096 ;
+	umount /mnt/data1 ; dmsetup remove data1 ; dmsetup remove data1_dif ; dd if=/dev/urandom of=/dev/nvme1n1p2 count=16 seek=0 bs=4096 ;
+	umount /mnt/data2 ; dmsetup remove data2 ; dmsetup remove data2_dif ; dd if=/dev/urandom of=/dev/nvme1n1p3 count=16 seek=0 bs=4096 ;
+	umount /mnt/data3 ; dmsetup remove data3 ; dmsetup remove data3_dif ; dd if=/dev/urandom of=/dev/nvme1n1p4 count=16 seek=0 bs=4096 ;
+	[ -e /dev/mapper/swap0 ] && swapoff /dev/mapper/swap0 ; dmsetup remove swap0 ; dmsetup remove swap0_dif ; dd if=/dev/urandom of=/dev/nvme1n1p5 count=16 seek=0 bs=4096 ;
 
 example-run: example-clean
 	cryptpilot init data0 && cryptpilot open data0 && mkdir -p /mnt/data0 && mount -t ext4 /dev/mapper/data0 /mnt/data0
-	cryptpilot init data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t xfs /dev/mapper/data1 /mnt/data1
-	umount /mnt/data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t xfs /dev/mapper/data1 /mnt/data1
+	cryptpilot init data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t xfs /dev/mapper/data1 /mnt/data1 && echo -n test > /mnt/data1/testfile
+	umount /mnt/data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t xfs /dev/mapper/data1 /mnt/data1 && [[ `cat /mnt/data1/testfile` == "test" ]]
 	cryptpilot init data2 && cryptpilot open data2 && mkdir -p /mnt/data2 && mount -t ext4 /dev/mapper/data2 /mnt/data2
 	cryptpilot init data3 && cryptpilot open data3 && mkdir -p /mnt/data3 && mount -t ext4 /dev/mapper/data3 /mnt/data3
 	cryptpilot init swap0 && cryptpilot open swap0 && swapon /dev/mapper/swap0
