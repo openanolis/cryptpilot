@@ -162,7 +162,7 @@ pub async fn load_volume_configs() -> Result<Vec<VolumeConfig>> {
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
 
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "conf") {
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "toml") {
             let volume_config = tokio::fs::read_to_string(&path)
                 .await
                 .map_err(Into::into)

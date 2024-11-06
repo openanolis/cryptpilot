@@ -36,9 +36,9 @@ install -d -p %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{_prefix}/lib/systemd/system
 install -p -m 644 dist/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/system/cryptpilot.service
 install -d -p %{buildroot}/etc/cryptpilot
-install -p -m 600 dist/etc/cryptpilot.conf %{buildroot}/etc/cryptpilot/cryptpilot.conf
+install -p -m 600 dist/etc/cryptpilot.toml %{buildroot}/etc/cryptpilot/cryptpilot.toml
 install -d -p %{buildroot}/etc/cryptpilot/volumes
-install -p -m 600 dist/etc/volumes/data0.conf.template %{buildroot}/etc/cryptpilot/volumes/data0.conf.template
+install -p -m 600 dist/etc/volumes/data0.toml.template %{buildroot}/etc/cryptpilot/volumes/data0.toml.template
 
 %clean
 rm -rf %{buildroot}
@@ -46,9 +46,9 @@ rm -rf %{buildroot}
 %files
 %{_prefix}/bin/cryptpilot
 %{_prefix}/lib/systemd/system/cryptpilot.service
-/etc/cryptpilot/cryptpilot.conf
+/etc/cryptpilot/cryptpilot.toml
 /etc/cryptpilot/volumes
-/etc/cryptpilot/volumes/data0.conf.template
+/etc/cryptpilot/volumes/data0.toml.template
 # %{dracut_dst}module-setup.sh
 
 %post
