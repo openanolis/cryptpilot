@@ -8,6 +8,9 @@ pub(crate) mod types;
 use anyhow::Result;
 use clap::Parser as _;
 use log::debug;
+use shadow_rs::shadow;
+
+shadow!(build);
 
 #[tokio::main]
 async fn main() -> Result<()> {

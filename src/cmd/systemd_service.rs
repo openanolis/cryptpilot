@@ -1,9 +1,16 @@
 use anyhow::Result;
 use log::{error, info};
 
-use crate::cli::SystemdServiceOptions;
+use crate::{build, cli::SystemdServiceOptions};
 
 pub async fn cmd_systemd_service(_systemd_service_options: &SystemdServiceOptions) -> Result<()> {
+    info!(
+        "cryptpilot version: v{}  commit: {}  buildtime: {}",
+        build::PKG_VERSION,
+        build::COMMIT_HASH,
+        build::BUILD_TIME
+    );
+
     info!("Checking status for all volumes");
     let volume_configs = crate::config::load_volume_configs().await?;
 

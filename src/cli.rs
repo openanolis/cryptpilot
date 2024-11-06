@@ -1,7 +1,10 @@
 use clap::Parser;
 
+use crate::build::CLAP_LONG_VERSION;
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
+#[clap(long_version = CLAP_LONG_VERSION)]
 pub struct Args {
     #[command(subcommand)]
     pub command: Command,
