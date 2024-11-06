@@ -1,23 +1,14 @@
-use std::{
-    collections::HashSet,
-    path::{Path, PathBuf},
-};
+use std::collections::HashSet;
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use lazy_static::lazy_static;
 use log::debug;
 use run_script::ScriptOptions;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
 
-const CRYPTPILOT_CONFIG_DIR_DEFAULT: &'static str = "/etc/cryptpilot";
-
-lazy_static! {
-    static ref CRYPTPILOT_CONFIG_DIR: RwLock<PathBuf> =
-        RwLock::new(CRYPTPILOT_CONFIG_DIR_DEFAULT.into());
-}
+use crate::config::get_config_dir;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct VolumeConfig {
     /// The name of resulting volume with decrypted data, which will be set up below `/dev/mapper/`.
     pub volume: String,
@@ -33,6 +24,7 @@ pub struct VolumeConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ExtraOptions {
     /// Whether or not to open the LUKS2 device and set up mapping during system booting phase (the phase after initrd phase)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,6 +42,7 @@ pub struct ExtraOptions {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields)]
 pub enum MakeFsType {
     Swap,
     Ext4,
@@ -139,14 +132,6 @@ pub enum KeyProviderOptions {
     Tpm2(crate::provider::tpm2::Tpm2Options),
 }
 
-pub async fn set_config_dir(config_dir: impl AsRef<Path>) {
-    *(CRYPTPILOT_CONFIG_DIR.write().await) = PathBuf::from(config_dir.as_ref());
-}
-
-pub async fn get_config_dir() -> PathBuf {
-    CRYPTPILOT_CONFIG_DIR.read().await.clone()
-}
-
 pub async fn load_volume_configs() -> Result<Vec<VolumeConfig>> {
     let mut volume_configs = Vec::new();
     let config_dir = get_config_dir().await.join("volumes");
@@ -193,7 +178,7 @@ pub async fn load_volume_configs() -> Result<Vec<VolumeConfig>> {
 }
 
 pub async fn load_volume_config(volume: &str) -> Result<VolumeConfig> {
-    crate::config::load_volume_configs()
+    load_volume_configs()
         .await
         .and_then(|volume_configs| {
             let volume_config = volume_configs
@@ -241,8 +226,7 @@ pub mod tests {
     #[test]
     fn test_deserialize_kms() -> Result<()> {
         let raw = r#"
-dev = "/dev/nvme1n1p2
-"
+dev = "/dev/nvme1n1p2"
 volume = "data1"
 
 [key_provider.kms]
@@ -306,9 +290,7 @@ nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
 
         let expected = VolumeConfig {
             volume: "data1".into(),
-            dev: "/dev/nvme1n1p2
-            "
-            .into(),
+            dev: "/dev/nvme1n1p2".into(),
             extra_options: ExtraOptions {
                 open_in_system: None,
                 makefs: None,

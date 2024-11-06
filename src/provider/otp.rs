@@ -9,6 +9,7 @@ use super::{IntoProvider, KeyProvider};
 const GENERATED_PASSPHRASE_LEN: usize = 64;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct OtpOptions {}
 
 pub struct OtpKeyProvider {

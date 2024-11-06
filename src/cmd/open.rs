@@ -3,14 +3,14 @@ use log::info;
 
 use crate::{
     cli::OpenOptions,
-    config::VolumeConfig,
+    config::volume::{KeyProviderOptions, VolumeConfig},
     luks2,
     provider::{IntoProvider, KeyProvider as _},
     types::IntegrityType,
 };
 
 pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
-    let volume_config = crate::config::load_volume_config(&open_options.volume).await?;
+    let volume_config = crate::config::volume::load_volume_config(&open_options.volume).await?;
 
     open_for_specific_volume(&volume_config).await?;
 
@@ -33,7 +33,7 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
     }
     let volume_config = volume_config.to_owned();
     Ok(match volume_config.key_provider {
-        crate::config::KeyProviderOptions::Otp(otp_options) => {
+        KeyProviderOptions::Otp(otp_options) => {
             let provider = otp_options.into_provider();
             let passphrase = provider.get_key().await?;
             info!("Generated temporary passphrase: {passphrase:?}");
@@ -63,7 +63,7 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
                 crate::luks2::makefs_if_empty(&volume_config.volume, &makefs, integrity).await?;
             }
         }
-        crate::config::KeyProviderOptions::Kms(kms_options) => {
+        KeyProviderOptions::Kms(kms_options) => {
             if !crate::luks2::is_initialized(&volume_config.dev).await? {
                 bail!(
                     "{} is not a valid LUKS2 volume, should be initialized before opening it",
@@ -88,7 +88,7 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
             )
             .await?;
         }
-        crate::config::KeyProviderOptions::Kbs(_kbs_options) => todo!(),
-        crate::config::KeyProviderOptions::Tpm2(_tpm2_options) => todo!(),
+        KeyProviderOptions::Kbs(_kbs_options) => todo!(),
+        KeyProviderOptions::Tpm2(_tpm2_options) => todo!(),
     })
 }

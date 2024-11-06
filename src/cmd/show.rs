@@ -3,11 +3,11 @@ use comfy_table::modifiers::UTF8_ROUND_CORNERS;
 use comfy_table::presets::UTF8_FULL;
 use comfy_table::*;
 
-use crate::config::{KeyProviderOptions, VolumeConfig};
+use crate::config::volume::{KeyProviderOptions, VolumeConfig};
 use crate::luks2;
 
 pub async fn cmd_show() -> Result<()> {
-    let volume_configs = crate::config::load_volume_configs().await?;
+    let volume_configs = crate::config::volume::load_volume_configs().await?;
 
     print_volume_configs_as_table(&volume_configs).await?;
 

@@ -14,16 +14,28 @@ shadow!(build);
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let env = env_logger::Env::default()
-        .default_filter_or("info")
-        .default_write_style_or("always"); // enable color
-    env_logger::Builder::from_env(env).init();
-
     let args = cli::Args::parse();
 
+    // Set config dir path
     if let Some(config_dir) = args.config_dir {
         config::set_config_dir(config_dir).await;
     }
+
+    // Check verbose option from config file, if is running as systemd-service.
+    let mut log_level = "info";
+    if let cli::Command::SystemdService(_) = args.command {
+        let global_config = crate::config::global::get_global_config().await?;
+        if global_config.systemd.verbose {
+            log_level = "debug";
+            crate::luks2::set_verbose(true).await;
+        }
+    }
+
+    // Config env_logger
+    let env = env_logger::Env::default()
+        .default_filter_or(log_level)
+        .default_write_style_or("always"); // enable color
+    env_logger::Builder::from_env(env).init();
 
     debug!("Using config dir: {:?}", config::get_config_dir().await);
 

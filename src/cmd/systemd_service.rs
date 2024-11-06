@@ -12,7 +12,7 @@ pub async fn cmd_systemd_service(_systemd_service_options: &SystemdServiceOption
     );
 
     info!("Checking status for all volumes");
-    let volume_configs = crate::config::load_volume_configs().await?;
+    let volume_configs = crate::config::volume::load_volume_configs().await?;
 
     if volume_configs.len() == 0 {
         info!("The volume configs is empty, exit now");

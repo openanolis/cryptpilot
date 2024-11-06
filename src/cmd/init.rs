@@ -4,23 +4,24 @@ use log::info;
 
 use crate::{
     cli::InitOptions,
+    config::volume::KeyProviderOptions,
     provider::{IntoProvider, KeyProvider as _},
     types::IntegrityType,
 };
 
 pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
-    let volume_config = crate::config::load_volume_config(&init_options.volume).await?;
+    let volume_config = crate::config::volume::load_volume_config(&init_options.volume).await?;
 
     info!(
         "The key_provider type is \"{}\"",
         serde_variant::to_variant_name(&volume_config.key_provider)?
     );
     match volume_config.key_provider {
-        crate::config::KeyProviderOptions::Otp(_otp_options) => {
+        KeyProviderOptions::Otp(_otp_options) => {
             info!("Not required to initialize");
             return Ok(());
         }
-        crate::config::KeyProviderOptions::Kms(kms_options) => {
+        KeyProviderOptions::Kms(kms_options) => {
             if crate::luks2::is_initialized(&volume_config.dev).await? && !init_options.force_reinit
             {
                 bail!("The device {} is already initialized", volume_config.dev);
@@ -67,8 +68,8 @@ pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
                 crate::luks2::close(&tmp_volume_name).await?;
             }
         }
-        crate::config::KeyProviderOptions::Kbs(_kbs_options) => todo!(),
-        crate::config::KeyProviderOptions::Tpm2(_tpm2_options) => todo!(),
+        KeyProviderOptions::Kbs(_kbs_options) => todo!(),
+        KeyProviderOptions::Tpm2(_tpm2_options) => todo!(),
     }
 
     info!("The volume is initialized now");

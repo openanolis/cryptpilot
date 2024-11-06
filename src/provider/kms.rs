@@ -9,6 +9,7 @@ use crate::types::Passphrase;
 use super::{IntoProvider, KeyProvider};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct KmsOptions {
     pub secret_name: String,
     pub client_key: String,

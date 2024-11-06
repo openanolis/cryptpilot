@@ -1,43 +1,81 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use lazy_static::lazy_static;
+use log::debug;
 use run_script::ScriptOptions;
-use tokio::fs::OpenOptions;
+use tokio::{fs::OpenOptions, sync::RwLock};
 
 use crate::{
-    config::MakeFsType,
+    config::volume::MakeFsType,
     types::{IntegrityType, Passphrase},
 };
+
+lazy_static! {
+    static ref VERBOSE: RwLock<bool> = RwLock::new(false);
+}
+
+pub async fn set_verbose(verbose: bool) {
+    *VERBOSE.write().await = verbose;
+}
+
+async fn get_verbose() -> bool {
+    *VERBOSE.read().await
+}
+
+struct Shell<S: AsRef<str>>(S);
+
+impl<S: AsRef<str>> Shell<S> {
+    pub fn run(self) -> Result<()> {
+        self.run_with_status_checker(|code, _, _| {
+            if code != 0 {
+                bail!("Bad shell exit code")
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    pub fn run_with_status_checker<R>(self, f: impl Fn(i32, &str, &str) -> Result<R>) -> Result<R> {
+        debug!("Running shell script:\n{}", self.0.as_ref());
+
+        let mut ops = ScriptOptions::new();
+        ops.exit_on_error = true;
+        run_script::run_script!(self.0.as_ref(), ops)
+            .map_err(Into::into)
+            .and_then(|(code, output, error)| {
+                let res = f(code, &output, &error);
+                res.with_context(|| {
+                    format!("\n\tshell script:\n{}\n\texit code: {code}\n\tstdout: {output}\n\tstderr: {error}", self.0.as_ref())
+                })
+            })
+    }
+}
 
 pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType) -> Result<()> {
     let dev = dev.to_owned();
     let passphrase = passphrase.to_owned();
+    let verbose = get_verbose().await;
+
     tokio::task::spawn_blocking(move || -> Result<_> {
-        let mut ops = ScriptOptions::new();
-        ops.exit_on_error = true;
-        run_script::run_script!(
+        Shell(
             format!(
                 r#"
-                echo -n {} | base64 -d | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 {} {} -
+                echo -n {} | base64 -d | cryptsetup {} luksFormat --type luks2 --cipher aes-xts-plain64 {} {} -
                 "#,
                 passphrase.to_base64(),
+                match verbose {
+                    true => "--debug",
+                    false => "",
+                },
                 match integrity {
-                    IntegrityType::None => format!(""),
-                    IntegrityType::Journal => format!("--integrity hmac-sha256 --integrity-no-wipe"),
-                    IntegrityType::NoJournal => format!("--integrity hmac-sha256 --integrity-no-wipe --integrity-no-journal"),
+                    IntegrityType::None => "",
+                    IntegrityType::Journal => "--integrity hmac-sha256 --integrity-no-wipe",
+                    IntegrityType::NoJournal => "--integrity hmac-sha256 --integrity-no-wipe --integrity-no-journal",
                 },
                 dev
-            ),
-            ops
-        )
-        .map_err(Into::into)
-        .and_then(|(code, output, error)| {
-            if code != 0 {
-                bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
-            } else {
-                Ok((output, error))
-            }
-        })
+            )
+        ).run()
         .with_context(|| format!("Failed to format {dev} as LUKS2 volume"))
     })
     .await
@@ -55,32 +93,26 @@ pub async fn open(
     let dev = dev.to_owned();
     let volume = volume.to_owned();
     let passphrase = passphrase.to_owned();
+    let verbose = get_verbose().await;
+
     tokio::task::spawn_blocking(move || -> Result<_> {
-        let mut ops = ScriptOptions::new();
-        ops.exit_on_error = true;
-        run_script::run_script!(
-            format!(
-                r#"
-                echo -n {} | base64 -d | cryptsetup open --type luks2 {} --key-file=- {} {}
+        Shell(format!(
+            r#"
+                echo -n {} | base64 -d | cryptsetup {} open --type luks2 {} --key-file=- {} {}
                 "#,
-                passphrase.to_base64(),
-                match integrity {
-                    IntegrityType::None | IntegrityType::Journal => format!(""),
-                    IntegrityType::NoJournal => format!("--integrity-no-journal"),
-                },
-                dev,
-                volume
-            ),
-            ops
-        )
-        .map_err(Into::into)
-        .and_then(|(code, output, error)| {
-            if code != 0 {
-                bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
-            } else {
-                Ok((output, error))
-            }
-        })
+            passphrase.to_base64(),
+            match verbose {
+                true => "--debug",
+                false => "",
+            },
+            match integrity {
+                IntegrityType::None | IntegrityType::Journal => format!(""),
+                IntegrityType::NoJournal => format!("--integrity-no-journal"),
+            },
+            dev,
+            volume
+        ))
+        .run()
         .with_context(|| format!("Failed to setup mapping for volume {}", volume))
     })
     .await
@@ -92,19 +124,13 @@ pub async fn open(
 pub async fn is_initialized(dev: &str) -> Result<bool> {
     let dev = dev.to_owned();
     tokio::task::spawn_blocking(move || -> Result<_> {
-        let mut ops = ScriptOptions::new();
-        ops.exit_on_error = true;
-        run_script::run_script!(
-            format!(
-                r#"
+        Shell(format!(
+            r#"
                 cryptsetup isLuks {}
                 "#,
-                dev
-            ),
-            ops
-        )
-        .map_err(Into::into)
-        .and_then(|(code, output, error)| {
+            dev
+        ))
+        .run_with_status_checker(|code, output, error| {
             let initialized = match code {
                 0 => true,
                 1 => false,
@@ -136,24 +162,20 @@ pub async fn is_dev_in_use(dev: &str) -> Result<bool> {
 }
 
 pub async fn close(volume: &str) -> Result<()> {
+    let verbose = get_verbose().await;
+
     let mut ops = ScriptOptions::new();
     ops.exit_on_error = true;
-    run_script::run_script!(
-        format!(
-            r#"
-            cryptsetup close {volume}
-         "#
-        ),
-        ops
-    )
-    .map_err(Into::into)
-    .and_then(|(code, output, error)| {
-        if code != 0 {
-            bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
-        } else {
-            Ok((output, error))
-        }
-    })
+    Shell(format!(
+        r#"
+            cryptsetup {} close {volume}
+         "#,
+        match verbose {
+            true => "--debug",
+            false => "",
+        },
+    ))
+    .run()
     .with_context(|| format!("Failed to close mapping for volume `{volume}`"))?;
     Ok(())
 }
@@ -168,31 +190,17 @@ pub async fn makefs_if_empty(
 
     // There is no need to check volume here since systemd-makefs will check it.
     tokio::task::spawn_blocking(move || -> Result<_> {
-        let mut ops = ScriptOptions::new();
-        ops.exit_on_error = true;
-
         match integrity {
-            IntegrityType::None => run_script::run_script!(
-                format!(
-                    r#"
+            IntegrityType::None => Shell(format!(
+                r#"
                         /usr/lib/systemd/systemd-makefs {} /dev/mapper/{}
                         "#,
-                    makefs.to_systemd_makefs_fstype(),
-                    volume,
-                ),
-                ops
-            )
-            .map_err(Into::into)
-            .and_then(|(code, output, error)| {
-                if code != 0 {
-                    bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
-                } else {
-                    Ok(())
-                }
-            }),
-            IntegrityType::Journal | IntegrityType::NoJournal => run_script::run_script!(
-                format!(
-                    r#"
+                makefs.to_systemd_makefs_fstype(),
+                volume,
+            ))
+            .run(),
+            IntegrityType::Journal | IntegrityType::NoJournal => Shell(format!(
+                r#"
                         export LC_ALL=C
                         set +o errexit
                         res=`file -E --brief --dereference --special-files /dev/mapper/{}`
@@ -211,18 +219,16 @@ pub async fn makefs_if_empty(
                             exit 3
                         fi
                         "#,
-                    volume,
-                ),
-                ops
-            )
-            .with_context(|| format!("Failed to detecting filesystem type on volume {volume}",))
-            .and_then(|(code, output, error)| match code {
+                volume,
+            ))
+            .run_with_status_checker(|code, _, _| match code {
                 2 => makefs.mkfs_on_no_wipe_volume_blocking(&format!("/dev/mapper/{volume}")),
                 3 => Ok(()),
                 _ => {
-                    bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
+                    bail!("Bad exit code")
                 }
-            }),
+            })
+            .with_context(|| format!("Failed to detecting filesystem type on volume {volume}",)),
         }
         .with_context(|| {
             format!(
