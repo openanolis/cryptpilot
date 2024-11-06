@@ -4,7 +4,6 @@ use comfy_table::presets::UTF8_FULL;
 use comfy_table::*;
 
 use crate::config::volume::{KeyProviderOptions, VolumeConfig};
-use crate::luks2;
 
 pub async fn cmd_show() -> Result<()> {
     let volume_configs = crate::config::volume::load_volume_configs().await?;
@@ -46,14 +45,14 @@ pub async fn print_volume_configs_as_table(volume_configs: &[VolumeConfig]) -> R
                 if let KeyProviderOptions::Otp(_) = volume_config.key_provider {
                     Cell::new("Not Required").fg(Color::Green)
                 } else {
-                    if crate::luks2::is_initialized(&volume_config.dev).await? {
+                    if crate::fs::luks2::is_initialized(&volume_config.dev).await? {
                         Cell::new("True").fg(Color::Green)
                     } else {
                         Cell::new("False").fg(Color::Yellow)
                     }
                 }
             },
-            if luks2::is_active(&volume_config.volume) {
+            if crate::fs::luks2::is_active(&volume_config.volume) {
                 Cell::new("True").fg(Color::Green)
             } else {
                 Cell::new("False").fg(Color::Yellow)

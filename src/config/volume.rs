@@ -1,9 +1,9 @@
-use std::collections::HashSet;
-
 use anyhow::{anyhow, bail, Context as _, Result};
 use log::debug;
-use run_script::ScriptOptions;
 use serde::{Deserialize, Serialize};
+
+use std::collections::HashSet;
+use std::fmt::Display;
 
 use crate::config::get_config_dir;
 
@@ -50,72 +50,9 @@ pub enum MakeFsType {
     Vfat,
 }
 
-impl MakeFsType {
-    pub fn to_systemd_makefs_fstype(&self) -> &'static str {
-        match self {
-            MakeFsType::Swap => "swap",
-            MakeFsType::Ext4 => "ext4",
-            MakeFsType::Xfs => "xfs",
-            MakeFsType::Vfat => "vfat",
-        }
-    }
-
-    pub fn mkfs_on_no_wipe_volume_blocking(&self, volume_path: &str) -> Result<()> {
-        let mut ops = ScriptOptions::new();
-        ops.exit_on_error = true;
-        match self {
-            MakeFsType::Swap => {
-                run_script::run_script!(
-                    format!(
-                        r#"
-                        dd if=/dev/zero of={volume_path} count=1 seek=0 bs=4096
-                        mkswap {volume_path}
-                        "#,
-                    ),
-                    ops
-                )
-            }
-            MakeFsType::Ext4 => {
-                run_script::run_script!(
-                    format!(
-                        r#"
-                        BLOCKS=$(mkfs.ext4 -n {volume_path} | tail -n 4 | grep -Eo '[0-9]{{4,}}' | sort -n)
-                        BLOCKS="0 $BLOCKS"
-
-                        for BLOCK_NUM in $BLOCKS
-                        do
-                            dd if=/dev/zero of={volume_path} count=1 seek=$BLOCK_NUM bs=4096
-                            dd if={volume_path}  count=1 skip=$BLOCK_NUM  bs=4096 | hexdump 
-                        done
-                        mkfs.ext4 {volume_path}
-                        "#,
-                    ),
-                    ops
-                )
-            }
-            MakeFsType::Xfs => {
-                run_script::run_script!(
-                    format!(
-                        r#"
-                        dd if=/dev/zero of={volume_path} count=1 seek=0 bs=4096
-                        mkfs.xfs -f {volume_path}
-                        "#,
-                    ),
-                    ops
-                )
-            }
-            MakeFsType::Vfat => {
-                bail!("The option `makefs=vfat` and `integrity=true` is not currently supported")
-            }
-        }
-        .map_err(Into::into)
-        .and_then(|(code, output, error)| {
-            if code != 0 {
-                bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}")
-            } else {
-                Ok(())
-            }
-        })
+impl Display for MakeFsType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(serde_variant::to_variant_name(self).unwrap_or("<unknown>"))
     }
 }
 

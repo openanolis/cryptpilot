@@ -1,56 +1,15 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use lazy_static::lazy_static;
-use log::debug;
 use run_script::ScriptOptions;
-use tokio::{fs::OpenOptions, sync::RwLock};
+use tokio::fs::OpenOptions;
 
 use crate::{
     config::volume::MakeFsType,
     types::{IntegrityType, Passphrase},
 };
 
-lazy_static! {
-    static ref VERBOSE: RwLock<bool> = RwLock::new(false);
-}
-
-pub async fn set_verbose(verbose: bool) {
-    *VERBOSE.write().await = verbose;
-}
-
-async fn get_verbose() -> bool {
-    *VERBOSE.read().await
-}
-
-struct Shell<S: AsRef<str>>(S);
-
-impl<S: AsRef<str>> Shell<S> {
-    pub fn run(self) -> Result<()> {
-        self.run_with_status_checker(|code, _, _| {
-            if code != 0 {
-                bail!("Bad shell exit code")
-            } else {
-                Ok(())
-            }
-        })
-    }
-
-    pub fn run_with_status_checker<R>(self, f: impl Fn(i32, &str, &str) -> Result<R>) -> Result<R> {
-        debug!("Running shell script:\n{}", self.0.as_ref());
-
-        let mut ops = ScriptOptions::new();
-        ops.exit_on_error = true;
-        run_script::run_script!(self.0.as_ref(), ops)
-            .map_err(Into::into)
-            .and_then(|(code, output, error)| {
-                let res = f(code, &output, &error);
-                res.with_context(|| {
-                    format!("\n\tshell script:\n{}\n\texit code: {code}\n\tstdout: {output}\n\tstderr: {error}", self.0.as_ref())
-                })
-            })
-    }
-}
+use super::{get_verbose, shell::Shell};
 
 pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType) -> Result<()> {
     let dev = dev.to_owned();
@@ -130,12 +89,12 @@ pub async fn is_initialized(dev: &str) -> Result<bool> {
                 "#,
             dev
         ))
-        .run_with_status_checker(|code, output, error| {
+        .run_with_status_checker(|code, _, _| {
             let initialized = match code {
                 0 => true,
                 1 => false,
                 _ => {
-                    bail!("Bad exit code: {code}\n\tstdout: {output}\n\tstderr: {error}");
+                    bail!("Bad exit code")
                 }
             };
             Ok(initialized)
@@ -208,34 +167,35 @@ pub async fn makefs_if_empty(
                         set -o errexit
 
                         if [[ $res == *"Input/output error"* ]] || [[ $res == "data" ]] ; then
-                            # A uninitialized (empty) disk
+                            # A uninitialized (empty) volume
                             exit 2
                         elif [[ $status -ne 0 ]] ; then
                             # Error happens
                             echo $res >&2
                             exit 1
                         else
-                            # Maybe some thing on the disk, so we should not touch it.
+                            # Maybe some thing on the volume, so we should not touch it.
                             exit 3
                         fi
                         "#,
                 volume,
             ))
             .run_with_status_checker(|code, _, _| match code {
-                2 => makefs.mkfs_on_no_wipe_volume_blocking(&format!("/dev/mapper/{volume}")),
-                3 => Ok(()),
+                2 => Ok(true),
+                3 => Ok(false),
                 _ => {
                     bail!("Bad exit code")
                 }
             })
-            .with_context(|| format!("Failed to detecting filesystem type on volume {volume}",)),
+            .with_context(|| format!("Failed to detecting filesystem type on volume {volume}",))
+            .and_then(|empty_volume| {
+                if empty_volume {
+                    makefs.mkfs_on_no_wipe_volume_blocking(&format!("/dev/mapper/{volume}"))?
+                }
+                Ok(())
+            }),
         }
-        .with_context(|| {
-            format!(
-                "Failed to initialize {} fs on volume {volume}",
-                serde_variant::to_variant_name(&makefs).unwrap_or("unknown")
-            )
-        })?;
+        .with_context(|| format!("Failed to initialize {makefs} fs on volume {volume}"))?;
         Ok(())
     })
     .await

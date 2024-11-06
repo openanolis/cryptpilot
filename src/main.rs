@@ -1,7 +1,7 @@
 pub(crate) mod cli;
 pub(crate) mod cmd;
 pub(crate) mod config;
-pub(crate) mod luks2;
+pub(crate) mod fs;
 pub(crate) mod provider;
 pub(crate) mod types;
 
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         let global_config = crate::config::global::get_global_config().await?;
         if global_config.systemd.verbose {
             log_level = "debug";
-            crate::luks2::set_verbose(true).await;
+            crate::fs::set_verbose(true).await;
         }
     }
 
