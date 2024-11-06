@@ -1,12 +1,12 @@
 [Unit]
-Description=A utility for protecting data at rest in confidential environment
+Description=Auto open cryptpilot volumes
 DefaultDependencies=no
 After=network-online.target
-Before=remote-cryptsetup.target
+Before=remote-fs-pre.target
 
 [Service]
-Type=simple
+Type=oneshot
 ExecStart=/usr/bin/cryptpilot systemd-service
 
 [Install]
-WantedBy=remote-cryptsetup.target
+WantedBy=remote-fs-pre.target

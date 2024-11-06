@@ -5,4 +5,5 @@
 - [ ] requires systemd 246
 - [ ] add a "check" command
 - [ ] add lock on device write operation
-- [ ] setup a systemd generator
+- [ ] Fix /etc/fstab not mount when integrity=true. Maybe it is because systemd-udevd cannot recongnize the device correctly.
+- [ ] Setup a systemd generator for generating service for each volume and control the order with something like Before=systemd-fsck@dev-mapper-data1.service and Before=remote-fs-pre.target. Can debug with systemctl show -p Requires,Wants,Requisite,BindsTo,PartOf,Before,After cryptpilot.service
