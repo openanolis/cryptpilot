@@ -30,6 +30,7 @@ cargo build --release --target x86_64-unknown-linux-musl --config target.x86_64-
 mkdir -p %{buildroot}%{_prefix}/bin
 cp target/x86_64-unknown-linux-musl/release/cryptpilot %{buildroot}%{_prefix}/bin/
 chmod 755 %{buildroot}%{_prefix}/bin/cryptpilot
+strip %{buildroot}%{_prefix}/bin/cryptpilot
 rm -rf %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{dracut_dst}
 # install -p -m 755 dist/dracut/modules.d/91luks-agent/module-setup.sh %{buildroot}%{dracut_dst}
