@@ -26,7 +26,7 @@ pub struct VolumeConfig {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ExtraOptions {
-    /// Whether or not to open the LUKS2 device and set up mapping during system booting phase (the phase after initrd phase)
+    /// Whether or not to open the LUKS2 device and set up mapping during system booting phase (the phase after initrd phase).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_open: Option<bool>,
 

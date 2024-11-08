@@ -39,7 +39,8 @@ install -p -m 644 dist/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/sys
 install -d -p %{buildroot}/etc/cryptpilot
 install -p -m 600 dist/etc/cryptpilot.toml %{buildroot}/etc/cryptpilot/cryptpilot.toml
 install -d -p %{buildroot}/etc/cryptpilot/volumes
-install -p -m 600 dist/etc/volumes/data0.toml.template %{buildroot}/etc/cryptpilot/volumes/data0.toml.template
+install -p -m 600 dist/etc/volumes/kms.toml.template %{buildroot}/etc/cryptpilot/volumes/kms.toml.template
+install -p -m 600 dist/etc/volumes/otp.toml.template %{buildroot}/etc/cryptpilot/volumes/otp.toml.template
 
 %clean
 rm -rf %{buildroot}
@@ -49,7 +50,8 @@ rm -rf %{buildroot}
 %{_prefix}/lib/systemd/system/cryptpilot.service
 /etc/cryptpilot/cryptpilot.toml
 /etc/cryptpilot/volumes
-/etc/cryptpilot/volumes/data0.toml.template
+/etc/cryptpilot/volumes/kms.toml.template
+/etc/cryptpilot/volumes/otp.toml.template
 # %{dracut_dst}module-setup.sh
 
 %post

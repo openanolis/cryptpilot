@@ -1,2 +1,3 @@
 [systemd]
+# Enable this option if you want more log when running cryptpilot.service systemd service.
 verbose = false

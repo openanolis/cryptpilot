@@ -9,7 +9,7 @@ use crate::config::get_config_dir;
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct GlobalConfig {
-    /// Whether or not to open the LUKS2 device and set up mapping during system booting phase (the phase after initrd phase)
+    /// Configuration related to cryptpilot.service systemd service.
     #[serde(default = "Default::default")]
     pub systemd: SystemdConfig,
 }
@@ -17,7 +17,7 @@ pub struct GlobalConfig {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SystemdConfig {
-    /// Whether or not to open the LUKS2 device and set up mapping during system booting phase (the phase after initrd phase)
+    /// Enable this option if you want more log when running cryptpilot.service systemd service.
     #[serde(default = "Default::default")]
     pub verbose: bool,
 }

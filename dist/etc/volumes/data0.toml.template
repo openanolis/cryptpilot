@@ -1,6 +1,0 @@
-dev = "/dev/nvme1n1p1"
-volume = "data0"
-auto_open = true
-
-# In-memory One Time Password
-[key_provider.otp]
