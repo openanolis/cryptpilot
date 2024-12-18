@@ -27,6 +27,8 @@ pub enum KeyProviderConfig {
     Kbs(crate::provider::kbs::KbsConfig),
     #[cfg(feature = "provider-tpm2")]
     Tpm2(crate::provider::tpm2::Tpm2Config),
+    #[cfg(feature = "provider-oidc")]
+    Oidc(crate::provider::oidc::OidcConfig),
 }
 
 pub enum KeyProviderEnum {
@@ -38,6 +40,8 @@ pub enum KeyProviderEnum {
     Kbs(crate::provider::kbs::KbsKeyProvider),
     #[cfg(feature = "provider-tpm2")]
     Tpm2(crate::provider::tpm2::Tpm2KeyProvider),
+    #[cfg(feature = "provider-oidc")]
+    Oidc(crate::provider::oidc::OidcKeyProvider),
 }
 
 impl KeyProvider for KeyProviderEnum {
@@ -47,6 +51,7 @@ impl KeyProvider for KeyProviderEnum {
             KeyProviderEnum::Kms(provider) => provider.get_key().await,
             KeyProviderEnum::Kbs(provider) => provider.get_key().await,
             KeyProviderEnum::Tpm2(provider) => provider.get_key().await,
+            KeyProviderEnum::Oidc(provider) => provider.get_key().await,
         }
     }
 }
@@ -61,6 +66,9 @@ impl IntoProvider for KeyProviderConfig {
             KeyProviderConfig::Kbs(kbs_config) => KeyProviderEnum::Kbs(kbs_config.into_provider()),
             KeyProviderConfig::Tpm2(tpm2_config) => {
                 KeyProviderEnum::Tpm2(tpm2_config.into_provider())
+            }
+            KeyProviderConfig::Oidc(oidc_config) => {
+                KeyProviderEnum::Oidc(oidc_config.into_provider())
             }
         }
     }

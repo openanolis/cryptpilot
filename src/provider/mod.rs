@@ -2,6 +2,8 @@
 pub mod kbs;
 #[cfg(feature = "provider-kms")]
 pub mod kms;
+#[cfg(feature = "provider-oidc")]
+pub mod oidc;
 #[cfg(feature = "provider-otp")]
 pub mod otp;
 #[cfg(feature = "provider-tpm2")]

@@ -681,6 +681,7 @@ dependencies = [
  "serde_variant",
  "sha2",
  "shadow-rs",
+ "strum",
  "tempfile",
  "tokio",
  "toml 0.8.19",

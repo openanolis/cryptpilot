@@ -60,7 +60,10 @@ impl Display for MakeFsType {
 #[cfg(test)]
 pub mod tests {
 
-    use crate::config::encrypt::KeyProviderConfig;
+    use crate::{
+        config::encrypt::KeyProviderConfig,
+        provider::oidc::{Kms, OidcConfig},
+    };
 
     #[allow(unused_imports)]
     use super::*;
@@ -230,5 +233,33 @@ nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
 
         assert_eq!(config, expected);
         Ok(())
+    }
+
+    #[test]
+    fn test_deserialize_oidc_test() {
+        let raw = include_str!("../../examples/volumes/data5.toml");
+        let config: VolumeConfig = toml::from_str(raw).unwrap();
+        let expected = VolumeConfig {
+            volume: "data5".into(),
+            dev: "/dev/nvme1n1p6".into(),
+            extra_config: ExtraConfig {
+                auto_open: Some(true),
+                makefs: Some(MakeFsType::Ext4),
+                integrity: Some(true),
+            },
+            encrypt: EncryptConfig {
+                key_provider: KeyProviderConfig::Oidc(OidcConfig {
+                    kms: Kms::Aliyun {
+                        oidc_provider_arn: "acs:ram::113511544585:oidc-provider/TestOidcIdp".into(),
+                        role_arn: "acs:ram::113511544585:role/testoidc".into(),
+                        region_id: "cn-beijing".into(),
+                    },
+                    command: "some-cli".into(),
+                    args: vec!["-c".into(), "/etc/config.json".into(), "get-token".into()],
+                    key_id: "disk-decryption-key".into(),
+                }),
+            },
+        };
+        assert_eq!(expected, config);
     }
 }

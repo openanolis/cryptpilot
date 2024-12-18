@@ -32,6 +32,9 @@ pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
             persistent_disk_init(init_options, &volume_config, kbs_config.clone()).await?;
         }
         KeyProviderConfig::Tpm2(_tpm2_config) => todo!(),
+        KeyProviderConfig::Oidc(oidc_config) => {
+            persistent_disk_init(init_options, &volume_config, oidc_config.clone()).await?
+        }
     }
 
     info!("The volume is initialized now");

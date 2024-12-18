@@ -45,6 +45,9 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
             persistent_disk_open(&volume_config, kbs_config.clone()).await?;
         }
         KeyProviderConfig::Tpm2(_tpm2_config) => todo!(),
+        KeyProviderConfig::Oidc(oidc_config) => {
+            persistent_disk_open(&volume_config, oidc_config.clone()).await?
+        }
     })
 }
 

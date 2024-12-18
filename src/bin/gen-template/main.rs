@@ -7,7 +7,13 @@ use cryptpilot::{
         global::{BootServiceConfig, GlobalConfig},
         volume::{ExtraConfig, MakeFsType, VolumeConfig},
     },
-    provider::{kbs::KbsConfig, kms::KmsConfig, otp::OtpConfig, tpm2::Tpm2Config},
+    provider::{
+        kbs::KbsConfig,
+        kms::KmsConfig,
+        oidc::{Kms, OidcConfig},
+        otp::OtpConfig,
+        tpm2::Tpm2Config,
+    },
 };
 use documented::{Documented, DocumentedFields};
 use shadow_rs::shadow;
@@ -42,6 +48,7 @@ pub enum VolumeType {
     Otp,
     Kms,
     Kbs,
+    ZeroTrust,
 }
 
 impl VolumeType {
@@ -93,6 +100,18 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                         .into(),
                     ),
                 });
+            }
+            VolumeType::ZeroTrust => {
+                volume_config.encrypt.key_provider = KeyProviderConfig::Oidc(OidcConfig {
+                    kms: Kms::Aliyun {
+                        oidc_provider_arn: "acs:ram::113511544585:oidc-provider/TestOidcIdp".into(),
+                        role_arn: "acs:ram::113511544585:role/testoidc".into(),
+                        region_id: "cn-beijing".into(),
+                    },
+                    command: "some-cli".into(),
+                    args: vec!["-c".into(), "/etc/config.json".into(), "get-token".into()],
+                    key_id: "disk-decryption-key".into(),
+                })
             }
         };
         volume_config
@@ -165,6 +184,17 @@ impl AsAnnotatedToml for VolumeConfig {
                 append_docs_as_toml_comments(provider_config.decor_mut(), Tpm2Config::DOCS);
                 annotate_toml_table::<Tpm2Config>(provider_config)
                     .context("Failed to annotate `Tpm2Options`")?;
+            }
+            KeyProviderConfig::Oidc(_) => {
+                let Some(provider_config) = key_provider.get_mut("oidc") else {
+                    return Ok(toml);
+                };
+                let Some(provider_config) = provider_config.as_table_mut() else {
+                    return Ok(toml);
+                };
+                append_docs_as_toml_comments(provider_config.decor_mut(), OidcConfig::DOCS);
+                annotate_toml_table::<OidcConfig>(provider_config)
+                    .context("Failed to annotate `ZeroTrustOptions`")?;
             }
         }
 
