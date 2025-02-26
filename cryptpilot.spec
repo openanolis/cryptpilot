@@ -42,7 +42,6 @@ ln -s `realpath %{_builddir}/%{name}-%{version}/vendor` ~/vendor
 # Build cryptpilot
 pushd src/
 cargo install --path . --bin cryptpilot --root %{_builddir}/%{name}-%{version}/install/cryptpilot/ --locked --offline
-strip %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot
 popd
 # Remove vendor
 rm -f ~/vendor
@@ -51,12 +50,9 @@ rm -f ~/vendor
 %install
 # Install cryptpilot
 pushd src/
-mkdir -p %{buildroot}%{_prefix}/bin
-mkdir -p %{buildroot}%{_prefix}/lib/cryptpilot/bin/
-cp %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot %{buildroot}%{_prefix}/lib/cryptpilot/bin/
-ln -s %{_prefix}/lib/cryptpilot/bin/cryptpilot %{buildroot}%{_prefix}/bin/
-chmod 755 %{buildroot}%{_prefix}/lib/cryptpilot/bin/cryptpilot
-strip %{buildroot}%{_prefix}/lib/cryptpilot/bin/cryptpilot
+install -d -p %{buildroot}%{_prefix}/bin
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot %{buildroot}%{_prefix}/bin/cryptpilot
+install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
 # Install remain stuffs
 rm -rf %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{dracut_dst}
@@ -83,8 +79,7 @@ rm -rf %{buildroot}
 %files
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot
-%dir %{_prefix}/lib/cryptpilot/bin
-%{_prefix}/lib/cryptpilot/bin/cryptpilot
+%{_prefix}/bin/cryptpilot-convert
 %dir /etc/cryptpilot
 /etc/cryptpilot/global.toml.template
 /etc/cryptpilot/fde.toml.template
