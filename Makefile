@@ -79,7 +79,7 @@ rpm-build-in-docker:
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
 	@echo "$$CARGO_CONFIG" > ~/rpmbuild/SOURCES/config
 
-	docker run -it --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:8 bash -x -c "yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec"
+	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:8 bash -x -c "yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec"
 
 .PHONE: rpm-install
 rpm-install: rpm-build
