@@ -7,7 +7,8 @@ Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
 License: ASL 2.0
 URL: www.alibaba.com
-Source0: https://github.com/inclavare-containers/cryptpilot/archive/refs/tags/%{name}-%{version}.tar.gz
+Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}.tar.gz
+
 Source1: config
 
 Requires: dracut lvm2 cryptsetup coreutils systemd veritysetup
