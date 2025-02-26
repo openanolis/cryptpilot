@@ -15,7 +15,7 @@ make rpm-build
 Then install the rpm package on your system:
 
 ```sh
-rpm --install /root/rpmbuild/RPMS/x86_64/cryptpilot-0.1.0-1.al8.x86_64.rpm
+rpm --install /root/rpmbuild/RPMS/x86_64/cryptpilot-*.al8.x86_64.rpm
 ```
 
 Now you can edit the configuration files under `/etc/cryptpilot/`. See the [configuration](docs/configuration.md) for details.

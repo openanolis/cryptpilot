@@ -123,7 +123,7 @@ print_help_and_exit() {
     exit 1
 }
 
-cryptpilot_rpm_path=/root/rpmbuild/RPMS/x86_64/cryptpilot-0.1.0-1.al8.x86_64.rpm
+cryptpilot_rpm_path=/root/rpmbuild/RPMS/x86_64/cryptpilot-0.2.0-1.al8.x86_64.rpm
 dcap_repo=https://enclave-cn-beijing.oss-cn-beijing.aliyuncs.com/repo/alinux/enclave-expr.repo
 
 # the size is currently fixed with 512MB

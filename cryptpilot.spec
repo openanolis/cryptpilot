@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name: cryptpilot
-Version: 0.1.0
+Version: 0.2.0
 Release: 1%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -96,5 +96,42 @@ rm -rf %{buildroot}
 %{dracut_dst}initrd-wait-network-online.service
 
 %changelog
+* Wed Feb 26 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.0-1
+- RPM Build Improvements:
+  * Add cryptpilot-convert to RPM package
+  * Fix RPM build in Docker environments without TTY
+  * Separate cargo configuration from .spec file
+  * Add static binary build support
+  * Update dependency names for aa and cdh
+
+- Feature Enhancements:
+  * Add OIDC Key Provider Plugin (contributed by xynnn007)
+  * Support configuration loading from cloud-init
+  * Add runtime measurement based on AAEL
+  * Implement dynamic log level adjustment (switch to tracing framework)
+
+- Service Optimizations:
+  * Optimize automatic decryption flow during initrd stage
+  * Fix systemd service dependencies
+  * Add emergency shell fallback for boot failures
+  * Improve console logging output
+
+- Security Improvements:
+  * Omit sensitive information in logs
+  * Enforce verification of /sysroot mount source
+  * Add timeout handling for KBS client
+
+- Documentation & CI:
+  * Add CI and license badges to README
+  * Implement GitHub Actions RPM build workflow
+  * Fix missing LICENSE file inclusion
+
+- Bug Fixes:
+  * Fix grub2-mkconfig failures under overlayfs
+  * Resolve device busy issues during conversion
+  * Fix builds on stable Rust versions
+  * Correct Alibaba Cloud Linux 3 UEFI conversion issues
+
+
 * Mon Oct 28 2024 Kun Lai <laikun@linux.alibaba.com> - 0.1.0-1
 - Initial package release.

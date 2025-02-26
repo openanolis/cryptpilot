@@ -15,8 +15,8 @@ yum install rpm-build
 rpmbuild -ba cryptpilot.spec
 yum-builddep cryptpilot.spec
 
-rpm -qlp /root/rpmbuild/RPMS/x86_64/cryptpilot-0.1.0-1.al8.x86_64.rpm
-rpm -i /root/rpmbuild/RPMS/x86_64/cryptpilot-0.1.0-1.al8.x86_64.rpm
+rpm -qlp /root/rpmbuild/RPMS/x86_64/cryptpilot-*.al8.x86_64.rpm
+rpm -i /root/rpmbuild/RPMS/x86_64/cryptpilot-*.al8.x86_64.rpm
 rpmquery -l nginx
 
 LC_ALL=C rpmbuild -ba cryptpilot.spec

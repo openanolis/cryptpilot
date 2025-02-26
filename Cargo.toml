@@ -4,7 +4,7 @@ default-run = "cryptpilot"
 description = "A utility for protecting data at rest in confidential environment"
 edition = "2021"
 name = "cryptpilot"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
 again = "0.1.2"
