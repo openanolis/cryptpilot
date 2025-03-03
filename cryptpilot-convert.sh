@@ -146,6 +146,10 @@ nbd-available() {
 
 get-available-nbd() {
     modprobe nbd max_part=8
+    # If run in container, use following instead
+    # 
+    # mknod /dev/nbd0 b 43 0
+    
     local a
     for a in /dev/nbd[0-9] /dev/nbd[1-9][0-9]; do
         nbd-available "$a" || continue
@@ -210,12 +214,22 @@ elif [ $# -eq 4 ]; then
         fatal "Input file $input_file does not exist"
     fi
 
+    # Check if the input file is a vhd or qcow2
+    if [[ "$input_file" != *.vhd ]] && [[ "$input_file" != *.qcow2 ]]; then
+        fatal "Input file $input_file is not supported, should be a vhd or qcow2 file"
+    fi
+
     if [ ! -d "${config_dir}" ]; then
         fatal "Cryptpilot config dir ${config_dir} does not exist"
     fi
 else
     print_help_and_exit
 fi
+
+
+echo "[ 0 ] Checking for required tools"
+yum install -y qemu-img cryptsetup veritysetup lvm2 parted grub2-tools e2fsprogs lsof
+
 
 # Install trap to collect error info on exit with error
 hook_exit ":;"

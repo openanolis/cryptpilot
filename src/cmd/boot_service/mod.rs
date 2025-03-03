@@ -294,7 +294,7 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
     check_sysroot().await?;
 
     // 1. Mount the data volume to filesystem
-    info!("[ 1/2 ] Mounting data volume");
+    info!("[ 1/4 ] Mounting data volume");
     Shell(format!(
         r#"
         mkdir -p /data_volume
@@ -304,10 +304,22 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
     .run()
     .context("Failed to mount data volume on /data_volume")?;
 
-    // 2. Setup the rootfs-overlay. If on ram, create it first. If on disk, just use it. And setup overlayfs. And also mount --bind the /data folder.
-    info!("[ 2/2 ] Setting up rootfs overlay");
-    let rw_overlay = fde_config.rootfs.rw_overlay.unwrap_or(RwOverlayType::Disk);
-    match rw_overlay {
+    // 2. Setup the rootfs-overlay. If on ram, create it first. If on disk, just use it to setup overlayfs.
+    info!("[ 2/4 ] Setting up rootfs overlay");
+
+    // Setup a backup of /sysroot at /sysroot_bak before mount overlay fs on it
+    let sysroot_bak = Path::new("/sysroot_bak");
+    Shell(format!(
+        r#"
+        mkdir -p {sysroot_bak:?}
+        mount --bind /sysroot {sysroot_bak:?} --make-private
+        "#
+    ))
+    .run()
+    .with_context(|| format!("Failed to setup backup of /sysroot at {sysroot_bak:?}"))?;
+
+    let overlay_type = fde_config.rootfs.rw_overlay.unwrap_or(RwOverlayType::Disk);
+    let overlay_dir = match overlay_type {
         RwOverlayType::Ram => {
             info!("Using tmpfs as rootfs overlay");
             Shell(format!(
@@ -321,9 +333,11 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
             ))
             .run()
             .context("Failed to setup overlayfs on /sysroot")?;
+
+            Path::new("/ram_overlay")
         }
         RwOverlayType::Disk => {
-            info!("Using data:/data as rootfs overlay");
+            info!("Using data-volume:/overlay as rootfs overlay");
             Shell(format!(
                 r#"
                 modprobe overlay
@@ -334,8 +348,83 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
             ))
             .run()
             .context("Failed to setup overlayfs on /sysroot")?;
+
+            Path::new("/data_volume/overlay")
+        }
+    };
+
+    // Setting up mount bind for some special dirs
+    info!("[ 3/4 ] Setting up mount bind");
+    let dirs = [
+        "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/",
+        "/var/lib/containers/storage/overlay/",
+        "/var/lib/docker/overlay",
+    ];
+
+    for dir in dirs {
+        // check if exist and not empty
+        let handle_dir_func = |dir| {
+            let target = Path::new("/sysroot/").join(format!("./{dir}"));
+            // Make sure the target dir is ready
+            if target.exists() {
+                if !target.is_dir() {
+                    bail!("The target {target:?} exists but not a dir");
+                }
+            } else {
+                std::fs::create_dir_all(&target)
+                    .with_context(|| format!("Failed to create target dir {target:?}"))?;
+            }
+            // Create the original dir
+            let origin = overlay_dir.join("mount-binds").join(format!("./{dir}"));
+            if origin.exists() {
+                if !origin.is_dir() {
+                    bail!("The origin {origin:?} exists but not a dir");
+                }
+                // The origin dir is setting up previously
+            } else {
+                // First time to setup the origin dir, copy content to it.
+                std::fs::create_dir_all(&origin)
+                    .with_context(|| format!("Failed to create origin dir {origin:?}"))?;
+
+                // We have to copy from the lower layer of the /sysroot
+                let copy_source = sysroot_bak.join(format!("./{dir}"));
+                if copy_source.exists() {
+                    if let Err(e) = Shell(format!(
+                        r#"
+                        cp -a {copy_source:?}/. {origin:?}/
+                        "#
+                    ))
+                    .run()
+                    .with_context(|| {
+                        format!("Failed to copy files from {copy_source:?} to {origin:?}")
+                    }) {
+                        let _ = std::fs::remove_dir_all(&origin);
+                        Err(e)?
+                    }
+                }
+            }
+
+            // Mount bind
+            Shell(format!(
+                r#"
+                mount --bind {origin:?} {target:?}
+                "#
+            ))
+            .run()
+            .with_context(|| format!("Failed to setup mount bind on {target:?}"))?;
+
+            Ok(())
+        };
+
+        if let Err(e) = handle_dir_func(dir)
+            .with_context(|| format!("Failed to settiing up mount bind for {dir}"))
+        {
+            error!("{e:#}");
         }
     }
+
+    // 4. mount --bind the /data folder
+    info!("[ 4/4 ] Setting up user-data dir: /data");
     Shell(
         r#"
         mkdir -p /data_volume/data
