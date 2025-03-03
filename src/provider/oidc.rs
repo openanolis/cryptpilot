@@ -28,7 +28,7 @@ use crate::{fs::cmd::CheckCommandOutput as _, types::Passphrase};
 
 use super::{IntoProvider, KeyProvider};
 
-const ONE_SHOT_CDH_BINARY_PATH: &str = "/usr/local/bin/confidential-data-hub";
+const ONE_SHOT_CDH_BINARY_PATH: &str = "/usr/bin/confidential-data-hub";
 
 /// Enum of authorization service and KMS pair
 #[derive(
@@ -159,6 +159,8 @@ impl KeyProvider for OidcKeyProvider {
 
 #[cfg(test)]
 mod tests {
+    use core::str;
+
     use crate::provider::{
         oidc::{Kms, OidcConfig},
         IntoProvider, KeyProvider,
@@ -177,8 +179,9 @@ mod tests {
                 region_id: "cn-shanghai".into(),
             },
         };
-        let provider = config.into_provider();
+        let provider: crate::provider::oidc::OidcKeyProvider = config.into_provider();
         let key = provider.get_key().await.unwrap();
-        println!("Get key: {:?}", key.as_bytes());
+        println!("Get key (bytes): {:?}", key.as_bytes());
+        println!("Get key (utf-8): {:?}", str::from_utf8(key.as_bytes()));
     }
 }

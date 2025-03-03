@@ -21,7 +21,7 @@ use crate::{
     types::Passphrase,
 };
 
-const ONE_SHOT_CDH_BINARY_PATH: &str = "/usr/local/bin/confidential-data-hub";
+const ONE_SHOT_CDH_BINARY_PATH: &str = "/usr/bin/confidential-data-hub";
 
 /// Key Broker Service
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Documented, DocumentedFields)]
