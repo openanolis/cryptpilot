@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name: cryptpilot
-Version: 0.2.0
+Version: 0.2.1
 Release: 1%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -99,6 +99,12 @@ rm -rf %{buildroot}
 %{dracut_dst}initrd-wait-network-online.service
 
 %changelog
+* Mon Mar  3 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.1-1
+- Add OIDC key provider Plugin
+- Fix path of confidential-data-hub
+- Fix failed to launch containers due to overlayfs
+- Not install attestation-agent as dependency unless user install it
+
 * Wed Feb 26 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.0-1
 - RPM Build Improvements:
   * Add cryptpilot-convert to RPM package
