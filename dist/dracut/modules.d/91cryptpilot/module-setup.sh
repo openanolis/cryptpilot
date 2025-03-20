@@ -51,5 +51,7 @@ installkernel() {
 }
 
 depends() {
-        echo crypt network # systemd
+        echo crypt network
+        # We need to install ssl ca certs for HTTPS support
+        echo url-lib
 }
