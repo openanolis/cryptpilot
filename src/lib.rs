@@ -22,11 +22,13 @@ use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _
 shadow!(build);
 
 pub async fn run() -> Result<()> {
-    let filter = tracing_subscriber::filter::LevelFilter::INFO;
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    // let filter = tracing_subscriber::filter::LevelFilter::INFO;
     let (filter, reload_handle) = tracing_subscriber::reload::Layer::new(filter);
     tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::Layer::default())
+        .with(tracing_subscriber::fmt::layer())
         .init();
 
     let args = cli::Args::parse();
@@ -92,7 +94,10 @@ pub async fn run() -> Result<()> {
             .unwrap_or(false)
         {
             reload_handle
-                .modify(|filter| *filter = tracing_subscriber::filter::LevelFilter::DEBUG)
+                .modify(|filter| {
+                    *filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| "debug".into())
+                })
                 .context("Failed to update log level to DEBUG")?;
             crate::fs::set_verbose(true).await;
 
@@ -119,4 +124,22 @@ pub async fn run() -> Result<()> {
     };
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[cfg(test)]
+    #[ctor::ctor]
+    fn init() {
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "debug".into());
+        let (filter, reload_handle) = tracing_subscriber::reload::Layer::new(filter);
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+    }
 }
