@@ -1,11 +1,54 @@
-use anyhow::{bail, Result};
+use std::path::{Path, PathBuf};
 
-use crate::config::volume::MakeFsType;
+use anyhow::{bail, Context as _, Result};
+use async_trait::async_trait;
+use block_devs::BlckExt as _;
+use nix::unistd::SysconfVar;
+use ordermap::OrderSet;
+use tokio::{
+    fs::{File, OpenOptions},
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+    process::Command,
+};
 
-use super::shell::Shell;
+use crate::{
+    config::volume::MakeFsType,
+    fs::{
+        block::{
+            blktrace::{blktrace_cat_BLK_TC_DISCARD, BLK_TC_SHIFT},
+            dummy::DummyDevice,
+        },
+        cmd::CheckCommandOutput as _,
+    },
+};
+
+use super::{
+    block::blktrace::{blktrace_cat_BLK_TC_READ, blktrace_cat_BLK_TC_WRITE, BlkTrace},
+    shell::Shell,
+};
+
+#[async_trait]
+pub trait MakeFs {
+    async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()>;
+}
+
+pub struct NormalMakeFs;
+
+#[async_trait]
+impl MakeFs for NormalMakeFs {
+    async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()> {
+        // There is no need to check volume here since systemd-makefs will check it.
+        Command::new("/usr/lib/systemd/systemd-makefs")
+            .arg(fs_type.to_systemd_makefs_fstype())
+            .arg(device_path.as_ref())
+            .run_check_output()
+            .await?;
+        Ok(())
+    }
+}
 
 impl MakeFsType {
-    pub fn to_systemd_makefs_fstype(&self) -> &'static str {
+    fn to_systemd_makefs_fstype(&self) -> &'static str {
         match self {
             MakeFsType::Swap => "swap",
             MakeFsType::Ext4 => "ext4",
@@ -13,44 +56,227 @@ impl MakeFsType {
             MakeFsType::Vfat => "vfat",
         }
     }
+}
 
-    pub fn mkfs_on_no_wipe_volume_blocking(&self, volume_path: &str) -> Result<()> {
-        let script = match self {
-            MakeFsType::Swap => {
-                format!(
-                    r#"
-                    dd if=/dev/zero of={volume_path} count=1 seek=0 bs=4096
-                    mkswap {volume_path}
-                    "#,
-                )
-            }
-            MakeFsType::Ext4 => {
-                // TODO: rewrite it in rust code
-                format!(
-                    r#"
-                    BLOCKS=$(mkfs.ext4 -n {volume_path} | tail -n 4 | grep -Eo '[0-9]{{4,}}' | sort -n)
-                    BLOCKS="0 $BLOCKS"
+pub struct IntegrityNoWipeMakeFs;
 
-                    for BLOCK_NUM in $BLOCKS
-                    do
-                        dd if=/dev/zero of={volume_path} count=1 seek=$BLOCK_NUM bs=4096
-                    done
-                    mkfs.ext4 {volume_path}
-                    "#,
-                )
-            }
-            MakeFsType::Xfs => {
-                format!(
+#[async_trait]
+impl MakeFs for IntegrityNoWipeMakeFs {
+    async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()> {
+        let is_empty_disk = {
+            let device_path: PathBuf = device_path.as_ref().to_owned();
+            tokio::task::spawn_blocking(move || -> Result<_> {
+                Shell(format!(
                     r#"
-                    dd if=/dev/zero of={volume_path} count=1 seek=0 bs=4096
-                    mkfs.xfs -f {volume_path}
-                    "#,
-                )
-            }
-            MakeFsType::Vfat => {
-                bail!("The option `makefs=vfat` and `integrity=true` is not currently supported")
-            }
+                export LC_ALL=C
+                set +o errexit
+                res=`file -E --brief --dereference --special-files {:?}`
+                status=$?
+                set -o errexit
+
+                if [[ $res == *"Input/output error"* ]] || [[ $res == "data" ]] ; then
+                    # A uninitialized (empty) volume
+                    exit 2
+                elif [[ $status -ne 0 ]] ; then
+                    # Error happens
+                    echo $res >&2
+                    exit 1
+                else
+                    # Maybe some thing on the volume, so we should not touch it.
+                    exit 3
+                fi
+            "#,
+                    device_path,
+                ))
+                .run_with_status_checker(|code, _, _| match code {
+                    2 => Ok(true),
+                    3 => Ok(false),
+                    _ => {
+                        bail!("Bad exit code")
+                    }
+                })
+                .with_context(|| format!("Failed to detecting filesystem type",))
+            })
+            .await
+            .context("background task failed")??
         };
-        Shell(script).run()
+
+        if is_empty_disk {
+            Self::mkfs_on_no_wipe_volume(device_path, fs_type).await?
+        }
+
+        Ok(())
+    }
+}
+
+impl IntegrityNoWipeMakeFs {
+    async fn mkfs_on_no_wipe_volume(
+        device_path: impl AsRef<Path>,
+        fs_type: MakeFsType,
+    ) -> Result<()> {
+        let device_size = File::open(&device_path)
+            .await?
+            .into_std()
+            .await
+            .get_block_device_size()?;
+
+        tracing::trace!(
+            "The device size of {:?} is {device_size}",
+            device_path.as_ref()
+        );
+
+        // Create a dummy device same size as the real one
+        let dummy_device = DummyDevice::setup(device_size).await?;
+        let dummy_device_path = dummy_device.path()?;
+        let dummy_device_sector_size = File::open(&dummy_device_path)
+            .await?
+            .into_std()
+            .await
+            .get_size_of_block()?;
+
+        // Enable the blktrace
+        let tracer = BlkTrace::monitor(&dummy_device_path).await?;
+
+        // Do some operations to the dummy device
+        {
+            NormalMakeFs::mkfs(&dummy_device_path, fs_type).await?;
+
+            // TODO: refact blkid with libblkid-rs crate
+            Command::new("blkid")
+                .arg("-p")
+                .arg(&dummy_device_path)
+                .run_check_output()
+                .await?;
+        }
+
+        let events = tracer.shutdown().await?;
+        let page_size =
+            nix::unistd::sysconf(SysconfVar::PAGE_SIZE)?.context("Failed to get page size")? as u64;
+
+        // Record all the positions touched
+        let mut rw_positions: OrderSet<_> = Default::default();
+        for event in &events {
+            // Refer to: https://github.com/sdsc/blktrace/blob/dd093eb1c48e0d86b835758b96a9886fb7773aa4/blkparse_fmt.c#L67-L74
+            if (((event.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_DISCARD)
+                != blktrace_cat_BLK_TC_DISCARD) /* We ignore Discard (TRIM) here */
+                && ((((event.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_READ)
+                    == blktrace_cat_BLK_TC_READ)
+                    || (((event.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_WRITE)
+                        == blktrace_cat_BLK_TC_WRITE))
+            {
+                tracing::trace!(
+                    "event action: {} sector: {}, bytes: {} bytes",
+                    event.event.action,
+                    event.event.sector,
+                    event.event.bytes
+                );
+
+                let bytes_start = event.event.sector * dummy_device_sector_size;
+                let bytes_end = bytes_start + (event.event.bytes as u64);
+                // The range [bytes_start, bytes_end) is touched by the operation
+                for i in (bytes_start / page_size)..((bytes_end + page_size - 1) / page_size) {
+                    rw_positions.insert(i);
+                }
+            }
+        }
+        tracing::trace!(
+            "Num of pages touched: {}, total size: {} bytes",
+            rw_positions.len(),
+            rw_positions.len() as u64 * page_size
+        );
+
+        // Migrate the touched pages to the real device
+        async {
+            let mut dummy_device_file = File::open(&dummy_device_path).await?;
+            let mut real_device_file = OpenOptions::new()
+                .write(true)
+                .read(true)
+                // .custom_flags(libc::O_DIRECT)
+                .open(&device_path)
+                .await?;
+            let mut buf = vec![0; page_size as usize];
+            for i in rw_positions {
+                let offset = i * page_size;
+                dummy_device_file
+                    .seek(std::io::SeekFrom::Start(offset))
+                    .await?;
+                real_device_file
+                    .seek(std::io::SeekFrom::Start(offset))
+                    .await?;
+
+                dummy_device_file.read_exact(&mut buf).await?;
+                tracing::trace!(
+                    "Migrated page write to offset {offset}, with {} bytes",
+                    buf.len()
+                );
+                real_device_file.write(&buf).await?;
+            }
+            Result::<_, anyhow::Error>::Ok(())
+        }
+        .await
+        .context("Failed to migrate data from tmp device to the real device")?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+
+    use crate::{
+        cli::CloseOptions,
+        config::{
+            encrypt::{EncryptConfig, KeyProviderConfig},
+            volume::{ExtraConfig, VolumeConfig},
+        },
+        provider::otp::OtpConfig,
+    };
+
+    use super::*;
+    use anyhow::Result;
+    use scopeguard::defer;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    async fn test_mkfs_with_integrity() -> Result<()> {
+        let dummy_device = DummyDevice::setup(1024 * 1024 * 1024).await?;
+
+        let volume_config = VolumeConfig {
+            volume: "mkfs_with_integrity".to_owned(),
+            dev: dummy_device.path().unwrap().to_str().unwrap().to_owned(),
+            extra_config: ExtraConfig {
+                auto_open: Some(true),
+                makefs: Some(MakeFsType::Ext4),
+                integrity: Some(true),
+            },
+            encrypt: EncryptConfig {
+                key_provider: KeyProviderConfig::Otp(OtpConfig {}),
+            },
+        };
+
+        // Close the volume if it is already opened
+        crate::cmd::close::cmd_close(&CloseOptions {
+            volume: volume_config.volume.clone(),
+        })
+        .await
+        .unwrap();
+
+        let executor = tokio::runtime::Handle::current();
+        defer! {
+            let volume = volume_config.volume.to_owned();
+            executor.spawn({
+                async {
+                    crate::cmd::close::cmd_close(&CloseOptions{volume}).await.unwrap();
+                }
+            });
+        }
+        crate::cmd::open::open_for_specific_volume(&volume_config).await?;
+
+        Command::new("blkid")
+            .arg("-p")
+            .arg(PathBuf::from("/dev/mapper/").join(&volume_config.volume))
+            .run_check_output()
+            .await?;
+
+        Ok(())
     }
 }

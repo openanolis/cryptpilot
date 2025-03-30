@@ -1,3 +1,4 @@
+pub mod block;
 pub mod cmd;
 pub mod luks2;
 pub mod mkfs;

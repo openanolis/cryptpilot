@@ -19,7 +19,7 @@ impl CheckCommandOutput for Command {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     bail!(
-                        "\ncmd: {:?}\nexit code: {}\nstdout: {}\nstderr: {}",
+                        "\nexternal cmd: {:?}\nexit code: {}\nstdout: {}\nstderr: {}",
                         self.as_std(),
                         match output.status.code() {
                             Some(code) => {

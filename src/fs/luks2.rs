@@ -9,7 +9,11 @@ use crate::{
     types::{IntegrityType, Passphrase},
 };
 
-use super::{get_verbose, shell::Shell};
+use super::{
+    get_verbose,
+    mkfs::{IntegrityNoWipeMakeFs, MakeFs, NormalMakeFs},
+    shell::Shell,
+};
 
 pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType) -> Result<()> {
     let dev = dev.to_owned();
@@ -159,58 +163,13 @@ pub async fn makefs_if_empty(
     let volume = volume.to_owned();
     let makefs = makefs.to_owned();
 
-    // There is no need to check volume here since systemd-makefs will check it.
-    tokio::task::spawn_blocking(move || -> Result<_> {
-        match integrity {
-            // TODO: omit /usr/lib/systemd/systemd-makefs
-            IntegrityType::None => Shell(format!(
-                r#"
-                        /usr/lib/systemd/systemd-makefs {} /dev/mapper/{}
-                        "#,
-                makefs.to_systemd_makefs_fstype(),
-                volume,
-            ))
-            .run(),
-            IntegrityType::Journal | IntegrityType::NoJournal => Shell(format!(
-                r#"
-                        export LC_ALL=C
-                        set +o errexit
-                        res=`file -E --brief --dereference --special-files /dev/mapper/{}`
-                        status=$?
-                        set -o errexit
-
-                        if [[ $res == *"Input/output error"* ]] || [[ $res == "data" ]] ; then
-                            # A uninitialized (empty) volume
-                            exit 2
-                        elif [[ $status -ne 0 ]] ; then
-                            # Error happens
-                            echo $res >&2
-                            exit 1
-                        else
-                            # Maybe some thing on the volume, so we should not touch it.
-                            exit 3
-                        fi
-                        "#,
-                volume,
-            ))
-            .run_with_status_checker(|code, _, _| match code {
-                2 => Ok(true),
-                3 => Ok(false),
-                _ => {
-                    bail!("Bad exit code")
-                }
-            })
-            .with_context(|| format!("Failed to detecting filesystem type on volume {volume}",))
-            .and_then(|empty_volume| {
-                if empty_volume {
-                    makefs.mkfs_on_no_wipe_volume_blocking(&format!("/dev/mapper/{volume}"))?
-                }
-                Ok(())
-            }),
+    let device_path = format!("/dev/mapper/{volume}");
+    match integrity {
+        IntegrityType::None => NormalMakeFs::mkfs(device_path, makefs).await,
+        IntegrityType::Journal | IntegrityType::NoJournal => {
+            IntegrityNoWipeMakeFs::mkfs(device_path, makefs).await
         }
-        .with_context(|| format!("Failed to initialize {makefs} fs on volume {volume}"))?;
-        Ok(())
-    })
-    .await
-    .context("background task failed")?
+    }
+    .with_context(|| format!("Failed to initialize {makefs} fs on volume {volume}"))?;
+    Ok(())
 }
