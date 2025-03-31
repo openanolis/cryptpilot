@@ -11,18 +11,27 @@ Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/
 
 Source1: config
 
-Requires: dracut lvm2 cryptsetup coreutils systemd veritysetup
+Requires: dracut
+Requires: lvm2
+Requires: cryptsetup
+Requires: coreutils
+Requires: systemd
+Requires: veritysetup
+Requires: veritysetup
+Requires: device-mapper-libs
+
 # If not installed, the kbs and kms-oidc keyprovider will not work.
 Recommends: confidential-data-hub
 # If not installed, the AAEL will not work.
 Suggests: attestation-agent
 
-# BuildRequires: cargo, rust, protobuf-compiler
 BuildRequires: protobuf-compiler
 BuildRequires: perl-IPC-Cmd
 BuildRequires: clang-libs
 BuildRequires: cargo
 BuildRequires: rust
+BuildRequires: clang
+BuildRequires: device-mapper-devel
 
 ExclusiveArch: x86_64
 
