@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name: cryptpilot
-Version: 0.2.1
+Version: 0.2.2
 Release: 1%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -117,6 +117,11 @@ rm -rf %{buildroot}
 %{dracut_dst}initrd-wait-network-online.service
 
 %changelog
+* Mon Mar 31 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.2-1
+- Fix TLS support in dracut initrd
+- Add RUST_LOG environment variable to control log level
+- Fix udev env SYSTEMD_READY=0 when integrity is on
+
 * Mon Mar  3 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.1-1
 - Add OIDC key provider Plugin
 - Fix path of confidential-data-hub
