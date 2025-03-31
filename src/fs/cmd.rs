@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use tokio::process::Command;
 
@@ -19,7 +19,7 @@ impl CheckCommandOutput for Command {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     bail!(
-                        "\nexternal cmd: {:?}\nexit code: {}\nstdout: {}\nstderr: {}",
+                        "\ncmd: {:?}\nexit code: {}\nstdout: {}\nstderr: {}",
                         self.as_std(),
                         match output.status.code() {
                             Some(code) => {
@@ -44,5 +44,6 @@ impl CheckCommandOutput for Command {
                     Ok(output.stdout)
                 }
             })
+            .context("Failed to execute external command")
     }
 }

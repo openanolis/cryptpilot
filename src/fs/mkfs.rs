@@ -126,7 +126,9 @@ impl IntegrityNoWipeMakeFs {
         );
 
         // Create a dummy device same size as the real one
-        let dummy_device = DummyDevice::setup(device_size).await?;
+        let dummy_device = DummyDevice::setup(device_size)
+            .await
+            .context("Failed to create dummy device")?;
         let dummy_device_path = dummy_device.path()?;
         let dummy_device_sector_size = File::open(&dummy_device_path)
             .await?

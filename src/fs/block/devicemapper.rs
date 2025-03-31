@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use devicemapper::{DevId, DmFlags, DmName, DmOptions, DM};
 use rand::{distributions::Alphanumeric, Rng as _};
 
-struct DeviceMapperDevice {
+pub struct DeviceMapperDevice {
     dm: DM,
     device_name: String,
 }

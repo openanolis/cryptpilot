@@ -5,8 +5,8 @@ use std::{
     path::Path,
 };
 
-use anyhow::{ensure, Context, Result};
-use nix::{ioctl_none, ioctl_readwrite};
+use anyhow::{bail, ensure, Context, Result};
+use nix::{ioctl_none, ioctl_readwrite, mount::MsFlags};
 use tokio::{
     fs::{File, OpenOptions},
     io::AsyncReadExt as _,
@@ -51,7 +51,42 @@ const BLK_TRACE_BUF_SIZE: u32 = 65536;
 const BLK_TRACE_BUF_COUNT: u32 = 16;
 
 impl BlkTrace {
+    async fn check_and_setup_debugfs() -> Result<()> {
+        let debugfs = Path::new("/sys/kernel/debug");
+        if !debugfs.exists() {
+            bail!("The debugfs (/sys/kernel/debug) is not supported in current kernel, please enable it");
+        }
+
+        let mounted = mnt::MountIter::new_from_proc()?.any(|item| {
+            if let Ok(item) = item {
+                return item.file == debugfs;
+            }
+            false
+        });
+        if !mounted {
+            tracing::info!("debugfs not mounted, mounting it now");
+            tokio::fs::create_dir_all(&debugfs).await?;
+
+            tokio::task::spawn_blocking(move || -> Result<_> {
+                nix::mount::mount(
+                    Some("debugfs"),
+                    debugfs,
+                    Some("debugfs"),
+                    MsFlags::empty(),
+                    Option::<&str>::None,
+                )
+                .context("Failed to mount debugfs")?;
+                Ok(())
+            })
+            .await??;
+        }
+
+        Ok(())
+    }
+
     pub async fn monitor(path: impl AsRef<Path>) -> Result<Self> {
+        Self::check_and_setup_debugfs().await?;
+
         let file = File::open(path).await?;
         let task = BlkTraceTask { file };
 
@@ -203,34 +238,20 @@ pub mod tests {
 
     use std::io::SeekFrom;
 
+    use crate::fs::block::devicemapper::DeviceMapperDevice;
+
     use super::*;
     use anyhow::Result;
-    use devicemapper::{DevId, DmFlags, DmName, DmOptions, DM};
     use tokio::io::{AsyncSeekExt, BufReader};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_blktrace() -> Result<()> {
-        let device_name = "cryptpilot-unittest-dev";
-
-        let dm = DM::new().unwrap();
-        let name = DmName::new(device_name).expect("is valid DM name");
-        let _dev = dm.device_create(name, None, DmOptions::default()).unwrap();
-
-        let id = DevId::Name(name);
-        let table = vec![(0, 10 * 1024 * 1024 * 1024, "zero".into(), "".into())];
-
-        dm.table_load(
-            &id,
-            &table,
-            DmOptions::default().set_flags(DmFlags::DM_PERSISTENT_DEV),
-        )
-        .unwrap();
-        dm.device_suspend(&id, DmOptions::default()).unwrap();
+        let dm_device = DeviceMapperDevice::new_zero(10 * 1024 * 1024 * 1024).await?;
+        let device_path = dm_device.path();
 
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         tracing::info!("The tracer is now enabled");
-        let device_path = format!("/dev/mapper/{device_name}");
         let tracer = BlkTrace::monitor(&device_path).await?;
 
         tracing::info!("Start to randomly read the block");
@@ -274,8 +295,6 @@ pub mod tests {
 
         assert!(traces.len() > 0);
         assert!(count_read > 0);
-
-        dm.device_remove(&id, DmOptions::default()).unwrap();
 
         Ok(())
     }
