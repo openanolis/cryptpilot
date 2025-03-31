@@ -28,8 +28,9 @@ pub async fn print_volume_configs_as_table(volume_configs: &[VolumeConfig]) -> R
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec![
             "Volume",
-            "Device",
-            "Encrypt Key Provider",
+            "Volume Path",
+            "Underlay Device",
+            "Key Provider",
             "Extra Options",
             "Initialized",
             "Opened",
@@ -40,6 +41,15 @@ pub async fn print_volume_configs_as_table(volume_configs: &[VolumeConfig]) -> R
 
         table.add_row(vec![
             Cell::new(volume_config.volume.as_str()),
+            if !dev_exist {
+                Cell::new("N/A").fg(Color::Yellow)
+            } else {
+                if crate::fs::luks2::is_active(&volume_config.volume) {
+                    Cell::new(volume_config.volume_path().display()).fg(Color::Green)
+                } else {
+                    Cell::new("<not opened>").fg(Color::Yellow)
+                }
+            },
             if dev_exist {
                 Cell::new(volume_config.dev.as_str())
             } else {

@@ -1,7 +1,10 @@
 use documented::DocumentedFields;
 use serde::{Deserialize, Serialize};
 
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    path::{Path, PathBuf},
+};
 
 use super::encrypt::EncryptConfig;
 
@@ -21,6 +24,12 @@ pub struct VolumeConfig {
 
     /// The encryption specific configurations
     pub encrypt: EncryptConfig,
+}
+
+impl VolumeConfig {
+    pub fn volume_path(&self) -> PathBuf {
+        Path::new("/dev/mapper").join(&self.volume)
+    }
 }
 
 /// Extra configuration for the volume.
