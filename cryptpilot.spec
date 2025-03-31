@@ -84,6 +84,15 @@ install -p -m 600 dist/etc/volumes/otp.toml.template %{buildroot}/etc/cryptpilot
 install -p -m 600 dist/etc/volumes/kbs.toml.template %{buildroot}/etc/cryptpilot/volumes/kbs.toml.template
 popd
 
+%post
+# Check if it is a install or update
+if [ $1 == 1 ] || [ $1 == 2 ]; then
+  if command -v dracut >&- ; then
+      echo "Updating initrd ..."
+      dracut --force
+  fi
+fi
+
 %clean
 rm -f ~/.cargo/config
 rm -rf %{buildroot}
