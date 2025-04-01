@@ -1,7 +1,0 @@
-volume = "data2"
-dev = "/dev/nvme1n1p3"
-auto_open = true
-makefs = "ext4"
-integrity = false
-
-[encrypt.otp]

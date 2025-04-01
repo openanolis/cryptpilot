@@ -104,11 +104,17 @@ impl IntoProvider for OidcConfig {
 
 impl KeyProvider for OidcKeyProvider {
     async fn get_key(&self) -> Result<Passphrase> {
-        let oidc_token = tokio::process::Command::new(&self.options.command)
+        #[allow(unused_variables)]
+        let get_oidc_token_res = tokio::process::Command::new(&self.options.command)
             .args(&self.options.args)
             .run_check_output()
             .await
-            .context("failed to execute the command to get OIDC token")?;
+            .context("failed to execute the command to get OIDC token");
+        #[cfg(not(test))]
+        let oidc_token = get_oidc_token_res?;
+        #[cfg(test)]
+        let oidc_token = { b"test_oidc_token".to_vec() };
+
         let oidc_token = String::from_utf8(oidc_token).context("failed to parse OIDC token")?;
 
         let mut sealed_secret_file = tempfile::Builder::new()
@@ -136,13 +142,20 @@ impl KeyProvider for OidcKeyProvider {
             .write_all(sealed_secret.as_bytes())
             .context("failed to write contents to sealed secret file")?;
 
-        let key_u8 = Command::new(ONE_SHOT_CDH_BINARY_PATH)
+        #[allow(unused_variables)]
+        let get_secret_res = Command::new(ONE_SHOT_CDH_BINARY_PATH)
             .arg("unseal-secret")
             .arg("--secret-path")
             .arg(sealed_secret_file.path())
             .run_check_output()
             .await
-            .context("failed to retrieve key using OIDC + KMS")?;
+            .context("failed to retrieve key using OIDC + KMS");
+
+        #[cfg(not(test))]
+        let key_u8 = get_secret_res?;
+
+        #[cfg(test)]
+        let key_u8 = { BASE64_STANDARD.encode(b"test").into_bytes() };
 
         let passphrase = (|| -> Result<_> {
             let key_base64 = String::from_utf8(key_u8)?;
@@ -165,10 +178,15 @@ impl KeyProvider for OidcKeyProvider {
 mod tests {
     use core::str;
 
+    use crate::provider::tests::{run_test_on_volume, test_volume_base};
     use crate::provider::{
         oidc::{Kms, OidcConfig},
         IntoProvider, KeyProvider,
     };
+
+    use anyhow::Result;
+    use rstest::rstest;
+    use rstest_reuse::apply;
 
     #[ignore]
     #[tokio::test]
@@ -187,5 +205,34 @@ mod tests {
         let key = provider.get_key().await.unwrap();
         println!("Get key (bytes): {:?}", key.as_bytes());
         println!("Get key (utf-8): {:?}", str::from_utf8(key.as_bytes()));
+    }
+
+    #[apply(test_volume_base)]
+    async fn test_volume(makefs: &str, integrity: bool) -> Result<()> {
+        run_test_on_volume(&format!(
+            r#"
+            volume = "<placeholder>"
+            dev = "<placeholder>"
+            auto_open = true
+            makefs = "{makefs}"
+            integrity = {integrity}
+
+            [encrypt.oidc]
+            command = "some-cli"
+            args = [
+                "-c",
+                "/etc/config.json",
+                "get-token",
+            ]
+            key_id = "disk-decryption-key"
+
+            [encrypt.oidc.kms]
+            type = "aliyun"
+            oidc_provider_arn = "acs:ram::113511544585:oidc-provider/TestOidcIdp"
+            role_arn = "acs:ram::113511544585:role/testoidc"
+            region_id = "cn-beijing"
+            "#,
+        ))
+        .await
     }
 }

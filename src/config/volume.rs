@@ -246,7 +246,28 @@ nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
 
     #[test]
     fn test_deserialize_oidc_test() {
-        let raw = include_str!("../../examples/volumes/data5.toml");
+        let raw = r#"
+            volume = "data5"
+            dev = "/dev/nvme1n1p6"
+            auto_open = true
+            makefs = "ext4"
+            integrity = true
+
+            [encrypt.oidc]
+            command = "some-cli"
+            args = [
+                "-c",
+                "/etc/config.json",
+                "get-token",
+            ]
+            key_id = "disk-decryption-key"
+
+            [encrypt.oidc.kms]
+            type = "aliyun"
+            oidc_provider_arn = "acs:ram::113511544585:oidc-provider/TestOidcIdp"
+            role_arn = "acs:ram::113511544585:role/testoidc"
+            region_id = "cn-beijing"
+        "#;
         let config: VolumeConfig = toml::from_str(raw).unwrap();
         let expected = VolumeConfig {
             volume: "data5".into(),

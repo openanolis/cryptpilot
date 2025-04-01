@@ -1,7 +1,0 @@
-volume = "swap0"
-dev = "/dev/nvme1n1p6"
-auto_open = true
-makefs = "swap"
-integrity = true
-
-[encrypt.otp]

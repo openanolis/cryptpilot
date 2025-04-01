@@ -33,3 +33,29 @@ impl KeyProvider for OtpKeyProvider {
         super::VolumeType::Temporary
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+
+    use crate::provider::tests::{run_test_on_volume, test_volume_base};
+
+    use anyhow::Result;
+    use rstest::rstest;
+    use rstest_reuse::apply;
+
+    #[apply(test_volume_base)]
+    async fn test_volume(makefs: &str, integrity: bool) -> Result<()> {
+        run_test_on_volume(&format!(
+            r#"
+            volume = "<placeholder>"
+            dev = "<placeholder>"
+            auto_open = true
+            makefs = "{makefs}"
+            integrity = {integrity}
+
+            [encrypt.otp]
+            "#,
+        ))
+        .await
+    }
+}

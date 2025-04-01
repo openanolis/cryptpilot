@@ -94,55 +94,14 @@ update-rpm-tree:
 	cp ./cryptpilot.spec ../rpm-tree-cryptpilot/
 	@echo "$$CARGO_CONFIG" > ../rpm-tree-cryptpilot/config
 
-.PHONE: example-prepare
-example-prepare: example-clean
-	parted --script /dev/nvme1n1 \
-            mktable gpt \
-            mkpart data0 0% 10% \
-            mkpart data1 10% 20% \
-            mkpart data2 20% 30% \
-            mkpart data3 30% 40% \
-            mkpart data4 40% 50% \
-            mkpart swap0 50% 100%
-	partprobe
-	rm -rf /etc/cryptpilot/
-	rsync -avp --exclude=fde.toml ./examples/ /etc/cryptpilot/
 
-.PHONE: example-clean
-example-clean:
-	! mountpoint -q /mnt/data0 || umount /mnt/data0 ; [ ! -e /dev/mapper/data0 ] || dmsetup remove data0 ; [ ! -e /dev/mapper/data0_dif ] || dmsetup remove data0_dif ; dd if=/dev/urandom of=/dev/nvme1n1p1 count=16 seek=0 bs=4096 ;
-	! mountpoint -q /mnt/data1 || umount /mnt/data1 ; [ ! -e /dev/mapper/data1 ] || dmsetup remove data1 ; [ ! -e /dev/mapper/data1_dif ] || dmsetup remove data1_dif ; dd if=/dev/urandom of=/dev/nvme1n1p2 count=16 seek=0 bs=4096 ;
-	! mountpoint -q /mnt/data2 || umount /mnt/data2 ; [ ! -e /dev/mapper/data2 ] || dmsetup remove data2 ; [ ! -e /dev/mapper/data2_dif ] || dmsetup remove data2_dif ; dd if=/dev/urandom of=/dev/nvme1n1p3 count=16 seek=0 bs=4096 ;
-	! mountpoint -q /mnt/data3 || umount /mnt/data3 ; [ ! -e /dev/mapper/data3 ] || dmsetup remove data3 ; [ ! -e /dev/mapper/data3_dif ] || dmsetup remove data3_dif ; dd if=/dev/urandom of=/dev/nvme1n1p4 count=16 seek=0 bs=4096 ;
-	! mountpoint -q /mnt/data4 || umount /mnt/data4 ; [ ! -e /dev/mapper/data4 ] || dmsetup remove data4 ; [ ! -e /dev/mapper/data4_dif ] || dmsetup remove data4_dif ; dd if=/dev/urandom of=/dev/nvme1n1p5 count=16 seek=0 bs=4096 ;
-	! { swapon | grep swap0 ; } || swapoff /dev/mapper/swap0 ; [ ! -e /dev/mapper/swap0 ] || dmsetup remove swap0 ; [ ! -e /dev/mapper/swap0_dif ] || dmsetup remove swap0_dif ; dd if=/dev/urandom of=/dev/nvme1n1p6 count=16 seek=0 bs=4096 ;
-
-.PHONE: example-run
-example-run: example-clean
-	cryptpilot init data0 -y && cryptpilot open data0 && mkdir -p /mnt/data0 && mount -t ext4 /dev/mapper/data0 /mnt/data0
-	cryptpilot init data1 -y && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t ext4 /dev/mapper/data1 /mnt/data1 && echo -n test > /mnt/data1/testfile
-	umount /mnt/data1 && cryptpilot open data1 && mkdir -p /mnt/data1 && mount -t ext4 /dev/mapper/data1 /mnt/data1 && [[ `cat /mnt/data1/testfile` == "test" ]]
-	cryptpilot init data2 -y && cryptpilot open data2 && mkdir -p /mnt/data2 && mount -t ext4 /dev/mapper/data2 /mnt/data2
-	cryptpilot init data3 -y && cryptpilot open data3 && mkdir -p /mnt/data3 && mount -t xfs /dev/mapper/data3 /mnt/data3
-	cryptpilot init data4 -y && cryptpilot open data4 && mkdir -p /mnt/data4 && mount -t xfs /dev/mapper/data4 /mnt/data4
-	cryptpilot init swap0 -y && cryptpilot open swap0 && swapon /dev/mapper/swap0
-	$(info All is done. Now you can check with 'findmnt' and 'swapon')
-
-.PHONE: example-run-test
-example-run-test: install-test-depend
-	{ [[ -e /mnt/data0 && -e /mnt/data1 && -e /mnt/data2 && -e /mnt/data3 && -e /mnt/data4 ]] && { swapon | grep `realpath /dev/mapper/swap0` ; } ; } || { echo "You may need to run 'make example-run' first to mount dirs and turn on swap files." ; false ; }
-	$(info Running filesystem test suites on data disks')
-	cd /mnt/data0 && prove -rv ~/pjdfstest/tests
-	cd /mnt/data1 && prove -rv ~/pjdfstest/tests
-	cd /mnt/data2 && prove -rv ~/pjdfstest/tests
-	cd /mnt/data3 && prove -rv ~/pjdfstest/tests
-	cd /mnt/data4 && prove -rv ~/pjdfstest/tests
-	$(info Testing on swap disk, now you can monitor with 'free -h')
-	systemd-run --wait --property="MemoryMax=128M" --property="MemorySwapMax=infinity"  -- stress-ng --timeout 60 --vm 1 --vm-hang 0 --vm-method zero-one --vm-bytes $$(swapon | grep `realpath /dev/mapper/swap0` | awk '{ print $$3 }')
+.PHONE: run-test
+run-test: install-test-depend
+	cargo test -- --nocapture
 
 .PHONE: install-test-depend
 install-test-depend:
-	[[ -e ~/pjdfstest/pjdfstest ]] || { cd ~/ && git clone https://github.com/pjd/pjdfstest.git && cd ~/pjdfstest && autoreconf -ifs && ./configure && make pjdfstest ; }
+	[[ -e /tmp/pjdfstest/pjdfstest ]] || { cd /tmp/ && git clone https://github.com/pjd/pjdfstest.git && cd /tmp/pjdfstest && autoreconf -ifs && ./configure && make pjdfstest ; }
 
 	which prove || { yum install -y perl-Test-Harness ; }
 	which stress-ng || { yum install -y stress-ng ; }

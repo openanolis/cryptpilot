@@ -86,7 +86,9 @@ url = "{}"
         cdh_config
             .write_all(config.as_bytes())
             .context("Failed to write contents to oneshot CDH config")?;
-        let key_u8 = Command::new(ONE_SHOT_CDH_BINARY_PATH)
+
+        #[allow(unused_variables)]
+        let get_secret_res = Command::new(ONE_SHOT_CDH_BINARY_PATH)
             .arg("-c")
             .arg(cdh_config.path())
             .arg("get-resource")
@@ -99,7 +101,13 @@ url = "{}"
                     "Failed to fetch passphrase from KBS URL {}",
                     self.options.kbs_url
                 )
-            })?;
+            });
+
+        #[cfg(not(test))]
+        let key_u8 = get_secret_res?;
+
+        #[cfg(test)]
+        let key_u8 = { BASE64_STANDARD.encode(b"test").into_bytes() };
 
         let passphrase = (|| -> Result<_> {
             let key_base64 = String::from_utf8(key_u8)?;
@@ -115,5 +123,39 @@ url = "{}"
 
     fn volume_type(&self) -> super::VolumeType {
         super::VolumeType::Persistent
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+
+    use crate::provider::tests::{run_test_on_volume, test_volume_base};
+
+    use anyhow::Result;
+    use rstest::rstest;
+    use rstest_reuse::apply;
+
+    #[apply(test_volume_base)]
+    async fn test_volume(makefs: &str, integrity: bool) -> Result<()> {
+        run_test_on_volume(&format!(
+            r#"
+            volume = "<placeholder>"
+            dev = "<placeholder>"
+            auto_open = true
+            makefs = "{makefs}"
+            integrity = {integrity}
+
+            [encrypt.kbs]
+            kbs_url = "https://1.2.3.4:8080"
+            key_uri = "kbs:///default/mykey/volume_data0"
+            kbs_root_cert = """
+            -----BEGIN CERTIFICATE-----
+            XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+            XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+            -----END CERTIFICATE-----
+            """
+            "#,
+        ))
+        .await
     }
 }
