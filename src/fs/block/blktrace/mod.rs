@@ -9,8 +9,7 @@ use anyhow::{bail, ensure, Context, Result};
 use nix::{ioctl_none, ioctl_readwrite, mount::MsFlags};
 use tokio::{
     fs::{File, OpenOptions},
-    io::AsyncReadExt,
-    select,
+    io::{AsyncReadExt, AsyncWriteExt},
 };
 
 mod gen {
@@ -172,24 +171,31 @@ impl BlkTrace {
                                 >(blk_event.as_mut_ptr())
                             };
 
-                            let res = select! {
-                                res = file.read_exact(ptr) => {
-                                    res
-                                }
-                                _ = cancel_token.cancelled() => {
-                                    tracing::trace!(relay_channel, "Cancelled now");
-                                    break;
-                                },
-                            };
-
+                            let mut res = file.read_exact(ptr).await;
                             if let Err(e) = &res {
                                 if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                                    // Try agein
-                                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                                    continue;
+                                    if cancel_token.is_cancelled() {
+                                        // The tracing task is stopping, wait and try again immediately.
+                                        tokio::time::sleep(std::time::Duration::from_millis(10))
+                                            .await;
+                                        res = file.read_exact(ptr).await;
+                                        if let Err(e) = &res {
+                                            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                                                // It seems we are actually reached the end of the file here.
+                                                tracing::trace!(relay_channel, "Cancelled now");
+                                                break;
+                                            }
+                                        }
+                                    } else {
+                                        // Try again in next loop
+                                        tokio::time::sleep(std::time::Duration::from_millis(10))
+                                            .await;
+                                        continue;
+                                    }
                                 }
                             }
                             res.context("Failed to read trace event from trace file")?;
+
                             let blk_event = unsafe { blk_event.assume_init() };
 
                             ensure!(
@@ -201,7 +207,6 @@ impl BlkTrace {
                             file.read_exact(&mut data)
                                 .await
                                 .context("Failed to read trace event data from trace file")?;
-                            tracing::trace!(relay_channel, "Got a new blk_event");
 
                             tx.send(BlkTraceEvent {
                                 event: blk_event,
