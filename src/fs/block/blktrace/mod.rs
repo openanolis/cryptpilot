@@ -29,6 +29,9 @@ ioctl_none!(blktrace_start, 0x12, 116);
 ioctl_none!(blktrace_stop, 0x12, 117);
 ioctl_none!(blktrace_teardown, 0x12, 118);
 
+// blockdev --flushbufs
+ioctl_none!(blkflsbuf, 0x12, 97);
+
 pub struct BlkTrace {
     task: BlkTraceTask,
     join_handle: tokio::task::JoinHandle<Result<Vec<BlkTraceEvent>>>,
@@ -235,6 +238,8 @@ impl BlkTrace {
 
     pub async fn shutdown(self) -> Result<(Vec<BlkTraceEvent>, u64)> {
         // Wait a millisecond to make sure all the trace is generated and put on the relay channel by kernel
+        self.task.flush_blkbuf().await?;
+
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
         self.cancel_token.cancel();
@@ -273,6 +278,17 @@ impl BlkTraceTask {
             .context("Failed to parse dropped")?;
 
         Ok(dropped)
+    }
+
+    pub async fn flush_blkbuf(&self) -> Result<()> {
+        let fd = self.block_device_file.as_raw_fd();
+        tokio::task::spawn_blocking(move || -> Result<_> {
+            let _ = unsafe { blkflsbuf(fd.as_raw_fd()) }.context("Failed to BLKFLSBUF")?;
+            Ok(())
+        })
+        .await??;
+
+        Ok(())
     }
 }
 
