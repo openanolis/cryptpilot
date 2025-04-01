@@ -126,7 +126,7 @@ impl IntegrityNoWipeMakeFs {
         );
 
         // Create a dummy device same size as the real one
-        let dummy_device = DummyDevice::setup(device_size)
+        let dummy_device = DummyDevice::setup_on_tmpfs(device_size)
             .await
             .context("Failed to create dummy device")?;
         let dummy_device_path = dummy_device.path()?;
@@ -209,6 +209,7 @@ impl IntegrityNoWipeMakeFs {
                 dummy_device_file.read_exact(&mut buf).await?;
                 real_device_file.write(&buf).await?;
             }
+            real_device_file.flush().await?;
             Result::<_, anyhow::Error>::Ok(())
         }
         .await
@@ -237,7 +238,7 @@ pub mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_mkfs_with_integrity() -> Result<()> {
-        let dummy_device = DummyDevice::setup(1024 * 1024 * 1024).await?;
+        let dummy_device = DummyDevice::setup_on_tmpfs(10 * 1024 * 1024 * 1024).await?;
 
         let volume_config = VolumeConfig {
             volume: "mkfs_with_integrity".to_owned(),
