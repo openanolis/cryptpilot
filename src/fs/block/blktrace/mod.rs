@@ -234,6 +234,9 @@ impl BlkTrace {
             Ok(traces)
         });
 
+        // Drop all page cache to force read operations to be sent to block device, so that we can capture all the read events.
+        task.drop_page_cache().await?;
+
         Ok(Self {
             task,
             join_handle,
@@ -283,6 +286,20 @@ impl BlkTraceTask {
             .context("Failed to parse dropped")?;
 
         Ok(dropped)
+    }
+
+    pub async fn drop_page_cache(&self) -> Result<()> {
+        async {
+            File::options()
+                .write(true)
+                .open("/proc/sys/vm/drop_caches")
+                .await?
+                .write_all(b"1")
+                .await?;
+            Ok::<_, anyhow::Error>(())
+        }
+        .await
+        .context("Failed to write to /proc/sys/vm/drop_caches")
     }
 
     pub async fn flush_blkbuf(&self) -> Result<()> {
