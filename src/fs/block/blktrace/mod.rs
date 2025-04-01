@@ -46,7 +46,7 @@ pub struct BlkTraceEvent {
 }
 
 // The size of each buffer for blktrace
-const BLK_TRACE_BUF_SIZE: u32 = 65536;
+const BLK_TRACE_BUF_SIZE: u32 = 4 * 1024 * 1024;
 // The amount of buffers for blktrace to keep spare
 const BLK_TRACE_BUF_COUNT: u32 = 16;
 
