@@ -38,6 +38,10 @@ impl InitrdStateConfigSource {
     pub fn new() -> Self {
         Self {}
     }
+
+    pub fn exist() -> bool {
+        Path::new(CRYPTPILOT_INITRD_STATE_PATH).exists()
+    }
 }
 
 #[async_trait]

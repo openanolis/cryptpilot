@@ -12,7 +12,7 @@ use anyhow::{bail, Context, Result};
 use clap::Parser as _;
 use cli::{BootServiceOptions, BootStage};
 use cmd::boot_service::{
-    copy_config::copy_config_to_initrd_state, initrd_state::InitrdStateConfigSource,
+    copy_config::copy_config_to_initrd_state_if_not_exist, initrd_state::InitrdStateConfigSource,
 };
 use config::source::{cached::CachedConfigSource, fs::FileSystemConfigSource};
 use log::{debug, info};
@@ -53,7 +53,7 @@ pub async fn run() -> Result<()> {
             stage: BootStage::InitrdBeforeSysroot,
         }) => {
             // We should load the configs from unsafe space and save them to initrd state for using later.
-            copy_config_to_initrd_state().await?;
+            copy_config_to_initrd_state_if_not_exist().await?;
             config::source::set_config_source(CachedConfigSource::new(
                 InitrdStateConfigSource::new(),
             ))
@@ -77,8 +77,16 @@ pub async fn run() -> Result<()> {
                     FileSystemConfigSource::new(config_dir),
                 ))
                 .await;
+            } else if Path::new("/etc/initrd-release").exists() {
+                // If we are in initrd, copy config to initrd state and load it from there.
+                copy_config_to_initrd_state_if_not_exist().await?;
+                config::source::set_config_source(CachedConfigSource::new(
+                    InitrdStateConfigSource::new(),
+                ))
+                .await;
+            } else {
+                // Or use default config dir.
             }
-            // Or use default config dir.
         }
     }
 

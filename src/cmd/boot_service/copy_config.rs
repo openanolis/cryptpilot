@@ -14,11 +14,15 @@ use crate::{
     measure::{AutoDetectMeasure, Measure, OPERATION_NAME_LOAD_CONFIG},
 };
 
-use super::detect_boot_part;
+use super::{detect_boot_part, initrd_state::InitrdStateConfigSource};
 
 const CRYPTPILOT_CONFIG_DIR_INITRD_UNTRUSTED: &'static str = "cryptpilot/config";
 
-pub async fn copy_config_to_initrd_state() -> Result<()> {
+pub async fn copy_config_to_initrd_state_if_not_exist() -> Result<()> {
+    if InitrdStateConfigSource::exist() {
+        return Ok(());
+    }
+
     let config = load_config().await?;
     let config_str = toml::to_string(&config)?;
 
