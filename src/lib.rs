@@ -11,8 +11,12 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use clap::Parser as _;
 use cli::{BootServiceOptions, BootStage};
-use cmd::boot_service::{
-    copy_config::copy_config_to_initrd_state_if_not_exist, initrd_state::InitrdStateConfigSource,
+use cmd::{
+    boot_service::{
+        copy_config::copy_config_to_initrd_state_if_not_exist,
+        initrd_state::InitrdStateConfigSource,
+    },
+    IntoCommand as _,
 };
 use config::source::{cached::CachedConfigSource, fs::FileSystemConfigSource};
 use log::{debug, info};
@@ -120,18 +124,41 @@ pub async fn run() -> Result<()> {
             .source_debug_string()
     );
 
-    match args.command {
-        cli::Command::Show(_) => cmd::show::cmd_show().await?,
-        cli::Command::Init(init_options) => cmd::init::cmd_init(&init_options).await?,
-        cli::Command::Open(open_options) => cmd::open::cmd_open(&open_options).await?,
-        cli::Command::Close(close_options) => cmd::close::cmd_close(&close_options).await?,
-        cli::Command::DumpConfig => cmd::dump_config::cmd_dump_config().await?,
-        cli::Command::BootService(boot_service_options) => {
-            cmd::boot_service::cmd_boot_service(&boot_service_options).await?
-        }
-    };
+    // Handle the command
+    args.command.into_command().run().await?;
 
     Ok(())
+}
+
+/// A macro like scopeguard::defer! but can defer a future.
+///
+/// Note that other code running concurrently in the same task will be suspended
+/// due to the call to block_in_place, until the future is finished.
+///
+/// # Examples
+///
+/// ```
+/// async_defer!(async {
+///     // Do some cleanup
+/// });
+/// ```
+///
+/// # Panics
+///
+/// This macro should only be used in tokio multi-thread runtime, and will panics
+/// if called from a [`current_thread`] runtime.
+///
+#[macro_export]
+macro_rules! async_defer {
+    ($future:expr) => {
+        scopeguard::defer! {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    let _ = $future.await;
+                });
+            });
+        }
+    };
 }
 
 #[cfg(test)]

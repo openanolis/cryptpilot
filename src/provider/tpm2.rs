@@ -28,4 +28,8 @@ impl KeyProvider for Tpm2KeyProvider {
     async fn get_key(&self) -> Result<Passphrase> {
         todo!()
     }
+
+    fn volume_type(&self) -> super::VolumeType {
+        super::VolumeType::Persistent
+    }
 }

@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use async_trait::async_trait;
 use dialoguer::Confirm;
 use log::info;
 use rand::{distributions::Alphanumeric, Rng as _};
@@ -10,36 +11,47 @@ use crate::{
     types::IntegrityType,
 };
 
-pub async fn cmd_init(init_options: &InitOptions) -> Result<()> {
-    let volume_config = crate::config::source::get_config_source()
-        .await
-        .get_volume_config(&init_options.volume)
-        .await?;
+pub struct InitCommand {
+    pub init_options: InitOptions,
+}
 
-    info!(
-        "The key_provider type is \"{}\"",
-        serde_variant::to_variant_name(&volume_config.encrypt.key_provider)?
-    );
-    match &volume_config.encrypt.key_provider {
-        KeyProviderConfig::Otp(_otp_config) => {
-            info!("Not required to initialize");
-            return Ok(());
+#[async_trait]
+impl super::Command for InitCommand {
+    async fn run(&self) -> Result<()> {
+        let volume_config = crate::config::source::get_config_source()
+            .await
+            .get_volume_config(&self.init_options.volume)
+            .await?;
+
+        info!(
+            "The key_provider type is \"{}\"",
+            serde_variant::to_variant_name(&volume_config.encrypt.key_provider)?
+        );
+        
+        match &volume_config.encrypt.key_provider {
+            KeyProviderConfig::Otp(_otp_config) => {
+                info!("Not required to initialize");
+                return Ok(());
+            }
+            KeyProviderConfig::Kms(kms_config) => {
+                persistent_disk_init(&self.init_options, &volume_config, kms_config.clone())
+                    .await?;
+            }
+            KeyProviderConfig::Kbs(kbs_config) => {
+                persistent_disk_init(&self.init_options, &volume_config, kbs_config.clone())
+                    .await?;
+            }
+            KeyProviderConfig::Tpm2(_tpm2_config) => todo!(),
+            KeyProviderConfig::Oidc(oidc_config) => {
+                persistent_disk_init(&self.init_options, &volume_config, oidc_config.clone())
+                    .await?
+            }
         }
-        KeyProviderConfig::Kms(kms_config) => {
-            persistent_disk_init(init_options, &volume_config, kms_config.clone()).await?;
-        }
-        KeyProviderConfig::Kbs(kbs_config) => {
-            persistent_disk_init(init_options, &volume_config, kbs_config.clone()).await?;
-        }
-        KeyProviderConfig::Tpm2(_tpm2_config) => todo!(),
-        KeyProviderConfig::Oidc(oidc_config) => {
-            persistent_disk_init(init_options, &volume_config, oidc_config.clone()).await?
-        }
+
+        info!("The volume is initialized now");
+
+        Ok(())
     }
-
-    info!("The volume is initialized now");
-
-    Ok(())
 }
 
 async fn persistent_disk_init(

@@ -112,4 +112,8 @@ url = "{}"
         info!("The passphrase has been fetched from KBS");
         return Ok(passphrase);
     }
+
+    fn volume_type(&self) -> super::VolumeType {
+        super::VolumeType::Persistent
+    }
 }

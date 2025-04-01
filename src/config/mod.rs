@@ -4,9 +4,12 @@ pub mod global;
 pub mod source;
 pub mod volume;
 
+use anyhow::Result;
+use async_trait::async_trait;
 use fde::FdeConfig;
 use global::GlobalConfig;
 use serde::{Deserialize, Serialize};
+use source::ConfigSource;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
@@ -20,4 +23,15 @@ pub struct ConfigBundle {
     /// Configurations for data volumes. This is the same as the configs under `/etc/cryptpilot/volumes/` directory.
     #[serde(default = "Default::default")]
     pub volumes: Vec<volume::VolumeConfig>,
+}
+
+#[async_trait]
+impl ConfigSource for ConfigBundle {
+    fn source_debug_string(&self) -> String {
+        "in-memory config bundle".to_owned()
+    }
+
+    async fn get_config(&self) -> Result<ConfigBundle> {
+        Ok(self.clone())
+    }
 }

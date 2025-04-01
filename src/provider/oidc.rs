@@ -155,6 +155,10 @@ impl KeyProvider for OidcKeyProvider {
         info!("The passphrase has been fetched from KMS with OIDC");
         return Ok(passphrase);
     }
+
+    fn volume_type(&self) -> super::VolumeType {
+        super::VolumeType::Persistent
+    }
 }
 
 #[cfg(test)]

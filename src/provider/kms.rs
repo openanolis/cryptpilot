@@ -73,4 +73,9 @@ impl KeyProvider for KmsKeyProvider {
         info!("The passphrase has been fetched from KMS");
         return Ok(passphrase);
     }
+
+    fn volume_type(&self) -> super::VolumeType {
+        super::VolumeType::Persistent
+    }
+
 }

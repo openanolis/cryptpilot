@@ -3,7 +3,7 @@ use documented::DocumentedFields;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    provider::{IntoProvider, KeyProvider},
+    provider::{IntoProvider, KeyProvider, VolumeType},
     types::Passphrase,
 };
 
@@ -52,6 +52,16 @@ impl KeyProvider for KeyProviderEnum {
             KeyProviderEnum::Kbs(provider) => provider.get_key().await,
             KeyProviderEnum::Tpm2(provider) => provider.get_key().await,
             KeyProviderEnum::Oidc(provider) => provider.get_key().await,
+        }
+    }
+
+    fn volume_type(&self) -> VolumeType {
+        match self {
+            KeyProviderEnum::Otp(provider) => provider.volume_type(),
+            KeyProviderEnum::Kms(provider) => provider.volume_type(),
+            KeyProviderEnum::Kbs(provider) => provider.volume_type(),
+            KeyProviderEnum::Tpm2(provider) => provider.volume_type(),
+            KeyProviderEnum::Oidc(provider) => provider.volume_type(),
         }
     }
 }

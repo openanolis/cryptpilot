@@ -1,4 +1,5 @@
 use anyhow::{bail, Context as _, Result};
+use async_trait::async_trait;
 use log::info;
 
 use crate::{
@@ -8,17 +9,24 @@ use crate::{
     types::IntegrityType,
 };
 
-pub async fn cmd_open(open_options: &OpenOptions) -> Result<()> {
-    let volume_config = crate::config::source::get_config_source()
-        .await
-        .get_volume_config(&open_options.volume)
-        .await?;
+pub struct OpenCommand {
+    pub open_options: OpenOptions,
+}
 
-    open_for_specific_volume(&volume_config).await?;
+#[async_trait]
+impl super::Command for OpenCommand {
+    async fn run(&self) -> Result<()> {
+        let volume_config = crate::config::source::get_config_source()
+            .await
+            .get_volume_config(&self.open_options.volume)
+            .await?;
 
-    info!("The mapping is active now");
+        open_for_specific_volume(&volume_config).await?;
 
-    Ok(())
+        info!("The mapping is active now");
+
+        Ok(())
+    }
 }
 
 pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()> {

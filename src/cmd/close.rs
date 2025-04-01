@@ -1,19 +1,27 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use log::info;
 
 use crate::cli::CloseOptions;
 
-pub async fn cmd_close(close_options: &CloseOptions) -> Result<()> {
-    let volume = close_options.volume.to_owned();
+pub struct CloseCommand {
+    pub close_options: CloseOptions,
+}
 
-    if !crate::fs::luks2::is_active(&volume) {
-        info!("The mapping for {} is not active, nothing to do", volume);
-        return Ok(());
+#[async_trait]
+impl super::Command for CloseCommand {
+    async fn run(&self) -> Result<()> {
+        let volume = self.close_options.volume.to_owned();
+
+        if !crate::fs::luks2::is_active(&volume) {
+            info!("The mapping for {} is not active, nothing to do", volume);
+            return Ok(());
+        }
+
+        info!("Removing mapping for {volume}");
+        crate::fs::luks2::close(&volume).await?;
+        info!("The mapping is removed now");
+
+        Ok(())
     }
-
-    info!("Removing mapping for {volume}");
-    crate::fs::luks2::close(&volume).await?;
-    info!("The mapping is removed now");
-
-    Ok(())
 }

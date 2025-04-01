@@ -16,6 +16,8 @@ use crate::types::Passphrase;
 pub trait KeyProvider {
     #[allow(async_fn_in_trait)]
     async fn get_key(&self) -> Result<Passphrase>;
+
+    fn volume_type(&self) -> VolumeType;
 }
 
 pub trait IntoProvider {
@@ -23,3 +25,12 @@ pub trait IntoProvider {
 
     fn into_provider(self) -> Self::Provider;
 }
+
+pub enum VolumeType {
+    /// Temporary volume, which will drop all the data after closing.
+    Temporary,
+
+    /// Persistent volume, which will keep the data after closing, and can be opened again with the same passphrase.
+    Persistent,
+}
+

@@ -222,7 +222,9 @@ impl IntegrityNoWipeMakeFs {
 pub mod tests {
 
     use crate::{
+        async_defer,
         cli::CloseOptions,
+        cmd::{close::CloseCommand, Command as _},
         config::{
             encrypt::{EncryptConfig, KeyProviderConfig},
             volume::{ExtraConfig, VolumeConfig},
@@ -232,7 +234,6 @@ pub mod tests {
 
     use super::*;
     use anyhow::Result;
-    use scopeguard::defer;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_mkfs_with_integrity() -> Result<()> {
@@ -252,21 +253,21 @@ pub mod tests {
         };
 
         // Close the volume if it is already opened
-        crate::cmd::close::cmd_close(&CloseOptions {
-            volume: volume_config.volume.clone(),
-        })
+        CloseCommand {
+            close_options: CloseOptions {
+                volume: volume_config.volume.clone(),
+            },
+        }
+        .run()
         .await
         .unwrap();
 
-        let executor = tokio::runtime::Handle::current();
-        defer! {
-            let volume = volume_config.volume.to_owned();
-            executor.spawn({
-                async {
-                    crate::cmd::close::cmd_close(&CloseOptions{volume}).await.unwrap();
-                }
-            });
+        async_defer! {
+            async{
+                CloseCommand{ close_options: CloseOptions{volume: volume_config.volume.to_owned()}}.run().await.unwrap();
+            }
         }
+
         crate::cmd::open::open_for_specific_volume(&volume_config).await?;
 
         Command::new("blkid")

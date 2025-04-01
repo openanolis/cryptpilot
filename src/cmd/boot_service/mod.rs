@@ -5,12 +5,14 @@ pub mod metadata;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use metadata::Metadata;
 use tokio::{fs, process::Command};
 
 use crate::{
     cli::{BootServiceOptions, BootStage},
+    cmd::show::PrintAsTable,
     config::{fde::RwOverlayType, volume::MakeFsType},
     fs::{cmd::CheckCommandOutput, mount::TmpMountPoint, shell::Shell},
     measure::{
@@ -68,35 +70,42 @@ pub async fn detect_root_part() -> Result<String> {
         .context("Failed to detect root partition")
 }
 
-pub async fn cmd_boot_service(boot_service_options: &BootServiceOptions) -> Result<()> {
-    match boot_service_options.stage {
-        BootStage::InitrdBeforeSysroot => {
-            setup_volumes_required_by_fde()
-                .await
-                .context("Failed to setup volumes required by FDE")?;
-            setup_user_provided_volumes(boot_service_options)
-                .await
-                .context("Failed to setup volumes user provided automatically")?;
-        }
-        BootStage::InitrdAfterSysroot => {
-            let measure = AutoDetectMeasure::new().await;
-            if let Err(e) = measure
-                .extend_measurement(OPERATION_NAME_INITRD_SWITCH_ROOT.into(), "{}".into()) // empty json object
-                .await
-                .context("Failed to record switch root event to runtime measurement")
-            {
-                warn!("{e:?}")
+pub struct BootServiceCommand {
+    pub boot_service_options: BootServiceOptions,
+}
+
+#[async_trait]
+impl super::Command for BootServiceCommand {
+    async fn run(&self) -> Result<()> {
+        match &self.boot_service_options.stage {
+            BootStage::InitrdBeforeSysroot => {
+                setup_volumes_required_by_fde()
+                    .await
+                    .context("Failed to setup volumes required by FDE")?;
+                setup_user_provided_volumes(&self.boot_service_options)
+                    .await
+                    .context("Failed to setup volumes user provided automatically")?;
             }
+            BootStage::InitrdAfterSysroot => {
+                let measure = AutoDetectMeasure::new().await;
+                if let Err(e) = measure
+                    .extend_measurement(OPERATION_NAME_INITRD_SWITCH_ROOT.into(), "{}".into()) // empty json object
+                    .await
+                    .context("Failed to record switch root event to runtime measurement")
+                {
+                    warn!("{e:?}")
+                }
 
-            setup_mounts_required_by_fde()
-                .await
-                .context("Failed to setup mounts required by FDE")?;
+                setup_mounts_required_by_fde()
+                    .await
+                    .context("Failed to setup mounts required by FDE")?;
+            }
         }
+
+        info!("Everything have been completed, exit now");
+
+        Ok(())
     }
-
-    info!("Everything have been completed, exit now");
-
-    Ok(())
 }
 
 async fn check_sysroot() -> Result<()> {
@@ -459,7 +468,7 @@ async fn setup_user_provided_volumes(boot_service_options: &BootServiceOptions) 
         info!("The volume configs is empty, exit now");
         return Ok(());
     }
-    super::show::print_volume_configs_as_table(&volume_configs).await?;
+    volume_configs.print_as_table().await?;
     info!("Opening volumes according to volume configs");
     for volume_config in &volume_configs {
         match boot_service_options.stage {
@@ -498,6 +507,6 @@ async fn setup_user_provided_volumes(boot_service_options: &BootServiceOptions) 
         };
     }
     info!("Checking status for all volumes again");
-    super::show::print_volume_configs_as_table(&volume_configs).await?;
+    volume_configs.print_as_table().await?;
     Ok(())
 }
