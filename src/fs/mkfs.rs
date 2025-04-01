@@ -13,19 +13,10 @@ use tokio::{
 
 use crate::{
     config::volume::MakeFsType,
-    fs::{
-        block::{
-            blktrace::{blktrace_cat_BLK_TC_DISCARD, BLK_TC_SHIFT},
-            dummy::DummyDevice,
-        },
-        cmd::CheckCommandOutput as _,
-    },
+    fs::{block::dummy::DummyDevice, cmd::CheckCommandOutput as _},
 };
 
-use super::{
-    block::blktrace::{blktrace_cat_BLK_TC_READ, blktrace_cat_BLK_TC_WRITE, BlkTrace},
-    shell::Shell,
-};
+use super::{block::blktrace::BlkTrace, shell::Shell};
 
 #[async_trait]
 pub trait MakeFs {
@@ -157,15 +148,12 @@ impl IntegrityNoWipeMakeFs {
 
         // Record all the positions touched
         let mut rw_positions: OrderSet<_> = Default::default();
+        let mut r_positions: OrderSet<_> = Default::default();
+        let mut w_positions: OrderSet<_> = Default::default();
         for event in &events {
             // Refer to: https://github.com/sdsc/blktrace/blob/dd093eb1c48e0d86b835758b96a9886fb7773aa4/blkparse_fmt.c#L67-L74
-            if (((event.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_DISCARD)
-                != blktrace_cat_BLK_TC_DISCARD) /* We ignore Discard (TRIM) here */
-                && ((((event.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_READ)
-                    == blktrace_cat_BLK_TC_READ)
-                    || (((event.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_WRITE)
-                        == blktrace_cat_BLK_TC_WRITE))
-            {
+            /* We ignore Discard (TRIM) here */
+            if !event.is_discard() && (event.is_read() || event.is_write()) {
                 tracing::trace!(
                     "event action: {} sector: {}, bytes: {} bytes",
                     event.event.action,
@@ -178,12 +166,20 @@ impl IntegrityNoWipeMakeFs {
                 // The range [bytes_start, bytes_end) is touched by the operation
                 for i in (bytes_start / page_size)..((bytes_end + page_size - 1) / page_size) {
                     rw_positions.insert(i);
+                    if event.is_read() {
+                        r_positions.insert(i);
+                    }
+                    if event.is_write() {
+                        w_positions.insert(i);
+                    }
                 }
             }
         }
         tracing::debug!(
-            "Num of pages need to update to volume: {}, total size: {} bytes",
+            "Num of pages need to update to volume: {} ({} reads, {} writes), total size: {} bytes",
             rw_positions.len(),
+            r_positions.len(),
+            w_positions.len(),
             rw_positions.len() as u64 * page_size
         );
 

@@ -46,6 +46,22 @@ pub struct BlkTraceEvent {
     pub data: Vec<u8>,
 }
 
+impl BlkTraceEvent {
+    pub fn is_read(&self) -> bool {
+        ((self.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_READ) == blktrace_cat_BLK_TC_READ
+    }
+
+    pub fn is_write(&self) -> bool {
+        ((self.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_WRITE)
+            == blktrace_cat_BLK_TC_WRITE
+    }
+
+    pub fn is_discard(&self) -> bool {
+        ((self.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_DISCARD)
+            == blktrace_cat_BLK_TC_DISCARD
+    }
+}
+
 // The size of each buffer for blktrace
 const BLK_TRACE_BUF_SIZE: u32 = 4 * 1024 * 1024;
 // The amount of buffers for blktrace to keep spare
