@@ -9,7 +9,7 @@ use anyhow::{bail, ensure, Context, Result};
 use nix::{ioctl_none, ioctl_readwrite, mount::MsFlags};
 use tokio::{
     fs::{File, OpenOptions},
-    io::AsyncReadExt as _,
+    io::AsyncReadExt,
     select,
 };
 
@@ -36,7 +36,8 @@ pub struct BlkTrace {
 }
 
 pub struct BlkTraceTask {
-    pub file: File,
+    pub block_device_file: File,
+    pub block_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -88,9 +89,12 @@ impl BlkTrace {
         Self::check_and_setup_debugfs().await?;
 
         let file = File::open(path).await?;
-        let task = BlkTraceTask { file };
+        let mut task = BlkTraceTask {
+            block_device_file: file,
+            block_name: None,
+        };
 
-        let fd = task.file.as_fd();
+        let fd = task.block_device_file.as_fd();
 
         let mut setup_data = blk_user_trace_setup {
             // Capture read and write events only
@@ -109,6 +113,8 @@ impl BlkTrace {
         .context("Block name not vaild")?
         .to_str()
         .context("Block name not vaild utf-8 string")?; // use the kernel returned block device name
+
+        task.block_name = Some(block_name.to_owned());
 
         let _ = unsafe { blktrace_start(fd.as_raw_fd()) }.context("Failed to BLKTRACESTART")?;
 
@@ -211,23 +217,55 @@ impl BlkTrace {
         })
     }
 
-    pub async fn shutdown(self) -> Result<Vec<BlkTraceEvent>> {
+    pub async fn shutdown(self) -> Result<(Vec<BlkTraceEvent>, u64)> {
         // Wait a millisecond to make sure all the trace is generated and put on the relay channel by kernel
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
 
         self.cancel_token.cancel();
-        let res = self.join_handle.await??;
+        let events = self.join_handle.await??;
+
+        let dropped = self
+            .task
+            .get_dropped()
+            .await
+            .context("Failed to get dropped events count from blktrace")?;
+
+        if dropped > 0 {
+            tracing::warn!(
+                "Dropped {} blktrace events, the recording is incomplete",
+                dropped
+            );
+        }
+
         drop(self.task);
-        Ok(res)
+        Ok((events, dropped))
+    }
+}
+
+impl BlkTraceTask {
+    pub async fn get_dropped(&self) -> Result<u64> {
+        let block_name = self.block_name.as_ref().context("Unknown block name")?;
+
+        let mut file =
+            File::open(format!("/sys/kernel/debug/block/{}/dropped", block_name)).await?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).await?;
+
+        let dropped = String::from_utf8(buf)
+            .map_err(anyhow::Error::from)
+            .and_then(|value| value.trim().parse::<u64>().map_err(anyhow::Error::from))
+            .context("Failed to parse dropped")?;
+
+        Ok(dropped)
     }
 }
 
 impl Drop for BlkTraceTask {
     fn drop(&mut self) {
-        if let Err(e) = unsafe { blktrace_stop(self.file.as_raw_fd()) } {
+        if let Err(e) = unsafe { blktrace_stop(self.block_device_file.as_raw_fd()) } {
             tracing::warn!("Failed to BLKTRACESTOP: {e}")
         };
-        if let Err(e) = unsafe { blktrace_teardown(self.file.as_raw_fd()) } {
+        if let Err(e) = unsafe { blktrace_teardown(self.block_device_file.as_raw_fd()) } {
             tracing::warn!("Failed to BLKTRACETEARDOWN: {e}")
         };
     }
@@ -267,9 +305,10 @@ pub mod tests {
 
         tracing::info!("Finished to randomly read the block");
 
-        let traces = tracer.shutdown().await?;
+        let (events, dropped) = tracer.shutdown().await?;
+        assert!(dropped == 0);
 
-        let count_read = traces
+        let count_read = events
             .iter()
             .filter(|t: &&BlkTraceEvent| {
                 (t.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_READ
@@ -277,7 +316,7 @@ pub mod tests {
             })
             .count();
 
-        let count_write = traces
+        let count_write = events
             .iter()
             .filter(|t| {
                 (t.event.action >> BLK_TC_SHIFT) & blktrace_cat_BLK_TC_WRITE
@@ -287,13 +326,13 @@ pub mod tests {
 
         tracing::info!(
             "The tracer is now shutdown, got {} traces, {count_read} reads, {count_write} writes",
-            traces.len()
+            events.len()
         );
-        for trace in &traces {
+        for trace in &events {
             tracing::info!("{trace:?}");
         }
 
-        assert!(traces.len() > 0);
+        assert!(events.len() > 0);
         assert!(count_read > 0);
 
         Ok(())

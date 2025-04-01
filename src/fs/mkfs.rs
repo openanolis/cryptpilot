@@ -151,7 +151,7 @@ impl IntegrityNoWipeMakeFs {
                 .await?;
         }
 
-        let events = tracer.shutdown().await?;
+        let (events, _dropped) = tracer.shutdown().await?;
         let page_size =
             nix::unistd::sysconf(SysconfVar::PAGE_SIZE)?.context("Failed to get page size")? as u64;
 
@@ -181,8 +181,8 @@ impl IntegrityNoWipeMakeFs {
                 }
             }
         }
-        tracing::trace!(
-            "Num of pages touched: {}, total size: {} bytes",
+        tracing::debug!(
+            "Num of pages need to update to volume: {}, total size: {} bytes",
             rw_positions.len(),
             rw_positions.len() as u64 * page_size
         );
@@ -207,10 +207,6 @@ impl IntegrityNoWipeMakeFs {
                     .await?;
 
                 dummy_device_file.read_exact(&mut buf).await?;
-                tracing::trace!(
-                    "Migrated page write to offset {offset}, with {} bytes",
-                    buf.len()
-                );
                 real_device_file.write(&buf).await?;
             }
             Result::<_, anyhow::Error>::Ok(())
