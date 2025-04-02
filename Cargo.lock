@@ -764,6 +764,7 @@ dependencies = [
  "kms",
  "lazy_static",
  "libc",
+ "liblmod",
  "log",
  "loopdev",
  "mnt",
@@ -775,7 +776,6 @@ dependencies = [
  "reqwest",
  "rstest",
  "rstest_reuse",
- "run_script",
  "scopeguard",
  "serde",
  "serde_json",
@@ -1019,12 +1019,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7454e41ff9012c00d53cf7f475c5e3afa3b91b7c90568495495e8d9bf47a1055"
 
 [[package]]
-name = "dunce"
-version = "1.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
-
-[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1127,16 +1121,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "fsio"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dad0ce30be0cc441b325c5d705c8b613a0ca0d92b6a8953d41bd236dc09a36d0"
-dependencies = [
- "dunce",
- "rand 0.8.5",
 ]
 
 [[package]]
@@ -1776,6 +1760,12 @@ dependencies = [
  "libz-sys",
  "pkg-config",
 ]
+
+[[package]]
+name = "liblmod"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b221585d3f0053b5b80768e115b50edcd5c423b703a9c2c5cbf4bcf417ab227c"
 
 [[package]]
 name = "libloading"
@@ -3006,15 +2996,6 @@ dependencies = [
  "quote",
  "rand 0.8.5",
  "syn 2.0.87",
-]
-
-[[package]]
-name = "run_script"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f20d7c40e6d6fc2ff69ad8e8bac4d39a5fc1874402647ac92b620954d56d5c3e"
-dependencies = [
- "fsio",
 ]
 
 [[package]]

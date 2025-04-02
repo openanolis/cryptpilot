@@ -47,7 +47,7 @@ pub mod tests {
             volume::{MakeFsType, VolumeConfig},
             ConfigBundle,
         },
-        fs::{block::dummy::DummyDevice, cmd::CheckCommandOutput as _},
+        fs::{block::dummy::DummyDevice, cmd::CheckCommandOutput as _, mount::TmpMountPoint},
         provider::{IntoProvider, KeyProvider, VolumeType},
     };
 
@@ -105,27 +105,10 @@ pub mod tests {
         T: Future<Output = Result<()>>,
     {
         open_then(&volume_config, |volume_config| async move {
-            let mount_dir = tempfile::Builder::new()
-                .prefix("cryptpilot-mount-")
-                .tempdir()?;
-
-            Command::new("mount")
-                .arg(volume_config.volume_path())
-                .arg(mount_dir.path())
-                .run_check_output()
-                .await?;
-
-            async_defer! {
-                async{
-                    Command::new("umount")
-                        .arg(mount_dir.path())
-                        .run_check_output()
-                        .await?;
-                    Ok::<_, anyhow::Error>(())
-                }
-            }
-
-            task(volume_config.clone(), mount_dir.path().into()).await
+            TmpMountPoint::with_new_mount(volume_config.volume_path(), |mount_point| async {
+                task(volume_config, mount_point).await
+            })
+            .await?
         })
         .await
     }
@@ -138,14 +121,14 @@ pub mod tests {
         open_then(&volume_config, |volume_config| async move {
             Command::new("swapon")
                 .arg(volume_config.volume_path())
-                .run_check_output()
+                .run()
                 .await?;
 
             async_defer! {
                 async{
                     Command::new("swapoff")
                         .arg(volume_config.volume_path())
-                        .run_check_output()
+                        .run()
                         .await?;
                     Ok::<_, anyhow::Error>(())
                 }
@@ -219,7 +202,7 @@ pub mod tests {
                         .arg("zero-one")
                         .arg("--vm-bytes")
                         .arg(swap_device_size.to_string())
-                        .run_check_output()
+                        .run()
                         .await?;
 
                     Ok(())
@@ -274,7 +257,7 @@ pub mod tests {
                         .arg("-rv")
                         .arg("/tmp/pjdfstest/tests")
                         .current_dir(mount_dir)
-                        .run_check_output()
+                        .run()
                         .await?;
                     Ok(())
                 })

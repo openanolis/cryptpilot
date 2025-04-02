@@ -3,7 +3,6 @@ pub mod cmd;
 pub mod luks2;
 pub mod mkfs;
 pub mod mount;
-pub mod shell;
 
 use lazy_static::lazy_static;
 use tokio::sync::RwLock;

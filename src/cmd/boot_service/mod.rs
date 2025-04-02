@@ -8,13 +8,17 @@ use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use metadata::Metadata;
-use tokio::{fs, process::Command};
+use tokio::{
+    fs::{self, File},
+    io::AsyncWriteExt,
+    process::Command,
+};
 
 use crate::{
     cli::{BootServiceOptions, BootStage},
     cmd::show::PrintAsTable,
     config::{fde::RwOverlayType, volume::MakeFsType},
-    fs::{cmd::CheckCommandOutput, mount::TmpMountPoint, shell::Shell},
+    fs::{cmd::CheckCommandOutput, mount::TmpMountPoint},
     measure::{
         AutoDetectMeasure, Measure as _, OPERATION_NAME_FDE_ROOTFS_HASH,
         OPERATION_NAME_INITRD_SWITCH_ROOT,
@@ -39,7 +43,7 @@ pub async fn detect_boot_part() -> Result<String> {
         .args(["--match-types", "ext4"])
         .args(["--match-token", r#"PARTLABEL="boot""#])
         .args(["--list-one", "--output", "device"])
-        .run_check_output()
+        .run()
         .await
         .and_then(|stdout| {
             let mut device_name = String::from_utf8(stdout)?;
@@ -57,7 +61,7 @@ pub async fn detect_root_part() -> Result<String> {
         .args(["--match-types", "ext4"])
         .args(["--match-token", r#"LABEL="root""#])
         .args(["--list-one", "--output", "device"])
-        .run_check_output()
+        .run()
         .await
         .and_then(|stdout| {
             let mut device_name = String::from_utf8(stdout)?;
@@ -165,13 +169,11 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
 
     // 1. Checking and activating LVM volume group 'system'
     info!("[ 1/4 ] Checking and activating LVM volume group 'system'");
-    Shell(
-        r#"
-        vgchange -a y system
-        "#,
-    )
-    .run()
-    .context("Failed to activate LVM volume group 'system'")?;
+    Command::new("vgchange")
+        .args(["-a", "y", "system"])
+        .run()
+        .await
+        .context("Failed to activate LVM volume group 'system'")?;
 
     // 2. Load the root-hash and add it to the AAEL
     info!("[ 2/4 ] Loading root-hash");
@@ -243,13 +245,29 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
 
             // Due to there is no udev in initrd, the lvcreate will complain that /dev/system/data not exist. A workaround is to set '--zero n' and zeroing the first 4k of logical volume manually.
             // See https://serverfault.com/a/1059400
-            Shell(
-                r#"
-                lvcreate -n data --zero n -l 100%FREE system --nolocking
-                dd if=/dev/zero of=/dev/mapper/system-data bs=4k count=1
-                "#,
-            )
-            .run()
+            async {
+                Command::new("lvcreate")
+                    .args([
+                        "-n",
+                        "data",
+                        "--zero",
+                        "n",
+                        "-l",
+                        "100%FREE",
+                        "system",
+                        "--nolocking",
+                    ])
+                    .run()
+                    .await?;
+                File::options()
+                    .write(true)
+                    .open("/dev/mapper/system-data")
+                    .await?
+                    .write_all(&[0u8; 4096])
+                    .await?;
+                Ok::<_, anyhow::Error>(())
+            }
+            .await
             .context("Failed to create data logical volume")?;
         }
 
@@ -304,13 +322,18 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
 
     // 1. Mount the data volume to filesystem
     info!("[ 1/4 ] Mounting data volume");
-    Shell(format!(
-        r#"
-        mkdir -p /data_volume
-        mount {DATA_LAYER_DEVICE} /data_volume
-        "#
-    ))
-    .run()
+    async {
+        tokio::fs::create_dir_all("/data_volume").await?;
+
+        Command::new("mount")
+            .arg(DATA_LAYER_DEVICE)
+            .arg("/data_volume")
+            .run()
+            .await?;
+
+        Ok::<_, anyhow::Error>(())
+    }
+    .await
     .context("Failed to mount data volume on /data_volume")?;
 
     // 2. Setup the rootfs-overlay. If on ram, create it first. If on disk, just use it to setup overlayfs.
@@ -318,44 +341,96 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
 
     // Setup a backup of /sysroot at /sysroot_bak before mount overlay fs on it
     let sysroot_bak = Path::new("/sysroot_bak");
-    Shell(format!(
-        r#"
-        mkdir -p {sysroot_bak:?}
-        mount --bind /sysroot {sysroot_bak:?} --make-private
-        "#
-    ))
-    .run()
+    async {
+        tokio::fs::create_dir_all(sysroot_bak).await?;
+
+        Command::new("mount")
+            .arg("--bind")
+            .arg("/sysroot")
+            .arg(sysroot_bak)
+            .arg("--make-private")
+            .run()
+            .await?;
+
+        Ok::<_, anyhow::Error>(())
+    }
+    .await
     .with_context(|| format!("Failed to setup backup of /sysroot at {sysroot_bak:?}"))?;
 
     let overlay_type = fde_config.rootfs.rw_overlay.unwrap_or(RwOverlayType::Disk);
+
+    // Load overlay module if not loaded
+    tokio::task::spawn_blocking(|| {
+        liblmod::modprobe(
+            "overlay".to_string(),
+            "".to_string(),
+            liblmod::Selection::Current,
+        )
+        .or_else(|e| {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(e);
+            }
+            Ok(())
+        })
+        .context("Failed to load kernel module 'overlay'")
+    })
+    .await??;
+
     let overlay_dir = match overlay_type {
         RwOverlayType::Ram => {
             info!("Using tmpfs as rootfs overlay");
-            Shell(format!(
-                r#"
-                modprobe overlay
-                mkdir -p /ram_overlay
-                mount tmpfs -t tmpfs /ram_overlay
-                mkdir -p /ram_overlay/{{upper,work}}
-                mount -t overlay {ROOTFS_LAYER_DEVICE} -o lowerdir=/sysroot,upperdir=/ram_overlay/upper,workdir=/ram_overlay/work /sysroot
-                "#
-            ))
-            .run()
+            async {
+                tokio::fs::create_dir_all("/ram_overlay").await?;
+
+                Command::new("mount")
+                    .args(["tmpfs", "-t", "tmpfs", "/ram_overlay"])
+                    .run()
+                    .await
+                    .context("Failed to create tmpfs for rootfs overlay")?;
+
+                tokio::fs::create_dir_all("/ram_overlay/upper").await?;
+                tokio::fs::create_dir_all("/ram_overlay/work").await?;
+
+                Command::new("mount")
+                    .args(["-t", "overlay"])
+                    .arg(ROOTFS_LAYER_DEVICE)
+                    .args([
+                        "-o",
+                        "lowerdir=/sysroot,upperdir=/ram_overlay/upper,workdir=/ram_overlay/work",
+                        "/sysroot",
+                    ])
+                    .run()
+                    .await
+                    .context("Failed to mount overlayfs")?;
+
+                Ok::<_, anyhow::Error>(())
+            }
+            .await
             .context("Failed to setup overlayfs on /sysroot")?;
 
             Path::new("/ram_overlay")
         }
         RwOverlayType::Disk => {
             info!("Using data-volume:/overlay as rootfs overlay");
-            Shell(format!(
-                r#"
-                modprobe overlay
-                mkdir -p /data_volume/overlay
-                mkdir -p /data_volume/overlay/{{upper,work}}
-                mount -t overlay {ROOTFS_LAYER_DEVICE} -o lowerdir=/sysroot,upperdir=/data_volume/overlay/upper,workdir=/data_volume/overlay/work /sysroot
-                "#,
-            ))
-            .run()
+            async {
+                tokio::fs::create_dir_all("/data_volume/overlay/upper").await?;
+                tokio::fs::create_dir_all("/data_volume/overlay/work").await?;
+
+                Command::new("mount")
+                    .args(["-t", "overlay"])
+                    .arg(ROOTFS_LAYER_DEVICE)
+                    .args([
+                        "-o",
+                        "lowerdir=/sysroot,upperdir=/data_volume/overlay/upper,workdir=/data_volume/overlay/work",
+                        "/sysroot",
+                    ])
+                    .run()
+                    .await
+                    .context("Failed to mount overlayfs")?;
+
+                Ok::<_, anyhow::Error>(())
+            }
+            .await
             .context("Failed to setup overlayfs on /sysroot")?;
 
             Path::new("/data_volume/overlay")
@@ -372,7 +447,7 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
 
     for dir in dirs {
         // check if exist and not empty
-        let handle_dir_func = |dir| {
+        let task = async {
             let target = Path::new("/sysroot/").join(format!("./{dir}"));
             // Make sure the target dir is ready
             if target.exists() {
@@ -398,15 +473,16 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
                 // We have to copy from the lower layer of the /sysroot
                 let copy_source = sysroot_bak.join(format!("./{dir}"));
                 if copy_source.exists() {
-                    if let Err(e) = Shell(format!(
-                        r#"
-                        cp -a {copy_source:?}/. {origin:?}/
-                        "#
-                    ))
-                    .run()
-                    .with_context(|| {
-                        format!("Failed to copy files from {copy_source:?} to {origin:?}")
-                    }) {
+                    if let Err(e) = Command::new("cp")
+                        .arg("-a")
+                        .arg(format!("{copy_source:?}/."))
+                        .arg(format!("{origin:?}/"))
+                        .run()
+                        .await
+                        .with_context(|| {
+                            format!("Failed to copy files from {copy_source:?} to {origin:?}")
+                        })
+                    {
                         let _ = std::fs::remove_dir_all(&origin);
                         Err(e)?
                     }
@@ -414,18 +490,19 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
             }
 
             // Mount bind
-            Shell(format!(
-                r#"
-                mount --bind {origin:?} {target:?}
-                "#
-            ))
-            .run()
-            .with_context(|| format!("Failed to setup mount bind on {target:?}"))?;
+            Command::new("mount")
+                .arg("--bind")
+                .arg(&origin)
+                .arg(&target)
+                .run()
+                .await
+                .with_context(|| format!("Failed to setup mount bind on {target:?}"))?;
 
             Ok(())
         };
 
-        if let Err(e) = handle_dir_func(dir)
+        if let Err(e) = task
+            .await
             .with_context(|| format!("Failed to settiing up mount bind for {dir}"))
         {
             error!("{e:#}");
@@ -434,27 +511,53 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
 
     // 4. mount --bind the /data folder
     info!("[ 4/4 ] Setting up user-data dir: /data");
-    Shell(
-        r#"
-        mkdir -p /data_volume/data
-        mkdir -p /sysroot/data
-        mount --bind /data_volume/data /sysroot/data
-        "#,
-    )
-    .run()
+    async {
+        tokio::fs::create_dir_all("/data_volume/data").await?;
+        tokio::fs::create_dir_all("/sysroot/data").await?;
+
+        Command::new("mount")
+            .args(["--bind", "/data_volume/data", "/sysroot/data"])
+            .run()
+            .await?;
+
+        Ok::<_, anyhow::Error>(())
+    }
+    .await
     .context("Failed to setup mount bind on /sysroot/data")?;
 
     Ok(())
 }
 
 async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Result<()> {
-    Shell(format!(
-        r#"
-        modprobe dm_verity
-        veritysetup open {lower_dm_device} {ROOTFS_LAYER_NAME} {ROOTFS_HASH_LOGICAL_VOLUME} "{root_hash}"
-        "#,
-    ))
-    .run()
+    async {
+        tokio::task::spawn_blocking(|| {
+            liblmod::modprobe(
+                "dm_verity".to_string(),
+                "".to_string(),
+                liblmod::Selection::Current,
+            )
+            .or_else(|e| {
+                if e.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err(e);
+                }
+                Ok(())
+            })
+            .context("Failed to load kernel module 'dm_verity'")
+        })
+        .await??;
+
+        Command::new("veritysetup")
+            .arg("open")
+            .arg(lower_dm_device)
+            .arg(ROOTFS_LAYER_NAME)
+            .arg(ROOTFS_HASH_LOGICAL_VOLUME)
+            .arg(root_hash)
+            .run()
+            .await?;
+
+        Ok::<_, anyhow::Error>(())
+    }
+    .await
     .context("Failed to setup rootfs_verity")
 }
 

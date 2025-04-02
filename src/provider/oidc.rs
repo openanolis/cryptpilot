@@ -107,7 +107,7 @@ impl KeyProvider for OidcKeyProvider {
         #[allow(unused_variables)]
         let get_oidc_token_res = tokio::process::Command::new(&self.options.command)
             .args(&self.options.args)
-            .run_check_output()
+            .run()
             .await
             .context("failed to execute the command to get OIDC token");
         #[cfg(not(test))]
@@ -147,7 +147,7 @@ impl KeyProvider for OidcKeyProvider {
             .arg("unseal-secret")
             .arg("--secret-path")
             .arg(sealed_secret_file.path())
-            .run_check_output()
+            .run()
             .await
             .context("failed to retrieve key using OIDC + KMS");
 
