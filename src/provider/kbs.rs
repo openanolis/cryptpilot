@@ -15,11 +15,7 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::{
-    fs::cmd::CheckCommandOutput as _,
-    provider::{IntoProvider, KeyProvider},
-    types::Passphrase,
-};
+use crate::{fs::cmd::CheckCommandOutput as _, provider::KeyProvider, types::Passphrase};
 
 const ONE_SHOT_CDH_BINARY_PATH: &str = "/usr/bin/confidential-data-hub";
 
@@ -36,15 +32,7 @@ pub struct KbsConfig {
 }
 
 pub struct KbsKeyProvider {
-    options: KbsConfig,
-}
-
-impl IntoProvider for KbsConfig {
-    type Provider = KbsKeyProvider;
-
-    fn into_provider(self) -> Self::Provider {
-        KbsKeyProvider { options: self }
-    }
+    pub options: KbsConfig,
 }
 
 impl KeyProvider for KbsKeyProvider {

@@ -4,8 +4,8 @@ use log::info;
 
 use crate::{
     cli::OpenOptions,
-    config::{encrypt::KeyProviderConfig, volume::VolumeConfig},
-    provider::{IntoProvider, KeyProvider as _},
+    config::volume::VolumeConfig,
+    provider::{IntoProvider, KeyProvider},
     types::IntegrityType,
 };
 
@@ -41,33 +41,25 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
     if crate::fs::luks2::is_dev_in_use(&volume_config.dev).await? {
         bail!("The device {} is currently in use", volume_config.dev);
     }
+
+    let key_provider = volume_config.encrypt.key_provider.clone().into_provider();
     let volume_config = volume_config.to_owned();
-    Ok(match &volume_config.encrypt.key_provider {
-        KeyProviderConfig::Otp(otp_config) => {
-            temporary_disk_open(&volume_config, otp_config.clone()).await?;
+
+    Ok(match key_provider.volume_type() {
+        crate::provider::VolumeType::Temporary => {
+            temporary_disk_open(&volume_config, &key_provider).await?;
         }
-        KeyProviderConfig::Kms(kms_config) => {
-            persistent_disk_open(&volume_config, kms_config.clone()).await?;
-        }
-        KeyProviderConfig::Kbs(kbs_config) => {
-            persistent_disk_open(&volume_config, kbs_config.clone()).await?;
-        }
-        KeyProviderConfig::Tpm2(_tpm2_config) => todo!(),
-        KeyProviderConfig::Oidc(oidc_config) => {
-            persistent_disk_open(&volume_config, oidc_config.clone()).await?
-        }
-        KeyProviderConfig::Exec(exec_config) => {
-            persistent_disk_open(&volume_config, exec_config.clone()).await?
+        crate::provider::VolumeType::Persistent => {
+            persistent_disk_open(&volume_config, &key_provider).await?;
         }
     })
 }
 
 async fn temporary_disk_open(
     volume_config: &VolumeConfig,
-    into_provider: impl IntoProvider,
+    key_provider: &impl KeyProvider,
 ) -> Result<()> {
-    let provider = into_provider.into_provider();
-    let passphrase = provider
+    let passphrase = key_provider
         .get_key()
         .await
         .context("Failed to get passphrase")?;
@@ -108,7 +100,7 @@ async fn temporary_disk_open(
 
 async fn persistent_disk_open(
     volume_config: &VolumeConfig,
-    into_provider: impl IntoProvider,
+    key_provider: &impl KeyProvider,
 ) -> Result<()> {
     if !crate::fs::luks2::is_initialized(&volume_config.dev).await? {
         bail!(
@@ -118,8 +110,7 @@ async fn persistent_disk_open(
     }
 
     info!("Fetching passphrase for volume {}", volume_config.volume);
-    let provider = into_provider.into_provider();
-    let passphrase = provider
+    let passphrase = key_provider
         .get_key()
         .await
         .context("Failed to get passphrase")?;

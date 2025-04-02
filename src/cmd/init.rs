@@ -6,7 +6,7 @@ use rand::{distributions::Alphanumeric, Rng as _};
 
 use crate::{
     cli::InitOptions,
-    config::{encrypt::KeyProviderConfig, volume::VolumeConfig},
+    config::volume::VolumeConfig,
     provider::{IntoProvider, KeyProvider},
     types::IntegrityType,
 };
@@ -27,28 +27,16 @@ impl super::Command for InitCommand {
             "The key_provider type is \"{}\"",
             serde_variant::to_variant_name(&volume_config.encrypt.key_provider)?
         );
-        
-        match &volume_config.encrypt.key_provider {
-            KeyProviderConfig::Otp(_otp_config) => {
+
+        let key_provider = volume_config.encrypt.key_provider.clone().into_provider();
+
+        match key_provider.volume_type() {
+            crate::provider::VolumeType::Temporary => {
                 info!("Not required to initialize");
                 return Ok(());
             }
-            KeyProviderConfig::Kms(kms_config) => {
-                persistent_disk_init(&self.init_options, &volume_config, kms_config.clone())
-                    .await?;
-            }
-            KeyProviderConfig::Kbs(kbs_config) => {
-                persistent_disk_init(&self.init_options, &volume_config, kbs_config.clone())
-                    .await?;
-            }
-            KeyProviderConfig::Tpm2(_tpm2_config) => todo!(),
-            KeyProviderConfig::Oidc(oidc_config) => {
-                persistent_disk_init(&self.init_options, &volume_config, oidc_config.clone())
-                    .await?
-            }
-            KeyProviderConfig::Exec(exec_config) => {
-                persistent_disk_init(&self.init_options, &volume_config, exec_config.clone())
-                    .await?
+            crate::provider::VolumeType::Persistent => {
+                persistent_disk_init(&self.init_options, &volume_config, &key_provider).await?;
             }
         }
 
@@ -61,7 +49,7 @@ impl super::Command for InitCommand {
 async fn persistent_disk_init(
     init_options: &InitOptions,
     volume_config: &VolumeConfig,
-    into_provider: impl IntoProvider,
+    key_provider: &impl KeyProvider,
 ) -> Result<()> {
     if crate::fs::luks2::is_initialized(&volume_config.dev).await? && !init_options.force_reinit {
         bail!("The device {} is already initialized. Use '--force-reinit' to force re-initialize the volume.", volume_config.dev);
@@ -84,8 +72,7 @@ async fn persistent_disk_init(
     }
 
     info!("Fetching passphrase for volume {}", volume_config.volume);
-    let provider = into_provider.into_provider();
-    let passphrase = provider
+    let passphrase = key_provider
         .get_key()
         .await
         .context("Failed to get passphrase")?;

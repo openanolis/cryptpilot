@@ -3,7 +3,10 @@ use documented::DocumentedFields;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    provider::{IntoProvider, KeyProvider, VolumeType},
+    provider::{
+        exec::ExecKeyProvider, kbs::KbsKeyProvider, kms::KmsKeyProvider, oidc::OidcKeyProvider,
+        otp::OtpKeyProvider, tpm2::Tpm2KeyProvider, IntoProvider, KeyProvider, VolumeType,
+    },
     types::Passphrase,
 };
 
@@ -77,18 +80,24 @@ impl IntoProvider for KeyProviderConfig {
 
     fn into_provider(self) -> Self::Provider {
         match self {
-            KeyProviderConfig::Otp(otp_config) => KeyProviderEnum::Otp(otp_config.into_provider()),
-            KeyProviderConfig::Kms(kms_config) => KeyProviderEnum::Kms(kms_config.into_provider()),
-            KeyProviderConfig::Kbs(kbs_config) => KeyProviderEnum::Kbs(kbs_config.into_provider()),
-            KeyProviderConfig::Tpm2(tpm2_config) => {
-                KeyProviderEnum::Tpm2(tpm2_config.into_provider())
-            }
-            KeyProviderConfig::Oidc(oidc_config) => {
-                KeyProviderEnum::Oidc(oidc_config.into_provider())
-            }
-            KeyProviderConfig::Exec(exec_config) => {
-                KeyProviderEnum::Exec(exec_config.into_provider())
-            }
+            KeyProviderConfig::Otp(otp_config) => KeyProviderEnum::Otp(OtpKeyProvider {
+                options: otp_config,
+            }),
+            KeyProviderConfig::Kms(kms_config) => KeyProviderEnum::Kms(KmsKeyProvider {
+                options: kms_config,
+            }),
+            KeyProviderConfig::Kbs(kbs_config) => KeyProviderEnum::Kbs(KbsKeyProvider {
+                options: kbs_config,
+            }),
+            KeyProviderConfig::Tpm2(tpm2_config) => KeyProviderEnum::Tpm2(Tpm2KeyProvider {
+                options: tpm2_config,
+            }),
+            KeyProviderConfig::Oidc(oidc_config) => KeyProviderEnum::Oidc(OidcKeyProvider {
+                options: oidc_config,
+            }),
+            KeyProviderConfig::Exec(exec_config) => KeyProviderEnum::Exec(ExecKeyProvider {
+                options: exec_config,
+            }),
         }
     }
 }

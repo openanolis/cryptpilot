@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::Passphrase;
 
-use super::{IntoProvider, KeyProvider};
+use super::KeyProvider;
 
 /// Aliyun KMS
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Documented, DocumentedFields)]
@@ -29,15 +29,7 @@ pub struct KmsConfig {
 }
 
 pub struct KmsKeyProvider {
-    options: KmsConfig,
-}
-
-impl IntoProvider for KmsConfig {
-    type Provider = KmsKeyProvider;
-
-    fn into_provider(self) -> Self::Provider {
-        KmsKeyProvider { options: self }
-    }
+    pub options: KmsConfig,
 }
 
 impl KmsKeyProvider {

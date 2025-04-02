@@ -26,7 +26,7 @@ use tokio::process::Command;
 
 use crate::{fs::cmd::CheckCommandOutput as _, types::Passphrase};
 
-use super::{IntoProvider, KeyProvider};
+use super::KeyProvider;
 
 const ONE_SHOT_CDH_BINARY_PATH: &str = "/usr/bin/confidential-data-hub";
 
@@ -91,15 +91,7 @@ pub struct OidcConfig {
 }
 
 pub struct OidcKeyProvider {
-    options: OidcConfig,
-}
-
-impl IntoProvider for OidcConfig {
-    type Provider = OidcKeyProvider;
-
-    fn into_provider(self) -> Self::Provider {
-        OidcKeyProvider { options: self }
-    }
+    pub options: OidcConfig,
 }
 
 impl KeyProvider for OidcKeyProvider {
@@ -178,6 +170,7 @@ impl KeyProvider for OidcKeyProvider {
 mod tests {
     use core::str;
 
+    use crate::config::encrypt::KeyProviderConfig;
     use crate::provider::tests::{run_test_on_volume, test_volume_base};
     use crate::provider::{
         oidc::{Kms, OidcConfig},
@@ -201,7 +194,7 @@ mod tests {
                 region_id: "cn-shanghai".into(),
             },
         };
-        let provider: crate::provider::oidc::OidcKeyProvider = config.into_provider();
+        let provider = KeyProviderConfig::Oidc(config).into_provider();
         let key = provider.get_key().await.unwrap();
         println!("Get key (bytes): {:?}", key.as_bytes());
         println!("Get key (utf-8): {:?}", str::from_utf8(key.as_bytes()));

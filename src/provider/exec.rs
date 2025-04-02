@@ -5,7 +5,7 @@ use tokio::process::Command;
 
 use crate::{fs::cmd::CheckCommandOutput as _, types::Passphrase};
 
-use super::{IntoProvider, KeyProvider};
+use super::KeyProvider;
 
 /// Execute Command Key Provider (reads key from command output)
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Documented, DocumentedFields)]
@@ -20,15 +20,7 @@ pub struct ExecConfig {
 }
 
 pub struct ExecKeyProvider {
-    options: ExecConfig,
-}
-
-impl IntoProvider for ExecConfig {
-    type Provider = ExecKeyProvider;
-
-    fn into_provider(self) -> Self::Provider {
-        ExecKeyProvider { options: self }
-    }
+    pub options: ExecConfig,
 }
 
 impl KeyProvider for ExecKeyProvider {
@@ -48,9 +40,10 @@ impl KeyProvider for ExecKeyProvider {
 
 #[cfg(test)]
 pub mod tests {
-    use crate::provider::exec::ExecConfig;
+    use crate::config::encrypt::KeyProviderEnum;
+    use crate::provider::exec::{ExecConfig, ExecKeyProvider};
     use crate::provider::tests::{run_test_on_volume, test_volume_base};
-    use crate::provider::{IntoProvider, KeyProvider};
+    use crate::provider::KeyProvider;
 
     use anyhow::Result;
     use rstest::rstest;
@@ -63,7 +56,7 @@ pub mod tests {
             args: vec!["-n".into(), "test-key".into()],
         };
 
-        let provider = config.into_provider();
+        let provider = KeyProviderEnum::Exec(ExecKeyProvider { options: config });
         let key = provider.get_key().await?;
 
         assert_eq!(key.as_bytes(), b"test-key");
@@ -78,7 +71,7 @@ pub mod tests {
             args: vec![r#"\x00\x01\x02\x03\n\t"#.into()],
         };
 
-        let provider = config.into_provider();
+        let provider = KeyProviderEnum::Exec(ExecKeyProvider { options: config });
         let key = provider.get_key().await?;
 
         assert_eq!(key.as_bytes(), [0x0, 0x1, 0x2, 0x3, b'\n', b'\t']);
@@ -93,7 +86,7 @@ pub mod tests {
             args: vec![],
         };
 
-        let provider = config.into_provider();
+        let provider = KeyProviderEnum::Exec(ExecKeyProvider { options: config });
         let result = provider.get_key().await;
 
         assert!(result.is_err());

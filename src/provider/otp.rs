@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::Passphrase;
 
-use super::{IntoProvider, KeyProvider};
+use super::KeyProvider;
 
 /// One Time Password (Temporary volume)
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Documented, DocumentedFields)]
@@ -13,15 +13,7 @@ pub struct OtpConfig {}
 
 pub struct OtpKeyProvider {
     #[allow(dead_code)]
-    options: OtpConfig,
-}
-
-impl IntoProvider for OtpConfig {
-    type Provider = OtpKeyProvider;
-
-    fn into_provider(self) -> Self::Provider {
-        OtpKeyProvider { options: self }
-    }
+    pub options: OtpConfig,
 }
 
 impl KeyProvider for OtpKeyProvider {
