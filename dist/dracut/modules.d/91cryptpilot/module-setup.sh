@@ -48,6 +48,7 @@ installkernel() {
         # Install kernel modules regardless of the hostonly mode
         hostonly='' instmods dm-mod dm-crypt dm-integrity dm-verity authenc overlay
         hostonly='' instmods virtio-pci virtio-net net-failover
+        hostonly='' instmods loop
 }
 
 depends() {
