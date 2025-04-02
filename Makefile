@@ -9,6 +9,7 @@ update-template:
 	cargo run --bin gen-template -- volume -t otp > dist/etc/volumes/otp.toml.template
 	cargo run --bin gen-template -- volume -t kms > dist/etc/volumes/kms.toml.template
 	cargo run --bin gen-template -- volume -t kbs > dist/etc/volumes/kbs.toml.template
+	cargo run --bin gen-template -- volume -t exec > dist/etc/volumes/exec.toml.template
 	cargo run --bin gen-template -- global > dist/etc/global.toml.template
 	cargo run --bin gen-template -- fde > dist/etc/fde.toml.template
 

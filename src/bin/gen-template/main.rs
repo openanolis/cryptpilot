@@ -13,6 +13,7 @@ use cryptpilot::{
         oidc::{Kms, OidcConfig},
         otp::OtpConfig,
         tpm2::Tpm2Config,
+        exec::ExecConfig,
     },
 };
 use documented::{Documented, DocumentedFields};
@@ -49,6 +50,7 @@ pub enum VolumeType {
     Kms,
     Kbs,
     ZeroTrust,
+    Exec,
 }
 
 impl VolumeType {
@@ -111,6 +113,12 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                     command: "some-cli".into(),
                     args: vec!["-c".into(), "/etc/config.json".into(), "get-token".into()],
                     key_id: "disk-decryption-key".into(),
+                })
+            }
+            VolumeType::Exec => {
+                volume_config.encrypt.key_provider = KeyProviderConfig::Exec(ExecConfig {
+                    command: "echo".into(),
+                    args: vec!["passphrase".into()],
                 })
             }
         };
@@ -195,6 +203,17 @@ impl AsAnnotatedToml for VolumeConfig {
                 append_docs_as_toml_comments(provider_config.decor_mut(), OidcConfig::DOCS);
                 annotate_toml_table::<OidcConfig>(provider_config)
                     .context("Failed to annotate `ZeroTrustOptions`")?;
+            }
+            KeyProviderConfig::Exec(_) => {
+                let Some(provider_config) = key_provider.get_mut("exec") else {
+                    return Ok(toml);
+                };
+                let Some(provider_config) = provider_config.as_table_mut() else {
+                    return Ok(toml);
+                };
+                append_docs_as_toml_comments(provider_config.decor_mut(), ExecConfig::DOCS);
+                annotate_toml_table::<ExecConfig>(provider_config)
+                    .context("Failed to annotate `ExecOptions`")?;
             }
         }
 

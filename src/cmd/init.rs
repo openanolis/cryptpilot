@@ -46,6 +46,10 @@ impl super::Command for InitCommand {
                 persistent_disk_init(&self.init_options, &volume_config, oidc_config.clone())
                     .await?
             }
+            KeyProviderConfig::Exec(exec_config) => {
+                persistent_disk_init(&self.init_options, &volume_config, exec_config.clone())
+                    .await?
+            }
         }
 
         info!("The volume is initialized now");

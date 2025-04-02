@@ -82,6 +82,7 @@ install -d -p %{buildroot}/etc/cryptpilot/volumes
 install -p -m 600 dist/etc/volumes/kms.toml.template %{buildroot}/etc/cryptpilot/volumes/kms.toml.template
 install -p -m 600 dist/etc/volumes/otp.toml.template %{buildroot}/etc/cryptpilot/volumes/otp.toml.template
 install -p -m 600 dist/etc/volumes/kbs.toml.template %{buildroot}/etc/cryptpilot/volumes/kbs.toml.template
+install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
 popd
 
 %post
@@ -108,6 +109,7 @@ rm -rf %{buildroot}
 /etc/cryptpilot/volumes/otp.toml.template
 /etc/cryptpilot/volumes/kms.toml.template
 /etc/cryptpilot/volumes/kbs.toml.template
+/etc/cryptpilot/volumes/exec.toml.template
 %dir %{dracut_dst}
 %{dracut_dst}module-setup.sh
 %{dracut_dst}initrd-trigger-network-online.sh

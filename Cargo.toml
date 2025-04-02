@@ -62,7 +62,7 @@ rstest_reuse = "0.7.0"
 two-rusty-forks = {version = "0.4.0", features = ["macro"]}
 
 [features]
-default = ["provider-kbs", "provider-kms", "provider-otp", "provider-tpm2", "provider-oidc"]
+default = ["provider-kbs", "provider-kms", "provider-otp", "provider-tpm2", "provider-oidc", "provider-exec"]
 provider-kbs = [
   "dep:ttrpc-codegen",
   "dep:ttrpc",
@@ -72,3 +72,4 @@ provider-kms = ["dep:kms"]
 provider-oidc = ["serde_json"]
 provider-otp = []
 provider-tpm2 = []
+provider-exec = []

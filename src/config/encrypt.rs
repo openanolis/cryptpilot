@@ -29,6 +29,8 @@ pub enum KeyProviderConfig {
     Tpm2(crate::provider::tpm2::Tpm2Config),
     #[cfg(feature = "provider-oidc")]
     Oidc(crate::provider::oidc::OidcConfig),
+    #[cfg(feature = "provider-exec")]
+    Exec(crate::provider::exec::ExecConfig),
 }
 
 pub enum KeyProviderEnum {
@@ -42,6 +44,8 @@ pub enum KeyProviderEnum {
     Tpm2(crate::provider::tpm2::Tpm2KeyProvider),
     #[cfg(feature = "provider-oidc")]
     Oidc(crate::provider::oidc::OidcKeyProvider),
+    #[cfg(feature = "provider-exec")]
+    Exec(crate::provider::exec::ExecKeyProvider),
 }
 
 impl KeyProvider for KeyProviderEnum {
@@ -52,6 +56,7 @@ impl KeyProvider for KeyProviderEnum {
             KeyProviderEnum::Kbs(provider) => provider.get_key().await,
             KeyProviderEnum::Tpm2(provider) => provider.get_key().await,
             KeyProviderEnum::Oidc(provider) => provider.get_key().await,
+            KeyProviderEnum::Exec(provider) => provider.get_key().await,
         }
     }
 
@@ -62,6 +67,7 @@ impl KeyProvider for KeyProviderEnum {
             KeyProviderEnum::Kbs(provider) => provider.volume_type(),
             KeyProviderEnum::Tpm2(provider) => provider.volume_type(),
             KeyProviderEnum::Oidc(provider) => provider.volume_type(),
+            KeyProviderEnum::Exec(provider) => provider.volume_type(),
         }
     }
 }
@@ -79,6 +85,9 @@ impl IntoProvider for KeyProviderConfig {
             }
             KeyProviderConfig::Oidc(oidc_config) => {
                 KeyProviderEnum::Oidc(oidc_config.into_provider())
+            }
+            KeyProviderConfig::Exec(exec_config) => {
+                KeyProviderEnum::Exec(exec_config.into_provider())
             }
         }
     }

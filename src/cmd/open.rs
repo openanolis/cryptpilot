@@ -56,6 +56,9 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
         KeyProviderConfig::Oidc(oidc_config) => {
             persistent_disk_open(&volume_config, oidc_config.clone()).await?
         }
+        KeyProviderConfig::Exec(exec_config) => {
+            persistent_disk_open(&volume_config, exec_config.clone()).await?
+        }
     })
 }
 

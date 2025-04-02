@@ -8,6 +8,8 @@ pub mod oidc;
 pub mod otp;
 #[cfg(feature = "provider-tpm2")]
 pub mod tpm2;
+#[cfg(feature = "provider-exec")]
+pub mod exec;
 
 use anyhow::Result;
 
