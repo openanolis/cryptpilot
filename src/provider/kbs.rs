@@ -94,7 +94,7 @@ url = "{}"
             .arg("get-resource")
             .arg("--resource-uri")
             .arg(&self.options.key_uri)
-            .run_check_output()
+            .run()
             .await
             .with_context(|| {
                 format!(

@@ -1,8 +1,7 @@
-use std::{io::Write, path::PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use run_script::ScriptOptions;
-use tokio::fs::OpenOptions;
+use tokio::{fs::OpenOptions, process::Command};
 
 use crate::{
     config::volume::MakeFsType,
@@ -10,9 +9,9 @@ use crate::{
 };
 
 use super::{
+    cmd::CheckCommandOutput as _,
     get_verbose,
     mkfs::{IntegrityNoWipeMakeFs, MakeFs, NormalMakeFs},
-    shell::Shell,
 };
 
 pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType) -> Result<()> {
@@ -20,35 +19,39 @@ pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
-    tokio::task::spawn_blocking(move || -> Result<_> {
-        let mut passphrase_file = tempfile::Builder::new()
-            .tempfile()
-            .context("Failed to create temp file for passphrase")?;
+    let mut cmd = Command::new("cryptsetup");
+    if verbose {
+        cmd.arg("--debug");
+    }
 
-        passphrase_file.write_all(passphrase.as_bytes())?;
+    cmd.args([
+        "luksFormat",
+        "--type",
+        "luks2",
+        "--cipher",
+        "aes-xts-plain64",
+    ]);
 
-        Shell(format!(
-            r#"
-            cat {:?} | cryptsetup {} luksFormat --type luks2 --cipher aes-xts-plain64 {} {} -
-            "#,
-            passphrase_file.path(),
-            match verbose {
-                true => "--debug",
-                false => "",
-            },
-            match integrity {
-                IntegrityType::None => "",
-                IntegrityType::Journal => "--integrity hmac-sha256 --integrity-no-wipe",
-                IntegrityType::NoJournal =>
-                    "--integrity hmac-sha256 --integrity-no-wipe --integrity-no-journal",
-            },
-            dev
-        ))
-        .run()
-        .with_context(|| format!("Failed to format {dev} as LUKS2 volume"))
-    })
-    .await
-    .context("background task failed")??;
+    match integrity {
+        IntegrityType::None => {}
+        IntegrityType::Journal => {
+            cmd.args(["--integrity", "hmac-sha256", "--integrity-no-wipe"]);
+        }
+        IntegrityType::NoJournal => {
+            cmd.args([
+                "--integrity",
+                "hmac-sha256",
+                "--integrity-no-wipe",
+                "--integrity-no-journal",
+            ]);
+        }
+    };
+
+    cmd.arg(&dev).arg("-");
+
+    cmd.run_with_input(Some(passphrase.as_bytes()))
+        .await
+        .with_context(|| format!("Failed to format {dev} as LUKS2 volume"))?;
 
     Ok(())
 }
@@ -64,47 +67,34 @@ pub async fn open(
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
-    tokio::task::spawn_blocking(move || -> Result<_> {
-        let mut passphrase_file = tempfile::Builder::new()
-            .tempfile()
-            .context("Failed to create temp file for passphrase")?;
+    let mut cmd = Command::new("cryptsetup");
+    if verbose {
+        cmd.arg("--debug");
+    }
 
-        passphrase_file.write_all(passphrase.as_bytes())?;
+    cmd.args(["open", "--type", "luks2"]);
 
-        Shell(format!(
-            r#"
-            cat {:?} | cryptsetup {} open --type luks2 {} --key-file=- {} {}
-            "#,
-            passphrase_file.path(),
-            match verbose {
-                true => "--debug",
-                false => "",
-            },
-            match integrity {
-                IntegrityType::None | IntegrityType::Journal => format!(""),
-                IntegrityType::NoJournal => format!("--integrity-no-journal"),
-            },
-            dev,
-            volume
-        ))
-        .run()
-        .with_context(|| format!("Failed to setup mapping for volume {}", volume))
-    })
-    .await
-    .context("background task failed")??;
+    match integrity {
+        IntegrityType::None | IntegrityType::Journal => {}
+        IntegrityType::NoJournal => {
+            cmd.args(["--integrity-no-journal"]);
+        }
+    };
+
+    cmd.args(["--key-file=-"]);
+    cmd.arg(dev).arg(&volume);
+
+    cmd.run_with_input(Some(passphrase.as_bytes()))
+        .await
+        .with_context(|| format!("Failed to setup mapping for volume {volume}"))?;
 
     Ok(())
 }
 
 pub async fn is_initialized(dev: &str) -> Result<bool> {
-    let dev = dev.to_owned();
-    tokio::task::spawn_blocking(move || -> Result<_> {
-        Shell(format!(
-            r#"
-                cryptsetup isLuks {}
-                "#,
-            dev
-        ))
+    Command::new("cryptsetup")
+        .arg("isLuks")
+        .arg(dev)
         .run_with_status_checker(|code, _, _| {
             let initialized = match code {
                 0 => true,
@@ -115,10 +105,8 @@ pub async fn is_initialized(dev: &str) -> Result<bool> {
             };
             Ok(initialized)
         })
+        .await
         .with_context(|| format!("Failed to check initialization status of device {dev}"))
-    })
-    .await
-    .context("background task failed")?
 }
 
 pub fn is_active(volume: &str) -> bool {
@@ -139,19 +127,16 @@ pub async fn is_dev_in_use(dev: &str) -> Result<bool> {
 pub async fn close(volume: &str) -> Result<()> {
     let verbose = get_verbose().await;
 
-    let mut ops = ScriptOptions::new();
-    ops.exit_on_error = true;
-    Shell(format!(
-        r#"
-            cryptsetup {} close {volume}
-         "#,
-        match verbose {
-            true => "--debug",
-            false => "",
-        },
-    ))
-    .run()
-    .with_context(|| format!("Failed to close mapping for volume `{volume}`"))?;
+    let mut cmd = Command::new("cryptsetup");
+    if verbose {
+        cmd.arg("--debug");
+    }
+    cmd.arg("close")
+        .arg(volume)
+        .run()
+        .await
+        .with_context(|| format!("Failed to close volume `{volume}`"))?;
+
     Ok(())
 }
 

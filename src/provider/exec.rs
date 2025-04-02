@@ -35,7 +35,7 @@ impl KeyProvider for ExecKeyProvider {
     async fn get_key(&self) -> Result<Passphrase> {
         let output = Command::new(&self.options.command)
             .args(&self.options.args)
-            .run_check_output()
+            .run()
             .await?;
 
         Ok(Passphrase::from(output))
