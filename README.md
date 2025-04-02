@@ -1,5 +1,6 @@
 # cryptpilot: The confidentiality for OS booting and data at rest in confidential computing environments
 [![Building](/../../actions/workflows/build-rpm.yml/badge.svg)](/../../actions/workflows/build-rpm.yml)
+![GitHub Release](https://img.shields.io/github/v/release/openanolis/cryptpilot)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 The cryptpilit project aims to provide a way that allows you to securely boot your system while ensuring the encryption and measurability of the entire operating system, as well as encryption and integrity protection for data at rest.

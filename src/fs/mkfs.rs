@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
@@ -6,7 +6,7 @@ use block_devs::BlckExt as _;
 use nix::unistd::SysconfVar;
 use ordermap::OrderSet;
 use tokio::{
-    fs::{File, OpenOptions},
+    fs::File,
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     process::Command,
 };
@@ -16,7 +16,7 @@ use crate::{
     fs::{block::dummy::DummyDevice, cmd::CheckCommandOutput as _},
 };
 
-use super::{block::blktrace::BlkTrace, shell::Shell};
+use super::block::blktrace::BlkTrace;
 
 #[async_trait]
 pub trait MakeFs {
@@ -32,7 +32,7 @@ impl MakeFs for NormalMakeFs {
         Command::new("/usr/lib/systemd/systemd-makefs")
             .arg(fs_type.to_systemd_makefs_fstype())
             .arg(device_path.as_ref())
-            .run_check_output()
+            .run()
             .await?;
         Ok(())
     }
@@ -54,46 +54,39 @@ pub struct IntegrityNoWipeMakeFs;
 #[async_trait]
 impl MakeFs for IntegrityNoWipeMakeFs {
     async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()> {
+        let device_path = device_path.as_ref();
         let is_empty_disk = {
-            let device_path: PathBuf = device_path.as_ref().to_owned();
-            tokio::task::spawn_blocking(move || -> Result<_> {
-                Shell(format!(
-                    r#"
-                export LC_ALL=C
-                set +o errexit
-                res=`file -E --brief --dereference --special-files {:?}`
-                status=$?
-                set -o errexit
+            Command::new("file")
+                .args(["-E", "--brief", "--dereference", "--special-files"])
+                .arg(&device_path)
+                .env("LC_ALL", "C")
+                .run_with_status_checker(|code, stdout, _| {
+                    let stdout = String::from_utf8_lossy(&stdout);
 
-                if [[ $res == *"Input/output error"* ]] || [[ $res == "data" ]] ; then
-                    # A uninitialized (empty) volume
-                    exit 2
-                elif [[ $status -ne 0 ]] ; then
-                    # Error happens
-                    echo $res >&2
-                    exit 1
-                else
-                    # Maybe some thing on the volume, so we should not touch it.
-                    exit 3
-                fi
-            "#,
-                    device_path,
-                ))
-                .run_with_status_checker(|code, _, _| match code {
-                    2 => Ok(true),
-                    3 => Ok(false),
-                    _ => {
-                        bail!("Bad exit code")
-                    }
+                    let is_empty_disk =
+                        if stdout.contains("Input/output error") || stdout.trim() == "data" {
+                            true
+                        } else if code != 0 {
+                            bail!("Bad exit code")
+                        } else {
+                            false
+                        };
+
+                    Ok(is_empty_disk)
                 })
-                .with_context(|| format!("Failed to detecting filesystem type",))
-            })
-            .await
-            .context("background task failed")??
+                .await
+                .context("Failed to detecting filesystem type")?
         };
 
         if is_empty_disk {
+            tracing::debug!(
+                "The device {device_path:?} is uninitialized (empty) and is ok to be initialized with mkfs"
+            );
             Self::mkfs_on_no_wipe_volume(device_path, fs_type).await?
+        } else {
+            tracing::debug!(
+                "The device {device_path:?} is not empty and maybe some data on it, so we won't touch it"
+            );
         }
 
         Ok(())
@@ -138,7 +131,7 @@ impl IntegrityNoWipeMakeFs {
             Command::new("blkid")
                 .arg("-p")
                 .arg(&dummy_device_path)
-                .run_check_output()
+                .run()
                 .await?;
         }
 
@@ -186,7 +179,7 @@ impl IntegrityNoWipeMakeFs {
         // Migrate the touched pages to the real device
         async {
             let mut dummy_device_file = File::open(&dummy_device_path).await?;
-            let mut real_device_file = OpenOptions::new()
+            let mut real_device_file = File::options()
                 .write(true)
                 .read(true)
                 // .custom_flags(libc::O_DIRECT)
@@ -218,10 +211,12 @@ impl IntegrityNoWipeMakeFs {
 #[cfg(test)]
 pub mod tests {
 
+    use std::path::PathBuf;
+
     use crate::{
         async_defer,
-        cli::CloseOptions,
-        cmd::{close::CloseCommand, Command as _},
+        cli::{CloseOptions, OpenOptions},
+        cmd::{close::CloseCommand, open::OpenCommand, Command as _},
         config::{
             encrypt::{EncryptConfig, KeyProviderConfig},
             volume::{ExtraConfig, VolumeConfig},
@@ -265,12 +260,18 @@ pub mod tests {
             }
         }
 
-        crate::cmd::open::open_for_specific_volume(&volume_config).await?;
+        OpenCommand {
+            open_options: OpenOptions {
+                volume: volume_config.volume.clone(),
+            },
+        }
+        .run()
+        .await?;
 
         Command::new("blkid")
             .arg("-p")
             .arg(PathBuf::from("/dev/mapper/").join(&volume_config.volume))
-            .run_check_output()
+            .run()
             .await?;
 
         Ok(())
