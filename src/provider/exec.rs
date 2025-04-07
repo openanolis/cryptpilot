@@ -1,9 +1,9 @@
-use anyhow::{Result, Context};
+use anyhow::Result;
 use documented::{Documented, DocumentedFields};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::{types::Passphrase, fs::cmd::CheckCommandOutput as _};
+use crate::{fs::cmd::CheckCommandOutput as _, types::Passphrase};
 
 use super::{IntoProvider, KeyProvider};
 
@@ -36,16 +36,9 @@ impl KeyProvider for ExecKeyProvider {
         let output = Command::new(&self.options.command)
             .args(&self.options.args)
             .run_check_output()
-            .await
-            .with_context(|| format!("Failed to execute command: {} args: {}", self.options.command, self.options.args.join(" ")))?;
+            .await?;
 
-        // Trim any trailing whitespace/newlines from the command output
-        let mut buffer = String::from_utf8(output)
-            .context("Failed to parse command output as UTF-8")?;
-        
-        buffer = buffer.trim_end().to_string();
-        
-        Ok(Passphrase::from(buffer.into_bytes()))
+        Ok(Passphrase::from(output))
     }
 
     fn volume_type(&self) -> super::VolumeType {
@@ -55,28 +48,41 @@ impl KeyProvider for ExecKeyProvider {
 
 #[cfg(test)]
 pub mod tests {
+    use crate::provider::exec::ExecConfig;
     use crate::provider::tests::{run_test_on_volume, test_volume_base};
     use crate::provider::{IntoProvider, KeyProvider};
-    use crate::provider::exec::ExecConfig;
 
     use anyhow::Result;
     use rstest::rstest;
     use rstest_reuse::apply;
-    use std::process::Stdio;
-    use tokio::process::Command as TokioCommand;
 
     #[tokio::test]
-    async fn test_get_key_from_exec() -> Result<()> {
+    async fn test_get_key_str_from_exec() -> Result<()> {
         let config = ExecConfig {
             command: "echo".into(),
-            args: vec!["test-key".into()],
+            args: vec!["-n".into(), "test-key".into()],
         };
-        
+
         let provider = config.into_provider();
         let key = provider.get_key().await?;
-        
+
         assert_eq!(key.as_bytes(), b"test-key");
-        
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_key_bin_from_exec() -> Result<()> {
+        let config = ExecConfig {
+            command: "printf".into(),
+            args: vec![r#"\x00\x01\x02\x03\n\t"#.into()],
+        };
+
+        let provider = config.into_provider();
+        let key = provider.get_key().await?;
+
+        assert_eq!(key.as_bytes(), [0x0, 0x1, 0x2, 0x3, b'\n', b'\t']);
+
         Ok(())
     }
 
@@ -86,27 +92,11 @@ pub mod tests {
             command: "non_existent_command".into(),
             args: vec![],
         };
-        
+
         let provider = config.into_provider();
         let result = provider.get_key().await;
-        
-        assert!(result.is_err());
-    }
 
-    #[tokio::test]
-    async fn test_trim_newlines() -> Result<()> {
-        let output = TokioCommand::new("printf")
-            .args(&["test-key-with-newlines\n\n"])
-            .stdout(Stdio::piped())
-            .output()
-            .await?;
-        
-        let mut buffer = String::from_utf8(output.stdout)?;
-        buffer = buffer.trim_end().to_string();
-        
-        assert_eq!(buffer, "test-key-with-newlines");
-        
-        Ok(())
+        assert!(result.is_err());
     }
 
     #[apply(test_volume_base)]
@@ -121,9 +111,9 @@ pub mod tests {
 
             [encrypt.exec]
             command = "echo"
-            args = ["test-passphrase"]
+            args = ["-n", "test-passphrase"]
             "#,
         ))
         .await
     }
-} 
+}
