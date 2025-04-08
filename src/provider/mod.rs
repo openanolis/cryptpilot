@@ -1,3 +1,5 @@
+#[cfg(feature = "provider-exec")]
+pub mod exec;
 #[cfg(feature = "provider-kbs")]
 pub mod kbs;
 #[cfg(feature = "provider-kms")]
@@ -8,8 +10,6 @@ pub mod oidc;
 pub mod otp;
 #[cfg(feature = "provider-tpm2")]
 pub mod tpm2;
-#[cfg(feature = "provider-exec")]
-pub mod exec;
 
 use anyhow::Result;
 
@@ -39,7 +39,7 @@ pub enum VolumeType {
 #[cfg(test)]
 pub mod tests {
 
-    use std::{future::Future, path::PathBuf};
+    use std::{future::Future, io::Error, path::PathBuf};
 
     use crate::{
         async_defer,
@@ -55,6 +55,7 @@ pub mod tests {
 
     use anyhow::{Context, Result};
     use block_devs::BlckExt as _;
+    use cgroups_rs::{cgroup_builder::CgroupBuilder, Cgroup, CgroupPid};
     use tokio::{
         fs::File,
         io::{AsyncReadExt, AsyncWriteExt},
@@ -187,25 +188,42 @@ pub mod tests {
                         .await
                         .get_block_device_size()?;
 
+                    let hier = cgroups_rs::hierarchies::auto();
+                    let cg: Cgroup =
+                        CgroupBuilder::new(&format!("cryptpilot-test-{}", rand::random::<u64>()))
+                            .memory()
+                            .memory_hard_limit(128 * 1024 * 1024 /* 128M */)
+                            .memory_swap_limit(-1 /* infinity */)
+                            .done()
+                            .build(hier)?;
+
+                    let cg_clone = cg.clone();
+                    async_defer! {async{
+                        async{
+                            cg_clone.delete()
+                        }
+                    }}
+
                     // Run stress-ng to consume swap memory
-                    Command::new("systemd-run")
-                        .arg("--wait")
-                        .arg("--property=MemoryMax=128M")
-                        .arg("--property=MemorySwapMax=infinity")
-                        .arg("--")
-                        .arg("stress-ng")
-                        .arg("--timeout")
-                        .arg("10")
-                        .arg("--vm")
-                        .arg("1")
-                        .arg("--vm-hang")
-                        .arg("0")
-                        .arg("--vm-method")
-                        .arg("zero-one")
-                        .arg("--vm-bytes")
-                        .arg(swap_device_size.to_string())
-                        .run()
-                        .await?;
+                    unsafe {
+                        Command::new("stress-ng")
+                            .arg("--timeout")
+                            .arg("10")
+                            .arg("--vm")
+                            .arg("1")
+                            .arg("--vm-hang")
+                            .arg("0")
+                            .arg("--vm-method")
+                            .arg("zero-one")
+                            .arg("--vm-bytes")
+                            .arg(swap_device_size.to_string())
+                            .pre_exec(move || {
+                                cg.add_task(CgroupPid::from(std::process::id() as u64))
+                                    .map_err(|e| Error::other(e))
+                            })
+                            .run()
+                    }
+                    .await?;
 
                     Ok(())
                 })

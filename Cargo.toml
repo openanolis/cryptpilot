@@ -56,6 +56,7 @@ shadow-rs = "0.35.2"
 ttrpc-codegen = {version = "0.4.2", optional = true}
 
 [dev-dependencies]
+cgroups-rs = "0.3.4"
 ctor = "=0.4.1"
 rstest = "0.25.0"
 rstest_reuse = "0.7.0"
@@ -63,6 +64,7 @@ two-rusty-forks = {version = "0.4.0", features = ["macro"]}
 
 [features]
 default = ["provider-kbs", "provider-kms", "provider-otp", "provider-tpm2", "provider-oidc", "provider-exec"]
+provider-exec = []
 provider-kbs = [
   "dep:ttrpc-codegen",
   "dep:ttrpc",
@@ -72,4 +74,3 @@ provider-kms = ["dep:kms"]
 provider-oidc = ["serde_json"]
 provider-otp = []
 provider-tpm2 = []
-provider-exec = []
