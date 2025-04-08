@@ -19,6 +19,14 @@ Requires: systemd
 Requires: veritysetup
 Requires: veritysetup
 Requires: device-mapper-libs
+# mkfs.vfat
+Requires: dosfstools
+# mkfs.xfs
+Requires: xfsprogs
+# mkfs.ext4
+Requires: e2fsprogs
+# swapon
+Requires: util-linux
 
 # If not installed, the kbs and kms-oidc keyprovider will not work.
 Recommends: confidential-data-hub
