@@ -32,8 +32,10 @@ wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_aliba
 Here we will encrypt the disk image file with a provided passphrase (GkdQgrmLx8LkGi2zVnGxdeT) and configs from `./config_dir/` directory. The second parameter is the output file name.
 
 ```sh
-./cryptpilot-convert.sh ./aliyun_3_x64_20G_nocloud_alibase_20250117.vhd ./aliyun_3_x64_20G_nocloud_alibase_20250117_cc.vhd ./config_dir/ GkdQgrmLx8LkGi2zVnGxdeT
+cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.vhd --out ./aliyun_3_x64_20G_nocloud_alibase_20250117_cc.vhd -c ./config_dir/ --passphrase GkdQgrmLx8LkGi2zVnGxdeT
 ```
+
+> Note: You can also use the --package parameter to install some packages/rpms to the converted disk.
 
 3. Upload the converted disk image file to Aliyun and boot from it.
 
@@ -44,8 +46,7 @@ For those who wish to convert a real system disk, you need to unbind the disk fr
 1. Convert the disk (assuming the disk is `/dev/nvme2n1`):
 
 ```sh
-./cryptpilot-convert.sh /dev/nvme2n1 ./config_dir/ GkdQgrmLx8LkGi2zVnGxdeT
-
+cryptpilot-convert --device /dev/nvme2n1 -c ./config_dir/ --passphrase GkdQgrmLx8LkGi2zVnGxdeT
 ```
 
 Now re-bind the disk to the original instance and boot from it.
