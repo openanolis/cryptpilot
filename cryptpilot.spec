@@ -1,13 +1,14 @@
 %global debug_package %{nil}
+%define release_num 1
 
 Name: cryptpilot
 Version: 0.2.2
-Release: 1%{?dist}
+Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
 License: ASL 2.0
 URL: www.alibaba.com
-Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}.tar.gz
+Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}-%{release_num}/cryptpilot-%{version}.tar.gz
 
 Source1: config
 
