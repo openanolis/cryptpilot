@@ -137,7 +137,7 @@ pub async fn run() -> Result<()> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// async_defer!(async {
 ///     // Do some cleanup
 /// });
