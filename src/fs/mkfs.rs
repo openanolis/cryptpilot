@@ -220,6 +220,7 @@ pub mod tests {
         config::{
             encrypt::{EncryptConfig, KeyProviderConfig},
             volume::{ExtraConfig, VolumeConfig},
+            ConfigBundle,
         },
         provider::otp::OtpConfig,
     };
@@ -243,6 +244,13 @@ pub mod tests {
                 key_provider: KeyProviderConfig::Otp(OtpConfig {}),
             },
         };
+
+        crate::config::source::set_config_source(ConfigBundle {
+            global: None,
+            fde: None,
+            volumes: vec![volume_config.clone()],
+        })
+        .await;
 
         // Close the volume if it is already opened
         CloseCommand {
