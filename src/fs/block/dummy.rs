@@ -49,7 +49,8 @@ impl DummyDevice {
         sparse_file.seek(std::io::SeekFrom::Start(device_size - 1))?;
         sparse_file.write_all(&[0])?;
 
-        let lc = LoopControl::open()?;
+        let lc = LoopControl::open()
+            .context("Failed to open loop control, maybe forgot to run 'sudo modprobe loop'?")?;
         // Retry to avoid conflicts and waiting for avaliable loop device
         let ld = RetryPolicy::exponential(Duration::from_millis(1))
             .with_max_retries(200)

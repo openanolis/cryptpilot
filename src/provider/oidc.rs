@@ -202,8 +202,9 @@ mod tests {
 
     #[apply(test_volume_base)]
     async fn test_volume(makefs: &str, integrity: bool) -> Result<()> {
-        run_test_on_volume(&format!(
-            r#"
+        run_test_on_volume(
+            &format!(
+                r#"
             volume = "<placeholder>"
             dev = "<placeholder>"
             auto_open = true
@@ -225,7 +226,9 @@ mod tests {
             role_arn = "acs:ram::113511544585:role/testoidc"
             region_id = "cn-beijing"
             "#,
-        ))
+            ),
+            false,
+        )
         .await
     }
 }

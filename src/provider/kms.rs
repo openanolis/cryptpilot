@@ -94,8 +94,9 @@ pub mod tests {
 
     #[apply(test_volume_base)]
     async fn test_volume(makefs: &str, integrity: bool) -> Result<()> {
-        run_test_on_volume(&format!(
-            r#"
+        run_test_on_volume(
+            &format!(
+                r#"
             volume = "<placeholder>"
             dev = "<placeholder>"
             auto_open = true
@@ -159,7 +160,9 @@ pub mod tests {
             -----END CERTIFICATE-----
             """
             "#,
-        ))
+            ),
+            false,
+        )
         .await
     }
 }

@@ -142,7 +142,7 @@ pub mod tests {
         .await
     }
 
-    pub async fn run_test_on_volume(config_str: &str) -> Result<()> {
+    pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> Result<()> {
         let mut volume_config: VolumeConfig = toml::from_str(config_str)?;
 
         // Random volume name
@@ -182,48 +182,52 @@ pub mod tests {
             Some(MakeFsType::Swap) => {
                 // Open and swapon
                 open_and_swapon(&volume_config, |volume_config| async move {
-                    let swap_device_size = File::open(volume_config.volume_path())
-                        .await?
-                        .into_std()
-                        .await
-                        .get_block_device_size()?;
+                    if use_external_suite {
+                        let swap_device_size = File::open(volume_config.volume_path())
+                            .await?
+                            .into_std()
+                            .await
+                            .get_block_device_size()?;
 
-                    let hier = cgroups_rs::hierarchies::auto();
-                    let cg: Cgroup =
-                        CgroupBuilder::new(&format!("cryptpilot-test-{}", rand::random::<u64>()))
-                            .memory()
-                            .memory_hard_limit(128 * 1024 * 1024 /* 128M */)
-                            .memory_swap_limit(-1 /* infinity */)
-                            .done()
-                            .build(hier)?;
+                        let hier = cgroups_rs::hierarchies::auto();
+                        let cg: Cgroup = CgroupBuilder::new(&format!(
+                            "cryptpilot-test-{}",
+                            rand::random::<u64>()
+                        ))
+                        .memory()
+                        .memory_hard_limit(128 * 1024 * 1024 /* 128M */)
+                        .memory_swap_limit(-1 /* infinity */)
+                        .done()
+                        .build(hier)?;
 
-                    let cg_clone = cg.clone();
-                    async_defer! {async{
-                        async{
-                            cg_clone.delete()
+                        let cg_clone = cg.clone();
+                        async_defer! {async{
+                            async{
+                                cg_clone.delete()
+                            }
+                        }}
+
+                        // Run stress-ng to consume swap memory
+                        unsafe {
+                            Command::new("stress-ng")
+                                .arg("--timeout")
+                                .arg("10")
+                                .arg("--vm")
+                                .arg("1")
+                                .arg("--vm-hang")
+                                .arg("0")
+                                .arg("--vm-method")
+                                .arg("zero-one")
+                                .arg("--vm-bytes")
+                                .arg(swap_device_size.to_string())
+                                .pre_exec(move || {
+                                    cg.add_task(CgroupPid::from(std::process::id() as u64))
+                                        .map_err(|e| Error::other(e))
+                                })
+                                .run()
                         }
-                    }}
-
-                    // Run stress-ng to consume swap memory
-                    unsafe {
-                        Command::new("stress-ng")
-                            .arg("--timeout")
-                            .arg("10")
-                            .arg("--vm")
-                            .arg("1")
-                            .arg("--vm-hang")
-                            .arg("0")
-                            .arg("--vm-method")
-                            .arg("zero-one")
-                            .arg("--vm-bytes")
-                            .arg(swap_device_size.to_string())
-                            .pre_exec(move || {
-                                cg.add_task(CgroupPid::from(std::process::id() as u64))
-                                    .map_err(|e| Error::other(e))
-                            })
-                            .run()
+                        .await?;
                     }
-                    .await?;
 
                     Ok(())
                 })
@@ -271,17 +275,19 @@ pub mod tests {
                 )
                 .await?;
 
-                // Open again and test with pjdfstest
-                open_and_mount(&volume_config, |_, mount_dir: PathBuf| async move {
-                    Command::new("prove")
-                        .arg("-rv")
-                        .arg("/tmp/pjdfstest/tests")
-                        .current_dir(mount_dir)
-                        .run()
-                        .await?;
-                    Ok(())
-                })
-                .await?;
+                if use_external_suite {
+                    // Open again and test with pjdfstest
+                    open_and_mount(&volume_config, |_, mount_dir: PathBuf| async move {
+                        Command::new("prove")
+                            .arg("-rv")
+                            .arg("/tmp/pjdfstest/tests")
+                            .current_dir(mount_dir)
+                            .run()
+                            .await?;
+                        Ok(())
+                    })
+                    .await?;
+                }
             }
             None => {
                 // Just Open it and do nothing
