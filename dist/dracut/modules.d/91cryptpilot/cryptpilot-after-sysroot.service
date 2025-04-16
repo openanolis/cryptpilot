@@ -17,4 +17,4 @@ StandardOutput=journal+console
 StandardError=journal+console
 
 [Install]
-RequiredBy=initrd-root-fs.target
+WantedBy=initrd-root-fs.target

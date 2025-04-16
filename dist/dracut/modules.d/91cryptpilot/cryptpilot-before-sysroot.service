@@ -16,4 +16,4 @@ StandardOutput=journal+console
 StandardError=journal+console
 
 [Install]
-RequiredBy=initrd-root-device.target
+WantedBy=initrd-root-device.target
