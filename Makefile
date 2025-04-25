@@ -50,6 +50,11 @@ git = "https://github.com/confidential-containers/guest-components.git"
 tag = "v0.10.0"
 replace-with = "vendored-sources"
 
+[source."git+https://github.com/stratis-storage/loopdev-3.git?tag=loopdev-3-v0.5.1"]
+git = "https://github.com/stratis-storage/loopdev-3.git"
+tag = "loopdev-3-v0.5.1"
+replace-with = "vendored-sources"
+
 [source.vendored-sources]
 directory = "vendor"
 endef
@@ -73,14 +78,27 @@ rpm-build: create-tarball
 	rpmbuild -ba ./cryptpilot.spec
 	@echo "RPM package is:" ~/rpmbuild/RPMS/*/cryptpilot-*
 
-.PHONE: rpm-build-in-docker
-rpm-build-in-docker:
+.PHONE: rpm-build-in-an8-docker
+rpm-build-in-an8-docker:
 	# copy sources
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
 	@echo "$$CARGO_CONFIG" > ~/rpmbuild/SOURCES/config
 
 	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:8 bash -x -c "yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec"
+
+.PHONE: rpm-build-in-an23-docker
+rpm-build-in-an23-docker:
+	# copy sources
+	mkdir -p ~/rpmbuild/SOURCES/
+	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
+	@echo "$$CARGO_CONFIG" > ~/rpmbuild/SOURCES/config
+
+	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:23 bash -x -c "yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec"
+
+
+.PHONE: rpm-build-in-docker
+rpm-build-in-docker: rpm-build-in-an8-docker
 
 .PHONE: rpm-install
 rpm-install: rpm-build
