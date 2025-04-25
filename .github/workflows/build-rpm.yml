@@ -67,7 +67,10 @@ jobs:
     needs: build
     container:
       image: ${{ matrix.distro }}
-      options: --privileged
+      volumes:
+        - /run/udev/control:/run/udev/control
+        - /dev:/dev
+      options: --privileged --ipc=host
     steps:
       - name: Update yum mirror
         run: |
