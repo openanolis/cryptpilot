@@ -123,4 +123,4 @@ install-test-depend:
 	[[ -e /tmp/pjdfstest/pjdfstest ]] || { cd /tmp/ && git clone https://github.com/pjd/pjdfstest.git && cd /tmp/pjdfstest && autoreconf -ifs && ./configure && make pjdfstest ; }
 
 	which prove || { yum install -y perl-Test-Harness ; }
-	which stress-ng || { yum install -y stress-ng ; }
+	which stress-ng || { yum install -y http://mirrors.openanolis.cn/anolis/8/AppStream/x86_64/os/Packages/stress-ng-0.17.08-2.0.1.an8.x86_64.rpm ; }
