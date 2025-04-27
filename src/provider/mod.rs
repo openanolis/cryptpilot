@@ -1,3 +1,5 @@
+pub mod helper;
+
 #[cfg(feature = "provider-exec")]
 pub mod exec;
 #[cfg(feature = "provider-kbs")]

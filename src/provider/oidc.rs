@@ -24,11 +24,9 @@ use serde_json::{json, Value};
 use strum::AsRefStr;
 use tokio::process::Command;
 
-use crate::{fs::cmd::CheckCommandOutput as _, types::Passphrase};
+use crate::{fs::cmd::CheckCommandOutput as _, provider::helper, types::Passphrase};
 
 use super::KeyProvider;
-
-const ONE_SHOT_CDH_BINARY_PATH: &str = "/usr/bin/confidential-data-hub";
 
 /// Enum of authorization service and KMS pair
 #[derive(
@@ -96,6 +94,14 @@ pub struct OidcKeyProvider {
 
 impl KeyProvider for OidcKeyProvider {
     async fn get_key(&self) -> Result<Passphrase> {
+        let cdh_bin_path = helper::find_cdh_binary_or_default();
+        #[cfg(not(test))]
+        if !std::path::Path::new(&cdh_bin_path).exists() {
+            anyhow::bail!(
+                "The confidential-data-hub binary not found, you may need to install it first."
+            )
+        }
+
         #[allow(unused_variables)]
         let get_oidc_token_res = tokio::process::Command::new(&self.options.command)
             .args(&self.options.args)
@@ -135,7 +141,7 @@ impl KeyProvider for OidcKeyProvider {
             .context("failed to write contents to sealed secret file")?;
 
         #[allow(unused_variables)]
-        let get_secret_res = Command::new(ONE_SHOT_CDH_BINARY_PATH)
+        let get_secret_res = Command::new(cdh_bin_path)
             .arg("unseal-secret")
             .arg("--secret-path")
             .arg(sealed_secret_file.path())

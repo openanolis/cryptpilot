@@ -6,18 +6,20 @@
 //! Please ensure the Oneshot CDH is included in [`ONE_SHOT_CDH_BINARY_PATH`].
 //! Also, Attestation Agent must be serving in ttrpc mode in the execution environment.
 use core::str;
-use std::{io::Write as _, path::Path};
+use std::io::Write as _;
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result};
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use documented::{Documented, DocumentedFields};
 use log::info;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::{fs::cmd::CheckCommandOutput as _, provider::KeyProvider, types::Passphrase};
-
-const ONE_SHOT_CDH_BINARY_PATH: &str = "/usr/bin/confidential-data-hub";
+use crate::{
+    fs::cmd::CheckCommandOutput as _,
+    provider::{helper, KeyProvider},
+    types::Passphrase,
+};
 
 /// Key Broker Service
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Documented, DocumentedFields)]
@@ -37,8 +39,12 @@ pub struct KbsKeyProvider {
 
 impl KeyProvider for KbsKeyProvider {
     async fn get_key(&self) -> Result<Passphrase> {
-        if !Path::new(ONE_SHOT_CDH_BINARY_PATH).exists() {
-            bail!("The confidential-data-hub binary not found, you may need to install it first.")
+        let cdh_bin_path = helper::find_cdh_binary_or_default();
+        #[cfg(not(test))]
+        if !std::path::Path::new(&cdh_bin_path).exists() {
+            anyhow::bail!(
+                "The confidential-data-hub binary not found, you may need to install it first."
+            )
         }
 
         let mut cdh_config = tempfile::Builder::new()
@@ -76,7 +82,7 @@ url = "{}"
             .context("Failed to write contents to oneshot CDH config")?;
 
         #[allow(unused_variables)]
-        let get_secret_res = Command::new(ONE_SHOT_CDH_BINARY_PATH)
+        let get_secret_res = Command::new(cdh_bin_path)
             .arg("-c")
             .arg(cdh_config.path())
             .arg("get-resource")
