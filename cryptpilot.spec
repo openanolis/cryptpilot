@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.2.2
+Version: 0.2.3
 Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -128,6 +128,14 @@ rm -rf %{buildroot}
 %{dracut_dst}initrd-wait-network-online.service
 
 %changelog
+* Mon Apr 28 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.3-1
+- Add new key provider plugin type "exec"
+- Fix wrong lvm part size in disk image converted by cryptpilot-convert
+- Change systemd service in initrd from RequiredBy to WantedBy for weaker dependency
+
+* Tue Apr 15 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.2-2
+- Update source code git hash from c2257859 to ea829279
+
 * Mon Mar 31 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.2-1
 - Fix TLS support in dracut initrd
 - Add RUST_LOG environment variable to control log level
