@@ -6,8 +6,8 @@ Version: 0.2.3
 Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
-License: ASL 2.0
-URL: www.alibaba.com
+License: Apache-2.0
+URL: https://www.alibaba.com
 Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}-%{release_num}/cryptpilot-%{version}.tar.gz
 
 Source1: config
@@ -17,7 +17,6 @@ Requires: lvm2
 Requires: cryptsetup
 Requires: coreutils
 Requires: systemd
-Requires: veritysetup
 Requires: veritysetup
 Requires: device-mapper-libs
 # mkfs.vfat
