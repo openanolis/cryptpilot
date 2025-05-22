@@ -26,7 +26,14 @@ build:
 create-tarball:
 	rm -rf /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/ && mkdir -p /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/
 
-	cargo vendor --manifest-path ./Cargo.toml --no-delete --versioned-dirs --respect-source-config /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/vendor/
+	mkdir -p /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/.cargo/
+	cargo vendor --locked --manifest-path ./Cargo.toml --no-delete --versioned-dirs --respect-source-config /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/vendor// | tee /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/.cargo/config.toml
+
+	sed -i 's;^.*directory = .*/vendor/.*$$;directory = "vendor";g' /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/.cargo/config.toml
+
+	# sanity check on cargo vendor
+	@grep "source.crates-io" /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/.cargo/config.toml >/dev/null || (echo "cargo vendor failed, please check /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/.cargo/config.toml"; exit 1)
+
 	# remove unused files
 	find /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/vendor/windows*/src/ ! -name 'lib.rs' -type f -exec rm -f {} +
 	find /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/vendor/winapi*/src/ ! -name 'lib.rs' -type f -exec rm -f {} +
@@ -41,25 +48,6 @@ create-tarball:
 
 	@echo "Tarball generated:" /tmp/cryptpilot-${VERSION}.tar.gz
 
-define CARGO_CONFIG
-[source.crates-io]
-replace-with = "vendored-sources"
-
-[source."git+https://github.com/confidential-containers/guest-components.git?tag=v0.10.0"]
-git = "https://github.com/confidential-containers/guest-components.git"
-tag = "v0.10.0"
-replace-with = "vendored-sources"
-
-[source."git+https://github.com/stratis-storage/loopdev-3.git?tag=loopdev-3-v0.5.1"]
-git = "https://github.com/stratis-storage/loopdev-3.git"
-tag = "loopdev-3-v0.5.1"
-replace-with = "vendored-sources"
-
-[source.vendored-sources]
-directory = "vendor"
-endef
-export CARGO_CONFIG
-
 .PHONE: rpm-build
 rpm-build: create-tarball
 	# setup build tree
@@ -68,7 +56,6 @@ rpm-build: create-tarball
 
 	# copy sources
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
-	@echo "$$CARGO_CONFIG" > ~/rpmbuild/SOURCES/config
 
 	# install build dependencies
 	which yum-builddep || { yum install -y yum-utils ; }
@@ -83,7 +70,6 @@ rpm-build-in-an8-docker:
 	# copy sources
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
-	@echo "$$CARGO_CONFIG" > ~/rpmbuild/SOURCES/config
 
 	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:8 bash -x -c "yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec"
 
@@ -92,7 +78,6 @@ rpm-build-in-an23-docker:
 	# copy sources
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
-	@echo "$$CARGO_CONFIG" > ~/rpmbuild/SOURCES/config
 
 	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:23 bash -x -c "yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec"
 
@@ -111,7 +96,6 @@ update-rpm-tree:
 	rm -f ../rpm-tree-cryptpilot/cryptpilot-*.tar.gz
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ../rpm-tree-cryptpilot/
 	cp ./cryptpilot.spec ../rpm-tree-cryptpilot/
-	@echo "$$CARGO_CONFIG" > ../rpm-tree-cryptpilot/config
 
 
 .PHONE: run-test

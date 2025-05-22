@@ -10,8 +10,6 @@ License: Apache-2.0
 URL: https://www.alibaba.com
 Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}-%{release_num}/cryptpilot-%{version}.tar.gz
 
-Source1: config
-
 Requires: dracut
 Requires: lvm2
 Requires: cryptsetup
@@ -52,19 +50,13 @@ A utility for protecting data at rest in confidential environment, with setting 
 
 %prep
 %setup -q -n %{name}-%{version}
-# Add cargo source replacement configs
-mkdir -p ~/.cargo/
-cp %{SOURCE1} ~/.cargo/config
 
 
 %build
-ln -s `realpath %{_builddir}/%{name}-%{version}/vendor` ~/vendor
 # Build cryptpilot
 pushd src/
 cargo install --path . --bin cryptpilot --root %{_builddir}/%{name}-%{version}/install/cryptpilot/ --locked --offline
 popd
-# Remove vendor
-rm -f ~/vendor
 
 
 %install
