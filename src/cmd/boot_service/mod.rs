@@ -532,7 +532,7 @@ async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Resul
     async {
         tokio::task::spawn_blocking(|| {
             liblmod::modprobe(
-                "dm_verity".to_string(),
+                "dm-verity".to_string(),
                 "".to_string(),
                 liblmod::Selection::Current,
             )
@@ -542,7 +542,7 @@ async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Resul
                 }
                 Ok(())
             })
-            .context("Failed to load kernel module 'dm_verity'")
+            .context("Failed to load kernel module 'dm-verity'")
         })
         .await??;
 
