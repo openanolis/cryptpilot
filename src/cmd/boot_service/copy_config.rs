@@ -18,7 +18,7 @@ use super::{detect_boot_part, initrd_state::InitrdStateConfigSource};
 
 const CRYPTPILOT_CONFIG_DIR_INITRD_UNTRUSTED: &'static str = "cryptpilot/config";
 
-pub async fn copy_config_to_initrd_state_if_not_exist() -> Result<()> {
+pub async fn copy_config_to_initrd_state_if_not_exist(extend_measurement: bool) -> Result<()> {
     if InitrdStateConfigSource::exist() {
         return Ok(());
     }
@@ -30,15 +30,18 @@ pub async fn copy_config_to_initrd_state_if_not_exist() -> Result<()> {
     let initrd_state = InitrdState { config };
     serialize_initrd_state(&initrd_state).await?;
 
-    // Extend config hash to runtime measurement
-    let measure = AutoDetectMeasure::new().await;
-    if let Err(e) = measure
-        .extend_measurement_hash(OPERATION_NAME_LOAD_CONFIG.into(), config_str)
-        .await
-        .context("Failed to extend cryptpilot config hash to runtime measurement")
-    {
-        warn!("{e:?}")
+    if extend_measurement {
+        // Extend config hash to runtime measurement
+        let measure = AutoDetectMeasure::new().await;
+        if let Err(e) = measure
+            .extend_measurement_hash(OPERATION_NAME_LOAD_CONFIG.into(), config_str)
+            .await
+            .context("Failed to extend cryptpilot config hash to runtime measurement")
+        {
+            warn!("{e:?}")
+        }
     }
+
     Ok(())
 }
 

@@ -1,9 +1,9 @@
 [Unit]
-Description=Cryptpilot Service (after /sysroot mount)
+Description=Cryptpilot FDE Service (after /sysroot mount)
 DefaultDependencies=no
 ConditionPathExists=/etc/initrd-release
-After=cryptpilot-before-sysroot.service
-Requisite=cryptpilot-before-sysroot.service
+After=cryptpilot-fde-before-sysroot.service
+Requisite=cryptpilot-fde-before-sysroot.service
 After=dracut-initqueue.service
 After=sysroot.mount
 Before=initrd-root-fs.target
@@ -12,9 +12,9 @@ Requires=sysroot.mount
 [Service]
 Type=oneshot
 RemainAfterExit=true
-ExecStart=/usr/bin/cryptpilot boot-service --stage initrd-after-sysroot
+ExecStart=/usr/bin/cryptpilot boot-service --stage initrd-fde-after-sysroot
 StandardOutput=journal+console
 StandardError=journal+console
 
 [Install]
-WantedBy=initrd-root-fs.target
+RequiredBy=initrd-root-fs.target

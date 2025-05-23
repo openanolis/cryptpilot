@@ -35,10 +35,12 @@ install() {
                 inst_simple $moddir/initrd-wait-network-online.service /usr/lib/systemd/system/initrd-wait-network-online.service
                 systemctl --root "$initdir" enable initrd-wait-network-online.service
         fi
-        inst_simple $moddir/cryptpilot-before-sysroot.service /usr/lib/systemd/system/cryptpilot-before-sysroot.service
-        inst_simple $moddir/cryptpilot-after-sysroot.service /usr/lib/systemd/system/cryptpilot-after-sysroot.service
-        systemctl --root "$initdir" enable cryptpilot-after-sysroot.service
-        systemctl --root "$initdir" enable cryptpilot-before-sysroot.service
+        inst_simple $moddir/cryptpilot-fde-before-sysroot.service /usr/lib/systemd/system/cryptpilot-fde-before-sysroot.service
+        inst_simple $moddir/cryptpilot-fde-after-sysroot.service /usr/lib/systemd/system/cryptpilot-fde-after-sysroot.service
+        inst_simple $moddir/cryptpilot-auto-open.service /usr/lib/systemd/system/cryptpilot-auto-open.service
+        systemctl --root "$initdir" enable cryptpilot-fde-after-sysroot.service
+        systemctl --root "$initdir" enable cryptpilot-fde-before-sysroot.service
+        systemctl --root "$initdir" enable cryptpilot-auto-open.service
 
         set +u
         set +e

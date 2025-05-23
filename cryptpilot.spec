@@ -71,8 +71,9 @@ install -d -p %{buildroot}%{dracut_dst}
 install -p -m 755 dist/dracut/modules.d/91cryptpilot/module-setup.sh %{buildroot}%{dracut_dst}
 install -p -m 755 dist/dracut/modules.d/91cryptpilot/initrd-trigger-network-online.sh %{buildroot}%{dracut_dst}
 install -p -m 755 dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.sh %{buildroot}%{dracut_dst}
-install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-before-sysroot.service %{buildroot}%{dracut_dst}
-install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-after-sysroot.service %{buildroot}%{dracut_dst}
+install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service %{buildroot}%{dracut_dst}
+install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service %{buildroot}%{dracut_dst}
+install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-auto-open.service %{buildroot}%{dracut_dst}
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{_prefix}/lib/systemd/system
 install -d -p %{buildroot}/etc/cryptpilot
@@ -114,8 +115,9 @@ rm -rf %{buildroot}
 %{dracut_dst}module-setup.sh
 %{dracut_dst}initrd-trigger-network-online.sh
 %{dracut_dst}initrd-wait-network-online.sh
-%{dracut_dst}cryptpilot-before-sysroot.service
-%{dracut_dst}cryptpilot-after-sysroot.service
+%{dracut_dst}cryptpilot-fde-before-sysroot.service
+%{dracut_dst}cryptpilot-fde-after-sysroot.service
+%{dracut_dst}cryptpilot-auto-open.service
 %{dracut_dst}initrd-wait-network-online.service
 
 %changelog

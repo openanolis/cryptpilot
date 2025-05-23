@@ -82,15 +82,17 @@ pub struct BootServiceCommand {
 impl super::Command for BootServiceCommand {
     async fn run(&self) -> Result<()> {
         match &self.boot_service_options.stage {
-            BootStage::InitrdBeforeSysroot => {
+            BootStage::InitrdFdeBeforeSysroot => {
                 setup_volumes_required_by_fde()
                     .await
                     .context("Failed to setup volumes required by FDE")?;
+            }
+            BootStage::InitrdVolumesAutoOpen => {
                 setup_user_provided_volumes(&self.boot_service_options)
                     .await
                     .context("Failed to setup volumes user provided automatically")?;
             }
-            BootStage::InitrdAfterSysroot => {
+            BootStage::InitrdFdeAfterSysroot => {
                 let measure = AutoDetectMeasure::new().await;
                 if let Err(e) = measure
                     .extend_measurement(OPERATION_NAME_INITRD_SWITCH_ROOT.into(), "{}".into()) // empty json object
@@ -575,7 +577,7 @@ async fn setup_user_provided_volumes(boot_service_options: &BootServiceOptions) 
     info!("Opening volumes according to volume configs");
     for volume_config in &volume_configs {
         match boot_service_options.stage {
-            BootStage::InitrdBeforeSysroot
+            BootStage::InitrdFdeBeforeSysroot
                 if volume_config.extra_config.auto_open != Some(true) =>
             {
                 info!(
@@ -584,8 +586,8 @@ async fn setup_user_provided_volumes(boot_service_options: &BootServiceOptions) 
                 );
                 continue;
             }
-            BootStage::InitrdAfterSysroot => {
-                unreachable!("This should never happen in initrd-after-sysroot stage")
+            BootStage::InitrdFdeAfterSysroot => {
+                unreachable!("This should never happen in initrd-fde-after-sysroot stage")
             }
             _ => { /* Accept */ }
         };

@@ -82,18 +82,22 @@ pub struct BootServiceOptions {
 
 #[derive(ValueEnum, Clone, Debug)]
 pub enum BootStage {
-    #[clap(name = "initrd-before-sysroot")]
-    InitrdBeforeSysroot,
+    #[clap(name = "initrd-fde-before-sysroot")]
+    InitrdFdeBeforeSysroot,
 
-    #[clap(name = "initrd-after-sysroot")]
-    InitrdAfterSysroot,
+    #[clap(name = "initrd-fde-after-sysroot")]
+    InitrdFdeAfterSysroot,
+
+    #[clap(name = "initrd-volumes-auto-open")]
+    InitrdVolumesAutoOpen,
 }
 
 impl Display for BootStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BootStage::InitrdBeforeSysroot => write!(f, "initrd-before-sysroot"),
-            BootStage::InitrdAfterSysroot => write!(f, "initrd-after-sysroot"),
+            BootStage::InitrdFdeBeforeSysroot => write!(f, "initrd-fde-before-sysroot"),
+            BootStage::InitrdFdeAfterSysroot => write!(f, "initrd-fde-after-sysroot"),
+            BootStage::InitrdVolumesAutoOpen => write!(f, "initrd-volumes-auto-open"),
         }
     }
 }

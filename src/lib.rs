@@ -10,7 +10,6 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser as _;
-use cli::{BootServiceOptions, BootStage};
 use cmd::{
     boot_service::{
         copy_config::copy_config_to_initrd_state_if_not_exist,
@@ -53,19 +52,9 @@ pub async fn run() -> Result<()> {
 
     // Handle config dir
     match args.command {
-        cli::Command::BootService(BootServiceOptions {
-            stage: BootStage::InitrdBeforeSysroot,
-        }) => {
+        cli::Command::BootService(_) => {
             // We should load the configs from unsafe space and save them to initrd state for using later.
-            copy_config_to_initrd_state_if_not_exist().await?;
-            config::source::set_config_source(CachedConfigSource::new(
-                InitrdStateConfigSource::new(),
-            ))
-            .await;
-        }
-        cli::Command::BootService(BootServiceOptions {
-            stage: BootStage::InitrdAfterSysroot,
-        }) => {
+            copy_config_to_initrd_state_if_not_exist(true).await?;
             config::source::set_config_source(CachedConfigSource::new(
                 InitrdStateConfigSource::new(),
             ))
@@ -82,8 +71,8 @@ pub async fn run() -> Result<()> {
                 ))
                 .await;
             } else if Path::new("/etc/initrd-release").exists() {
-                // If we are in initrd, copy config to initrd state and load it from there.
-                copy_config_to_initrd_state_if_not_exist().await?;
+                // If we are in initrd, copy config to initrd state and load it from there, so we can run cryptpilot commands manually in initrd in case we need to operate in emergency shell.
+                copy_config_to_initrd_state_if_not_exist(false).await?;
                 config::source::set_config_source(CachedConfigSource::new(
                     InitrdStateConfigSource::new(),
                 ))
