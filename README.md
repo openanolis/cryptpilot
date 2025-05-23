@@ -17,7 +17,7 @@ After installing, you can edit the configuration files under `/etc/cryptpilot/`.
 
 In this example, we will show how to encrypt a bootable OS. The OS can be on a OS disk image file or a real system disk. 
 
-### Convert a OS disk image file
+### Encrypt a OS disk image file
 
 We will use the Alinux3 disk image file from [here](https://mirrors.aliyun.com/alinux/3/image/).
 
@@ -27,9 +27,20 @@ We will use the Alinux3 disk image file from [here](https://mirrors.aliyun.com/a
 wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2
 ```
 
-2. Convert the disk image file:
+2. Encrypt the disk image file:
 
-Here we will encrypt the disk image file with a provided passphrase (GkdQgrmLx8LkGi2zVnGxdeT) and configs from `./config_dir/` directory. The second parameter is the output file name.
+Here we will encrypt the disk image file with a provided passphrase (GkdQgrmLx8LkGi2zVnGxdeT) and configs from `./config_dir/` directory. The encrypted disk file is specified by `--out` parameter.
+
+Remenber that you have to prepare the configs directory before you run the command. The configs directory is a normal cryptpilot config dir (just like the `/etc/cryptpilot/`),  and should contains at least one `fde.toml` config file.
+
+```sh
+./config_dir
+└─── fde.toml
+```
+
+The details of the configuration can be found in [docs/configuration.md](docs/configuration.md).
+
+After that you can start the encryption with:
 
 ```sh
 cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2 --out ./encrypted.qcow2 -c ./config_dir/ --passphrase GkdQgrmLx8LkGi2zVnGxdeT
@@ -46,6 +57,7 @@ You can launch a virtual machine with the converted disk image file and check th
 
 ```sh
 yum install -y qemu-kvm
+wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/seed.img
 
 /usr/libexec/qemu-kvm \
     -m 4096M \
@@ -54,15 +66,18 @@ yum install -y qemu-kvm
     -drive file=./encrypted.qcow2,format=qcow2,if=virtio,id=hd0,readonly=off \
     -drive file=./seed.img,if=virtio,format=raw
 ```
+
+> Note: Accroding to [this page](https://www.alibabacloud.com/help/zh/alinux/getting-started/use-alibaba-cloud-linux-3-images-in-an-on-premises-environment), the login username of this is `alinux`, and password is `aliyun`.
+
 After you finished your tests, you can use Ctrl-A C to get to the qemu console, and enter 'quit' to exit qemu.
 
-4. Upload the converted disk image file to Aliyun and boot from it.
+4. Upload the encrypted disk image file to Aliyun and boot from it.
 
-### Convert a real system disk
+### Encrypt a real system disk
 
-For those who wish to convert a real system disk, you need to unbind the disk from the original instance and bind it to another instance (DO NOT convert the active disk where you are booting from).
+For those who wish to encrypt a real system disk, you need to unbind the disk from the original instance and bind it to another instance (DO NOT encrypt the active disk where you are booting from).
 
-1. Convert the disk (assuming the disk is `/dev/nvme2n1`):
+1. Encrypt the disk (assuming the disk is `/dev/nvme2n1`):
 
 ```sh
 cryptpilot-convert --device /dev/nvme2n1 -c ./config_dir/ --passphrase GkdQgrmLx8LkGi2zVnGxdeT
