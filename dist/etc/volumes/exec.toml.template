@@ -9,9 +9,9 @@ makefs = "ext4"
 # Whether or not to enable support for data integrity. The default value is false. Note that integrity cannot prevent a replay (rollback) attack.
 integrity = true
 
-# Execute Command Key Provider configuration
+# Execute Command Key Provider (reads key from command output)
 [encrypt.exec]
 # Command to execute for retrieving the key
 command = "echo"
 # Arguments to pass to the command (optional)
-args = ["passphrase"] 
+args = ["passphrase"]

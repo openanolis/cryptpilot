@@ -71,7 +71,7 @@ pub mod tests {
 
     use crate::{
         config::encrypt::KeyProviderConfig,
-        provider::oidc::{Kms, OidcConfig},
+        provider::oidc::{AliyunKmsConfig, Kms, OidcConfig},
     };
 
     #[allow(unused_imports)]
@@ -279,11 +279,11 @@ nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
             },
             encrypt: EncryptConfig {
                 key_provider: KeyProviderConfig::Oidc(OidcConfig {
-                    kms: Kms::Aliyun {
+                    kms: Kms::Aliyun(AliyunKmsConfig {
                         oidc_provider_arn: "acs:ram::113511544585:oidc-provider/TestOidcIdp".into(),
                         role_arn: "acs:ram::113511544585:role/testoidc".into(),
                         region_id: "cn-beijing".into(),
-                    },
+                    }),
                     command: "some-cli".into(),
                     args: vec!["-c".into(), "/etc/config.json".into(), "get-token".into()],
                     key_id: "disk-decryption-key".into(),

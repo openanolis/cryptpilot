@@ -5,6 +5,8 @@ use crate::config::ConfigBundle;
 
 use super::ConfigSource;
 
+pub const CLOUD_INIT_CONFIG_BUNDLE_HEADER: &str = "#cryptpilot-config";
+
 /// This is a config source that loads config from aliyun cloud-init user data. It is only supported in aliyun ECS instance, with IMDS enabled.
 /// User is expected to put the config bundle in the user data of the instance, before the instance boots.
 ///
@@ -17,17 +19,8 @@ impl CloudInitConfigSource {
     pub fn new() -> Self {
         Self {}
     }
-}
 
-pub const CLOUD_INIT_CONFIG_BUNDLE_HEADER: &str = "#cryptpilot-config";
-
-#[async_trait]
-impl ConfigSource for CloudInitConfigSource {
-    fn source_debug_string(&self) -> String {
-        "aliyun cloud-init user data".into()
-    }
-
-    async fn get_config(&self) -> Result<ConfigBundle> {
+    async fn get_cloudinit_user_data() -> Result<String> {
         // Get cloud-init user data from IMDS: https://help.aliyun.com/zh/ecs/user-guide/view-instance-metadata
         let token = reqwest::Client::new()
             .put("http://100.100.100.200/latest/api/token")
@@ -47,6 +40,10 @@ impl ConfigSource for CloudInitConfigSource {
             .text()
             .await?;
 
+        Ok(user_data)
+    }
+
+    fn parse_from_user_data(user_data: &str) -> Result<ConfigBundle> {
         if user_data.trim().is_empty() {
             bail!("The cloud-init user data is empty")
         }
@@ -61,5 +58,51 @@ impl ConfigSource for CloudInitConfigSource {
             toml::from_str(&user_data).context("Failed to parse cloud-init user data")?;
 
         Ok(config_bundle)
+    }
+}
+
+#[async_trait]
+impl ConfigSource for CloudInitConfigSource {
+    fn source_debug_string(&self) -> String {
+        "aliyun cloud-init user data".into()
+    }
+
+    async fn get_config(&self) -> Result<ConfigBundle> {
+        let user_data = Self::get_cloudinit_user_data().await?;
+        Self::parse_from_user_data(&user_data)
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+
+    #[allow(unused_imports)]
+    use super::*;
+    use anyhow::Result;
+
+    #[test]
+    fn test_deserialize_from_initrd() -> Result<()> {
+        CloudInitConfigSource::parse_from_user_data(
+            r#"#cryptpilot-config
+
+[global.boot]
+verbose = true
+
+[fde.rootfs]
+rw_overlay = "disk"
+
+[fde.rootfs.encrypt.exec]
+command = "echo"
+args = ["-n", "AAAaaawewe222"]
+
+[fde.data]
+integrity = true
+
+[fde.data.encrypt.exec]
+command = "echo"
+args = ["-n", "AAAaaawewe222"]"#,
+        )?;
+
+        Ok(())
     }
 }

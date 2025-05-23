@@ -80,9 +80,10 @@ install -d -p %{buildroot}/etc/cryptpilot
 install -p -m 600 dist/etc/global.toml.template %{buildroot}/etc/cryptpilot/global.toml.template
 install -p -m 600 dist/etc/fde.toml.template %{buildroot}/etc/cryptpilot/fde.toml.template
 install -d -p %{buildroot}/etc/cryptpilot/volumes
-install -p -m 600 dist/etc/volumes/kms.toml.template %{buildroot}/etc/cryptpilot/volumes/kms.toml.template
 install -p -m 600 dist/etc/volumes/otp.toml.template %{buildroot}/etc/cryptpilot/volumes/otp.toml.template
 install -p -m 600 dist/etc/volumes/kbs.toml.template %{buildroot}/etc/cryptpilot/volumes/kbs.toml.template
+install -p -m 600 dist/etc/volumes/kms.toml.template %{buildroot}/etc/cryptpilot/volumes/kms.toml.template
+install -p -m 600 dist/etc/volumes/oidc.toml.template %{buildroot}/etc/cryptpilot/volumes/oidc.toml.template
 install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
 popd
 
@@ -108,8 +109,9 @@ rm -rf %{buildroot}
 /etc/cryptpilot/fde.toml.template
 %dir /etc/cryptpilot/volumes
 /etc/cryptpilot/volumes/otp.toml.template
-/etc/cryptpilot/volumes/kms.toml.template
 /etc/cryptpilot/volumes/kbs.toml.template
+/etc/cryptpilot/volumes/kms.toml.template
+/etc/cryptpilot/volumes/oidc.toml.template
 /etc/cryptpilot/volumes/exec.toml.template
 %dir %{dracut_dst}
 %{dracut_dst}module-setup.sh

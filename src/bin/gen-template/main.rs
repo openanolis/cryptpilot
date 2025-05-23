@@ -8,12 +8,12 @@ use cryptpilot::{
         volume::{ExtraConfig, MakeFsType, VolumeConfig},
     },
     provider::{
+        exec::ExecConfig,
         kbs::KbsConfig,
         kms::KmsConfig,
-        oidc::{Kms, OidcConfig},
+        oidc::{AliyunKmsConfig, Kms, OidcConfig},
         otp::OtpConfig,
         tpm2::Tpm2Config,
-        exec::ExecConfig,
     },
 };
 use documented::{Documented, DocumentedFields};
@@ -49,13 +49,61 @@ pub enum VolumeType {
     Otp,
     Kms,
     Kbs,
-    ZeroTrust,
+    Oidc,
     Exec,
 }
 
 impl VolumeType {
     pub fn get_volume_config(self) -> VolumeConfig {
-        let mut volume_config = VolumeConfig {
+        let key_provider = match self {
+            VolumeType::Otp => {
+                // Do nothing
+                KeyProviderConfig::Otp(OtpConfig {})
+            }
+            VolumeType::Kms => KeyProviderConfig::Kms(KmsConfig {
+                secret_name: "XXXXXXXXX".into(),
+                client_key: r#"{
+  "KeyId": "KAAP.XXXXXXXXX",
+  "PrivateKeyData": "XXXXXXXXX"
+}"#
+                .into(),
+                client_key_password: "XXXXXXXXX".into(),
+                kms_instance_id: "kst-XXXXXXXXX".into(),
+                kms_cert_pem: r#"-----BEGIN CERTIFICATE-----
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+-----END CERTIFICATE-----
+"#
+                .into(),
+            }),
+            VolumeType::Kbs => KeyProviderConfig::Kbs(KbsConfig {
+                kbs_url: "https://1.2.3.4:8080".into(),
+                key_uri: "kbs:///default/mykey/volume_data0".into(),
+                kbs_root_cert: Some(
+                    r#"-----BEGIN CERTIFICATE-----
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+-----END CERTIFICATE-----
+"#
+                    .into(),
+                ),
+            }),
+            VolumeType::Oidc => KeyProviderConfig::Oidc(OidcConfig {
+                kms: Kms::Aliyun(AliyunKmsConfig {
+                    oidc_provider_arn: "acs:ram::113511544585:oidc-provider/TestOidcIdp".into(),
+                    role_arn: "acs:ram::113511544585:role/testoidc".into(),
+                    region_id: "cn-beijing".into(),
+                }),
+                command: "some-cli".into(),
+                args: vec!["-c".into(), "/etc/config.json".into(), "get-token".into()],
+                key_id: "disk-decryption-key".into(),
+            }),
+            VolumeType::Exec => KeyProviderConfig::Exec(ExecConfig {
+                command: "echo".into(),
+                args: vec!["passphrase".into()],
+            }),
+        };
+        VolumeConfig {
             dev: "/dev/nvme1n1p1".into(),
             volume: "data0".into(),
             extra_config: ExtraConfig {
@@ -63,69 +111,12 @@ impl VolumeType {
                 makefs: Some(MakeFsType::Ext4),
                 integrity: Some(true),
             },
-            encrypt: EncryptConfig {
-                key_provider: KeyProviderConfig::Otp(OtpConfig {}),
-            },
-        };
-
-        match self {
-            VolumeType::Otp => { // Do nothing
-            }
-            VolumeType::Kms => {
-                volume_config.encrypt.key_provider = KeyProviderConfig::Kms(KmsConfig {
-                    secret_name: "XXXXXXXXX".into(),
-                    client_key: r#"{
-  "KeyId": "KAAP.XXXXXXXXX",
-  "PrivateKeyData": "XXXXXXXXX"
-}"#
-                    .into(),
-                    client_key_password: "XXXXXXXXX".into(),
-                    kms_instance_id: "kst-XXXXXXXXX".into(),
-                    kms_cert_pem: r#"-----BEGIN CERTIFICATE-----
-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
------END CERTIFICATE-----
-"#
-                    .into(),
-                });
-            }
-            VolumeType::Kbs => {
-                volume_config.encrypt.key_provider = KeyProviderConfig::Kbs(KbsConfig {
-                    kbs_url: "https://1.2.3.4:8080".into(),
-                    key_uri: "kbs:///default/mykey/volume_data0".into(),
-                    kbs_root_cert: Some(
-                        r#"-----BEGIN CERTIFICATE-----
-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
------END CERTIFICATE-----
-"#
-                        .into(),
-                    ),
-                });
-            }
-            VolumeType::ZeroTrust => {
-                volume_config.encrypt.key_provider = KeyProviderConfig::Oidc(OidcConfig {
-                    kms: Kms::Aliyun {
-                        oidc_provider_arn: "acs:ram::113511544585:oidc-provider/TestOidcIdp".into(),
-                        role_arn: "acs:ram::113511544585:role/testoidc".into(),
-                        region_id: "cn-beijing".into(),
-                    },
-                    command: "some-cli".into(),
-                    args: vec!["-c".into(), "/etc/config.json".into(), "get-token".into()],
-                    key_id: "disk-decryption-key".into(),
-                })
-            }
-            VolumeType::Exec => {
-                volume_config.encrypt.key_provider = KeyProviderConfig::Exec(ExecConfig {
-                    command: "echo".into(),
-                    args: vec!["passphrase".into()],
-                })
-            }
-        };
-        volume_config
+            encrypt: EncryptConfig { key_provider },
+        }
     }
 }
 
+// TODO: refactor this to macro and add to the place where those struct is defined.
 trait AsAnnotatedToml {
     fn as_annotated_toml(&self) -> Result<DocumentMut>;
 }
@@ -158,7 +149,7 @@ impl AsAnnotatedToml for VolumeConfig {
                 };
                 append_docs_as_toml_comments(provider_config.decor_mut(), OtpConfig::DOCS);
                 annotate_toml_table::<OtpConfig>(provider_config)
-                    .context("Failed to annotate `OtpOptions`")?;
+                    .context("Failed to annotate `OtpConfig`")?;
             }
             KeyProviderConfig::Kms(_) => {
                 let Some(provider_config) = key_provider.get_mut("kms") else {
@@ -169,7 +160,7 @@ impl AsAnnotatedToml for VolumeConfig {
                 };
                 append_docs_as_toml_comments(provider_config.decor_mut(), KmsConfig::DOCS);
                 annotate_toml_table::<KmsConfig>(provider_config)
-                    .context("Failed to annotate `KmsOptions`")?;
+                    .context("Failed to annotate `KmsConfig`")?;
             }
             KeyProviderConfig::Kbs(_) => {
                 let Some(provider_config) = key_provider.get_mut("kbs") else {
@@ -180,7 +171,7 @@ impl AsAnnotatedToml for VolumeConfig {
                 };
                 append_docs_as_toml_comments(provider_config.decor_mut(), KbsConfig::DOCS);
                 annotate_toml_table::<KbsConfig>(provider_config)
-                    .context("Failed to annotate `KbsOptions`")?;
+                    .context("Failed to annotate `KbsConfig`")?;
             }
             KeyProviderConfig::Tpm2(_) => {
                 let Some(provider_config) = key_provider.get_mut("tpm") else {
@@ -191,7 +182,7 @@ impl AsAnnotatedToml for VolumeConfig {
                 };
                 append_docs_as_toml_comments(provider_config.decor_mut(), Tpm2Config::DOCS);
                 annotate_toml_table::<Tpm2Config>(provider_config)
-                    .context("Failed to annotate `Tpm2Options`")?;
+                    .context("Failed to annotate `Tpm2Config`")?;
             }
             KeyProviderConfig::Oidc(_) => {
                 let Some(provider_config) = key_provider.get_mut("oidc") else {
@@ -202,7 +193,18 @@ impl AsAnnotatedToml for VolumeConfig {
                 };
                 append_docs_as_toml_comments(provider_config.decor_mut(), OidcConfig::DOCS);
                 annotate_toml_table::<OidcConfig>(provider_config)
-                    .context("Failed to annotate `ZeroTrustOptions`")?;
+                    .context("Failed to annotate `OidcConfig`")?;
+
+                let Some(kms_config) = provider_config.get_mut("kms") else {
+                    return Ok(toml);
+                };
+                let Some(kms_config) = kms_config.as_table_mut() else {
+                    return Ok(toml);
+                };
+
+                append_docs_as_toml_comments(kms_config.decor_mut(), AliyunKmsConfig::DOCS);
+                annotate_toml_table::<AliyunKmsConfig>(kms_config)
+                    .context("Failed to annotate `AliyunKmsConfig`")?;
             }
             KeyProviderConfig::Exec(_) => {
                 let Some(provider_config) = key_provider.get_mut("exec") else {
@@ -213,7 +215,7 @@ impl AsAnnotatedToml for VolumeConfig {
                 };
                 append_docs_as_toml_comments(provider_config.decor_mut(), ExecConfig::DOCS);
                 annotate_toml_table::<ExecConfig>(provider_config)
-                    .context("Failed to annotate `ExecOptions`")?;
+                    .context("Failed to annotate `ExecConfig`")?;
             }
         }
 

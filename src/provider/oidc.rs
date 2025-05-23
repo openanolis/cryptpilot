@@ -37,16 +37,20 @@ pub enum Kms {
     /// Aliyun RAM + KMS
     #[serde(rename = "aliyun")]
     #[strum(serialize = "aliyun")]
-    Aliyun {
-        /// The ARN of the OIDC provider. This should be provided by official documents of Zero-Trust
-        oidc_provider_arn: String,
+    Aliyun(AliyunKmsConfig),
+}
 
-        /// The ARN of the RAM Role. This should be provided by official documents of Zero-Trust
-        role_arn: String,
+/// The detailed OIDC configs for Aliyun KMS
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Documented, DocumentedFields)]
+pub struct AliyunKmsConfig {
+    /// The ARN of the OIDC provider. This should be provided by official documents of Zero-Trust
+    pub oidc_provider_arn: String,
 
-        /// Region Id of the ECS/KMS.
-        region_id: String,
-    },
+    /// The ARN of the RAM Role. This should be provided by official documents of Zero-Trust
+    pub role_arn: String,
+
+    /// Region Id of the ECS/KMS.
+    pub region_id: String,
 }
 
 impl Kms {
@@ -56,11 +60,11 @@ impl Kms {
     /// of the settings.
     fn export_provider_settings(&self, oidc_token: String) -> Value {
         match self {
-            Kms::Aliyun {
+            Kms::Aliyun(AliyunKmsConfig {
                 oidc_provider_arn,
                 role_arn,
                 region_id,
-            } => json!({
+            }) => json!({
                 "oidc_provider_arn": oidc_provider_arn,
                 "role_arn": role_arn,
                 "region_id": region_id,
@@ -177,6 +181,7 @@ mod tests {
     use core::str;
 
     use crate::config::encrypt::KeyProviderConfig;
+    use crate::provider::oidc::AliyunKmsConfig;
     use crate::provider::tests::{run_test_on_volume, test_volume_base};
     use crate::provider::{
         oidc::{Kms, OidcConfig},
@@ -194,11 +199,11 @@ mod tests {
             command: "test/kbs/idtoken-fetcher".into(),
             args: vec![],
             key_id: "model-decryption-key".into(),
-            kms: Kms::Aliyun {
+            kms: Kms::Aliyun(AliyunKmsConfig {
                 oidc_provider_arn: "acs:ram::1242424***r/cai-ecs-oidc".into(),
                 role_arn: "acs:ram::124242445***ole/cai-ecs-oidc-test".into(),
                 region_id: "cn-shanghai".into(),
-            },
+            }),
         };
         let provider = KeyProviderConfig::Oidc(config).into_provider();
         let key = provider.get_key().await.unwrap();

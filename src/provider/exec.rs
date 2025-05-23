@@ -14,7 +14,7 @@ pub struct ExecConfig {
     /// Command to execute for retrieving the key
     pub command: String,
 
-    /// Arguments to pass to the command
+    /// Arguments to pass to the command (optional)
     #[serde(default)]
     pub args: Vec<String>,
 }
