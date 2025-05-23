@@ -24,7 +24,7 @@ We will use the Alinux3 disk image file from [here](https://mirrors.aliyun.com/a
 1. Download the Alinux3 disk image file (KVM x86_64 version with Microsoft Virtual PC format):
 
 ```sh
-wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20250117.vhd
+wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2
 ```
 
 2. Convert the disk image file:
@@ -32,12 +32,31 @@ wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_aliba
 Here we will encrypt the disk image file with a provided passphrase (GkdQgrmLx8LkGi2zVnGxdeT) and configs from `./config_dir/` directory. The second parameter is the output file name.
 
 ```sh
-cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.vhd --out ./aliyun_3_x64_20G_nocloud_alibase_20250117_cc.vhd -c ./config_dir/ --passphrase GkdQgrmLx8LkGi2zVnGxdeT
+cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2 --out ./encrypted.qcow2 -c ./config_dir/ --passphrase GkdQgrmLx8LkGi2zVnGxdeT
 ```
 
-> Note: You can also use the --package parameter to install some packages/rpms to the converted disk.
+> Note: You can also use the --package parameter to install some packages/rpms to the disk, before the encryption.
 
-3. Upload the converted disk image file to Aliyun and boot from it.
+
+3. (optional) Test the converted disk image file:
+
+You can launch a virtual machine with the converted disk image file and check that it works.
+
+> Note: If you are using a `.vhd` file, you have to convert it to a `.qcow2` file first, before you launch it with qemu.
+
+```sh
+yum install -y qemu-kvm
+
+/usr/libexec/qemu-kvm \
+    -m 4096M \
+    -smp 4 \
+    -nographic \
+    -drive file=./encrypted.qcow2,format=qcow2,if=virtio,id=hd0,readonly=off \
+    -drive file=./seed.img,if=virtio,format=raw
+```
+After you finished your tests, you can use Ctrl-A C to get to the qemu console, and enter 'quit' to exit qemu.
+
+4. Upload the converted disk image file to Aliyun and boot from it.
 
 ### Convert a real system disk
 
