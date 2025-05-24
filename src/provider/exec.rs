@@ -23,7 +23,12 @@ pub struct ExecKeyProvider {
     pub options: ExecConfig,
 }
 
+#[async_trait::async_trait]
 impl KeyProvider for ExecKeyProvider {
+    fn debug_name(&self) -> String {
+        format!("External Command ({})", self.options.command)
+    }
+
     async fn get_key(&self) -> Result<Passphrase> {
         let output = Command::new(&self.options.command)
             .args(&self.options.args)
@@ -40,7 +45,6 @@ impl KeyProvider for ExecKeyProvider {
 
 #[cfg(test)]
 pub mod tests {
-    use crate::config::encrypt::KeyProviderEnum;
     use crate::provider::exec::{ExecConfig, ExecKeyProvider};
     use crate::provider::tests::{run_test_on_volume, test_volume_base};
     use crate::provider::KeyProvider;
@@ -56,7 +60,7 @@ pub mod tests {
             args: vec!["-n".into(), "test-key".into()],
         };
 
-        let provider = KeyProviderEnum::Exec(ExecKeyProvider { options: config });
+        let provider = ExecKeyProvider { options: config };
         let key = provider.get_key().await?;
 
         assert_eq!(key.as_bytes(), b"test-key");
@@ -71,7 +75,7 @@ pub mod tests {
             args: vec![r#"\x00\x01\x02\x03\n\t"#.into()],
         };
 
-        let provider = KeyProviderEnum::Exec(ExecKeyProvider { options: config });
+        let provider = ExecKeyProvider { options: config };
         let key = provider.get_key().await?;
 
         assert_eq!(key.as_bytes(), [0x0, 0x1, 0x2, 0x3, b'\n', b'\t']);
@@ -86,7 +90,7 @@ pub mod tests {
             args: vec![],
         };
 
-        let provider = KeyProviderEnum::Exec(ExecKeyProvider { options: config });
+        let provider = ExecKeyProvider { options: config };
         let result = provider.get_key().await;
 
         assert!(result.is_err());

@@ -16,7 +16,12 @@ pub struct OtpKeyProvider {
     pub options: OtpConfig,
 }
 
+#[async_trait::async_trait]
 impl KeyProvider for OtpKeyProvider {
+    fn debug_name(&self) -> String {
+        format!("Secure Random One-Time Password")
+    }
+
     async fn get_key(&self) -> Result<Passphrase> {
         Ok(Passphrase::random())
     }

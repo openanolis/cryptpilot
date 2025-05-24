@@ -17,8 +17,10 @@ use anyhow::Result;
 
 use crate::types::Passphrase;
 
+#[async_trait::async_trait]
 pub trait KeyProvider {
-    #[allow(async_fn_in_trait)]
+    fn debug_name(&self) -> String;
+
     async fn get_key(&self) -> Result<Passphrase>;
 
     fn volume_type(&self) -> VolumeType;

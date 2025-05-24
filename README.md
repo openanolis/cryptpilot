@@ -17,6 +17,47 @@ After installing, you can edit the configuration files under `/etc/cryptpilot/`.
 
 In this example, we will show how to encrypt a bootable OS. The OS can be on a OS disk image file or a real system disk. 
 
+Remenber that you have to prepare the configs directory before you start. The configs directory is a normal cryptpilot config dir (the struct is just like the global config dir `/etc/cryptpilot/`), and should contains at least one `fde.toml` config file. The full details of the configuration can be found in [docs/configuration.md](docs/configuration.md) and you may would like to read it first.
+
+Here we will create a `config_dir` with a single `fde.toml` config file. And for demo purposes, we will use `exec` key provider, which returns a hardcoded passphrase `AAAaaawewe222` for both `rootfs` and `data` volume:
+
+> [!IMPORTANT]
+> The `exec` key provider below is only for demo purposes, and you should choose another key provider (e.g. `kbs` or `kms`) in production.
+
+```sh
+mkdir -p ./config_dir
+cat << EOF > ./config_dir/fde.toml
+[rootfs]
+rw_overlay = "disk"
+
+[rootfs.encrypt.exec]
+command = "echo"
+args = ["-n", "AAAaaawewe222"]
+
+[data]
+integrity = true
+
+[data.encrypt.exec]
+command = "echo"
+args = ["-n", "AAAaaawewe222"]
+
+EOF
+
+tree
+```
+
+Here is the content of the `config_dir`:
+```txt
+./config_dir
+└─── fde.toml
+```
+
+You can check your configs are valid with:
+
+```sh
+cryptpilot -d ~/diskenc/config_dir_exec/ config check --keep-checking
+```
+
 ### Encrypt a OS disk image file
 
 We will use the Alinux3 disk image file from [here](https://mirrors.aliyun.com/alinux/3/image/).
@@ -29,21 +70,12 @@ wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_aliba
 
 2. Encrypt the disk image file:
 
-Here we will encrypt the disk image file with a provided passphrase (GkdQgrmLx8LkGi2zVnGxdeT) and configs from `./config_dir/` directory. The encrypted disk file is specified by `--out` parameter.
+Here we will encrypt the disk image file with a provided passphrase (`AAAaaawewe222`) and configs from `./config_dir/` directory. The encrypted disk file is specified by `--out` parameter.
 
-Remenber that you have to prepare the configs directory before you run the command. The configs directory is a normal cryptpilot config dir (just like the `/etc/cryptpilot/`),  and should contains at least one `fde.toml` config file.
-
-```sh
-./config_dir
-└─── fde.toml
-```
-
-The details of the configuration can be found in [docs/configuration.md](docs/configuration.md).
-
-After that you can start the encryption with:
+And you can start the encryption with:
 
 ```sh
-cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2 --out ./encrypted.qcow2 -c ./config_dir/ --passphrase GkdQgrmLx8LkGi2zVnGxdeT
+cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2 --out ./encrypted.qcow2 -c ./config_dir/ --passphrase AAAaaawewe222
 ```
 
 > Note: You can also use the --package parameter to install some packages/rpms to the disk, before the encryption.
@@ -80,7 +112,7 @@ For those who wish to encrypt a real system disk, you need to unbind the disk fr
 1. Encrypt the disk (assuming the disk is `/dev/nvme2n1`):
 
 ```sh
-cryptpilot-convert --device /dev/nvme2n1 -c ./config_dir/ --passphrase GkdQgrmLx8LkGi2zVnGxdeT
+cryptpilot-convert --device /dev/nvme2n1 -c ./config_dir/ --passphrase AAAaaawewe222
 ```
 
 Now re-bind the disk to the original instance and boot from it.

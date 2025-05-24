@@ -16,7 +16,11 @@ pub struct Tpm2KeyProvider {
     pub options: Tpm2Config,
 }
 
+#[async_trait::async_trait]
 impl KeyProvider for Tpm2KeyProvider {
+    fn debug_name(&self) -> String {
+        "TPM".into()
+    }
     async fn get_key(&self) -> Result<Passphrase> {
         todo!()
     }

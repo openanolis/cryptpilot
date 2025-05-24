@@ -40,7 +40,6 @@ pub struct ExtraConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_open: Option<bool>,
 
-    // pub open_in_initrd: Option<bool>,
     /// The file system to initialize on the volume. Allowed values are ["swap", "ext4", "xfs", "vfat"]. If is not specified, or the device is not "empty", i.e. it contains any signature, the operation will be skipped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub makefs: Option<MakeFsType>,

@@ -36,68 +36,45 @@ pub enum KeyProviderConfig {
     Exec(crate::provider::exec::ExecConfig),
 }
 
-pub enum KeyProviderEnum {
-    #[cfg(feature = "provider-otp")]
-    Otp(crate::provider::otp::OtpKeyProvider),
-    #[cfg(feature = "provider-kms")]
-    Kms(crate::provider::kms::KmsKeyProvider),
-    #[cfg(feature = "provider-kbs")]
-    Kbs(crate::provider::kbs::KbsKeyProvider),
-    #[cfg(feature = "provider-tpm2")]
-    Tpm2(crate::provider::tpm2::Tpm2KeyProvider),
-    #[cfg(feature = "provider-oidc")]
-    Oidc(crate::provider::oidc::OidcKeyProvider),
-    #[cfg(feature = "provider-exec")]
-    Exec(crate::provider::exec::ExecKeyProvider),
-}
+pub struct BoxedKeyProvider(Box<dyn KeyProvider + Send + Sync + 'static>);
 
-impl KeyProvider for KeyProviderEnum {
+#[async_trait::async_trait]
+impl KeyProvider for BoxedKeyProvider {
+    fn debug_name(&self) -> String {
+        self.0.debug_name()
+    }
     async fn get_key(&self) -> Result<Passphrase> {
-        match self {
-            KeyProviderEnum::Otp(provider) => provider.get_key().await,
-            KeyProviderEnum::Kms(provider) => provider.get_key().await,
-            KeyProviderEnum::Kbs(provider) => provider.get_key().await,
-            KeyProviderEnum::Tpm2(provider) => provider.get_key().await,
-            KeyProviderEnum::Oidc(provider) => provider.get_key().await,
-            KeyProviderEnum::Exec(provider) => provider.get_key().await,
-        }
+        self.0.get_key().await
     }
 
     fn volume_type(&self) -> VolumeType {
-        match self {
-            KeyProviderEnum::Otp(provider) => provider.volume_type(),
-            KeyProviderEnum::Kms(provider) => provider.volume_type(),
-            KeyProviderEnum::Kbs(provider) => provider.volume_type(),
-            KeyProviderEnum::Tpm2(provider) => provider.volume_type(),
-            KeyProviderEnum::Oidc(provider) => provider.volume_type(),
-            KeyProviderEnum::Exec(provider) => provider.volume_type(),
-        }
+        self.0.volume_type()
     }
 }
 
 impl IntoProvider for KeyProviderConfig {
-    type Provider = KeyProviderEnum;
+    type Provider = BoxedKeyProvider;
 
     fn into_provider(self) -> Self::Provider {
-        match self {
-            KeyProviderConfig::Otp(otp_config) => KeyProviderEnum::Otp(OtpKeyProvider {
+        BoxedKeyProvider(match self {
+            KeyProviderConfig::Otp(otp_config) => Box::new(OtpKeyProvider {
                 options: otp_config,
             }),
-            KeyProviderConfig::Kms(kms_config) => KeyProviderEnum::Kms(KmsKeyProvider {
+            KeyProviderConfig::Kms(kms_config) => Box::new(KmsKeyProvider {
                 options: kms_config,
             }),
-            KeyProviderConfig::Kbs(kbs_config) => KeyProviderEnum::Kbs(KbsKeyProvider {
+            KeyProviderConfig::Kbs(kbs_config) => Box::new(KbsKeyProvider {
                 options: kbs_config,
             }),
-            KeyProviderConfig::Tpm2(tpm2_config) => KeyProviderEnum::Tpm2(Tpm2KeyProvider {
+            KeyProviderConfig::Tpm2(tpm2_config) => Box::new(Tpm2KeyProvider {
                 options: tpm2_config,
             }),
-            KeyProviderConfig::Oidc(oidc_config) => KeyProviderEnum::Oidc(OidcKeyProvider {
+            KeyProviderConfig::Oidc(oidc_config) => Box::new(OidcKeyProvider {
                 options: oidc_config,
             }),
-            KeyProviderConfig::Exec(exec_config) => KeyProviderEnum::Exec(ExecKeyProvider {
+            KeyProviderConfig::Exec(exec_config) => Box::new(ExecKeyProvider {
                 options: exec_config,
             }),
-        }
+        })
     }
 }

@@ -37,7 +37,12 @@ pub struct KbsKeyProvider {
     pub options: KbsConfig,
 }
 
+#[async_trait::async_trait]
 impl KeyProvider for KbsKeyProvider {
+    fn debug_name(&self) -> String {
+        format!("Key Broker Service ({})", self.options.kbs_url)
+    }
+
     async fn get_key(&self) -> Result<Passphrase> {
         let cdh_bin_path = helper::find_cdh_binary_or_default();
         #[cfg(not(test))]

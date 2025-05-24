@@ -34,9 +34,9 @@ pub async fn run() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let args = cli::Args::parse();
+    let args = cli::Cli::parse();
 
-    if let cli::Command::BootService(boot_service_options) = &args.command {
+    if let cli::GlobalSubcommand::BootService(boot_service_options) = &args.command {
         info!(
             "cryptpilot version: v{}  commit: {}  buildtime: {}",
             build::PKG_VERSION,
@@ -52,7 +52,7 @@ pub async fn run() -> Result<()> {
 
     // Handle config dir
     match args.command {
-        cli::Command::BootService(_) => {
+        cli::GlobalSubcommand::BootService(_) => {
             // We should load the configs from unsafe space and save them to initrd state for using later.
             copy_config_to_initrd_state_if_not_exist(true).await?;
             config::source::set_config_source(CachedConfigSource::new(
@@ -84,7 +84,7 @@ pub async fn run() -> Result<()> {
     }
 
     // Check verbose option from config file, if is running as boot service.
-    if let cli::Command::BootService(_) = args.command {
+    if let cli::GlobalSubcommand::BootService(_) = args.command {
         let global_config = crate::config::source::get_config_source()
             .await
             .get_global_config()

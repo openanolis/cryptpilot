@@ -96,7 +96,15 @@ pub struct OidcKeyProvider {
     pub options: OidcConfig,
 }
 
+#[async_trait::async_trait]
 impl KeyProvider for OidcKeyProvider {
+    fn debug_name(&self) -> String {
+        format!(
+            "KMS (key ID: {}) via OIDC token (provider: {})",
+            self.options.key_id, self.options.command
+        )
+    }
+
     async fn get_key(&self) -> Result<Passphrase> {
         let cdh_bin_path = helper::find_cdh_binary_or_default();
         #[cfg(not(test))]

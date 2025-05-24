@@ -1,23 +1,23 @@
 use std::fmt::Display;
 
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::build::CLAP_LONG_VERSION;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 #[clap(long_version = CLAP_LONG_VERSION)]
-pub struct Args {
+pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: GlobalSubcommand,
 
     #[clap(long, short = 'd')]
     /// Path to the root directory where to load configuration files. Default value is /etc/cryptpilot.
     pub config_dir: Option<String>,
 }
 
-#[derive(Parser, Debug)]
-pub enum Command {
+#[derive(Subcommand, Debug)]
+pub enum GlobalSubcommand {
     /// Show status about volumes.
     #[command(name = "show")]
     Show(ShowOptions),
@@ -34,9 +34,9 @@ pub enum Command {
     #[command(name = "close")]
     Close(CloseOptions),
 
-    /// Dump all the config to a config bundle.
-    #[command(name = "dump-config")]
-    DumpConfig,
+    /// Subcommands related to configuration.
+    #[command(name = "config")]
+    Config(ConfigOptions),
 
     /// Running during system booting (both initrd stage and system stage).
     #[command(name = "boot-service")]
@@ -70,6 +70,38 @@ pub struct OpenOptions {
 pub struct CloseOptions {
     /// Name of the volume to close.
     pub volume: String,
+}
+
+#[derive(Debug, Args)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct ConfigOptions {
+    #[command(subcommand)]
+    pub command: ConfigSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+#[command(args_conflicts_with_subcommands = true)]
+pub enum ConfigSubcommand {
+    /// Dump all the config to a config bundle, which can be used in cloud-init user data.
+    #[command(name = "dump")]
+    Dump,
+
+    /// Check if the config is valid.
+    #[command(name = "check")]
+    Check(ConfigCheckOptions),
+}
+
+#[derive(Parser, Debug)]
+pub struct ConfigCheckOptions {
+    /// Keep checking the config even if one of the config is invalid.
+    #[clap(long)]
+    #[arg(value_enum)]
+    pub keep_checking: bool,
+
+    /// Skip verifing for fetching the encryption key from the configed key provider.
+    #[clap(long)]
+    #[arg(value_enum)]
+    pub skip_check_key: bool,
 }
 
 #[derive(Parser, Debug)]

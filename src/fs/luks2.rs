@@ -56,6 +56,28 @@ pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType
     Ok(())
 }
 
+pub async fn check_passphrase(dev: &str, passphrase: &Passphrase) -> Result<(), anyhow::Error> {
+    let dev = dev.to_owned();
+    let passphrase = passphrase.to_owned();
+    let verbose = get_verbose().await;
+
+    let mut cmd = Command::new("cryptsetup");
+    if verbose {
+        cmd.arg("--debug");
+    }
+
+    cmd.args(["open", "--type", "luks2", "--test-passphrase"]);
+
+    cmd.args(["--key-file=-"]);
+    cmd.arg(&dev);
+
+    cmd.run_with_input(Some(passphrase.as_bytes()))
+        .await
+        .with_context(|| format!("Failed to check passphrase for device {dev}"))?;
+
+    Ok(())
+}
+
 pub async fn open(
     volume: &str,
     dev: &str,

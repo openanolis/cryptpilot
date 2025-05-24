@@ -3,10 +3,10 @@ use async_trait::async_trait;
 
 use crate::config::source::cloud_init::CLOUD_INIT_CONFIG_BUNDLE_HEADER;
 
-pub struct DumpConfigCommand {}
+pub struct ConfigDumpCommand {}
 
 #[async_trait]
-impl super::Command for DumpConfigCommand {
+impl super::super::Command for ConfigDumpCommand {
     async fn run(&self) -> Result<()> {
         let config = crate::config::source::get_config_source()
             .await

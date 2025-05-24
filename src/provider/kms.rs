@@ -59,7 +59,12 @@ impl KmsKeyProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl KeyProvider for KmsKeyProvider {
+    fn debug_name(&self) -> String {
+        format!("KMS (key ID: {}) via Access Key", self.options.secret_name)
+    }
+
     async fn get_key(&self) -> Result<Passphrase> {
         #[cfg(not(test))]
         let key_u8 = self.get_key_from_kms().await?;
