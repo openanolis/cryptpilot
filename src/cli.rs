@@ -49,7 +49,8 @@ pub struct ShowOptions {}
 #[derive(Parser, Debug)]
 pub struct InitOptions {
     /// Name of the volume to initialize.
-    pub volume: String,
+    #[arg(required=true, num_args=1..)]
+    pub volume: Vec<String>,
 
     /// Force re-initialization of the volume.
     #[clap(long, default_value = "false")]
@@ -63,13 +64,15 @@ pub struct InitOptions {
 #[derive(Parser, Debug)]
 pub struct OpenOptions {
     /// Name of the volume to open.
-    pub volume: String,
+    #[arg(required=true, num_args=1..)]
+    pub volume: Vec<String>,
 }
 
 #[derive(Parser, Debug)]
 pub struct CloseOptions {
     /// Name of the volume to close.
-    pub volume: String,
+    #[arg(required=true, num_args=1..)]
+    pub volume: Vec<String>,
 }
 
 #[derive(Debug, Args)]

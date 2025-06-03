@@ -11,16 +11,18 @@ pub struct CloseCommand {
 #[async_trait]
 impl super::Command for CloseCommand {
     async fn run(&self) -> Result<()> {
-        let volume = self.close_options.volume.to_owned();
+        for volume in &self.close_options.volume {
+            info!("Close volume {volume} now");
 
-        if !crate::fs::luks2::is_active(&volume) {
-            info!("The mapping for {} is not active, nothing to do", volume);
-            return Ok(());
+            if !crate::fs::luks2::is_active(&volume) {
+                info!("The mapping for {} is not active, nothing to do", volume);
+                continue;
+            }
+
+            info!("Removing mapping for {volume}");
+            crate::fs::luks2::close(&volume).await?;
+            info!("The volume {volume} is closed now");
         }
-
-        info!("Removing mapping for {volume}");
-        crate::fs::luks2::close(&volume).await?;
-        info!("The mapping is removed now");
 
         Ok(())
     }

@@ -36,7 +36,7 @@ pub trait ConfigSource {
 
                 Ok(volume_config)
             })
-            .with_context(|| format!("Failed to get config for volume name: {}", volume))
+            .with_context(|| format!("Failed to get config for volume name: {}. Maybe forget to write config file for it?", volume))
     }
 
     async fn get_global_config(&self) -> Result<Option<GlobalConfig>> {

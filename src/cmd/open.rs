@@ -16,15 +16,16 @@ pub struct OpenCommand {
 #[async_trait]
 impl super::Command for OpenCommand {
     async fn run(&self) -> Result<()> {
-        let volume_config = crate::config::source::get_config_source()
-            .await
-            .get_volume_config(&self.open_options.volume)
-            .await?;
+        for volume in &self.open_options.volume {
+            info!("Open volume {volume} now");
+            let volume_config = crate::config::source::get_config_source()
+                .await
+                .get_volume_config(&volume)
+                .await?;
 
-        open_for_specific_volume(&volume_config).await?;
-
-        info!("The mapping is active now");
-
+            open_for_specific_volume(&volume_config).await?;
+            info!("The volume {volume} is active now");
+        }
         Ok(())
     }
 }

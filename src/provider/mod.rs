@@ -86,7 +86,7 @@ pub mod tests {
     {
         OpenCommand {
             open_options: OpenOptions {
-                volume: volume_config.volume.clone(),
+                volume: vec![volume_config.volume.clone()],
             },
         }
         .run()
@@ -96,7 +96,7 @@ pub mod tests {
             async{
                 CloseCommand{
                     close_options: CloseOptions{
-                        volume: volume_config.volume.clone(),
+                        volume: vec![volume_config.volume.clone()],
                     }
                 }.run().await?;
                 Ok::<_, anyhow::Error>(())
@@ -174,7 +174,7 @@ pub mod tests {
 
         InitCommand {
             init_options: InitOptions {
-                volume: volume_config.volume.clone(),
+                volume: vec![volume_config.volume.clone()],
                 force_reinit: false,
                 yes: true,
             },

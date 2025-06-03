@@ -255,7 +255,7 @@ pub mod tests {
         // Close the volume if it is already opened
         CloseCommand {
             close_options: CloseOptions {
-                volume: volume_config.volume.clone(),
+                volume: vec![volume_config.volume.clone()],
             },
         }
         .run()
@@ -264,13 +264,17 @@ pub mod tests {
 
         async_defer! {
             async{
-                CloseCommand{ close_options: CloseOptions{volume: volume_config.volume.to_owned()}}.run().await.unwrap();
+                CloseCommand {
+                    close_options: CloseOptions {
+                        volume: vec![volume_config.volume.clone()],
+                    }
+                }.run().await.unwrap();
             }
         }
 
         OpenCommand {
             open_options: OpenOptions {
-                volume: volume_config.volume.clone(),
+                volume: vec![volume_config.volume.clone()],
             },
         }
         .run()

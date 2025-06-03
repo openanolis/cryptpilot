@@ -18,30 +18,33 @@ pub struct InitCommand {
 #[async_trait]
 impl super::Command for InitCommand {
     async fn run(&self) -> Result<()> {
-        let volume_config = crate::config::source::get_config_source()
-            .await
-            .get_volume_config(&self.init_options.volume)
-            .await?;
+        for volume in &self.init_options.volume {
+            info!("Initialize volume {volume} now");
 
-        info!(
-            "The key_provider type is \"{}\"",
-            serde_variant::to_variant_name(&volume_config.encrypt.key_provider)?
-        );
+            let volume_config = crate::config::source::get_config_source()
+                .await
+                .get_volume_config(&volume)
+                .await?;
 
-        let key_provider = volume_config.encrypt.key_provider.clone().into_provider();
+            info!(
+                "The key_provider type is \"{}\"",
+                serde_variant::to_variant_name(&volume_config.encrypt.key_provider)?
+            );
 
-        match key_provider.volume_type() {
-            crate::provider::VolumeType::Temporary => {
-                info!("Not required to initialize");
-                return Ok(());
+            let key_provider = volume_config.encrypt.key_provider.clone().into_provider();
+
+            match key_provider.volume_type() {
+                crate::provider::VolumeType::Temporary => {
+                    info!("Not required to initialize");
+                    continue;
+                }
+                crate::provider::VolumeType::Persistent => {
+                    persistent_disk_init(&self.init_options, &volume_config, &key_provider).await?;
+                }
             }
-            crate::provider::VolumeType::Persistent => {
-                persistent_disk_init(&self.init_options, &volume_config, &key_provider).await?;
-            }
+
+            info!("The volume {volume} is initialized now");
         }
-
-        info!("The volume is initialized now");
-
         Ok(())
     }
 }
