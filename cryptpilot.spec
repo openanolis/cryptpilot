@@ -73,9 +73,9 @@ install -p -m 755 dist/dracut/modules.d/91cryptpilot/initrd-trigger-network-onli
 install -p -m 755 dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.sh %{buildroot}%{dracut_dst}
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service %{buildroot}%{dracut_dst}
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service %{buildroot}%{dracut_dst}
-install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-auto-open.service %{buildroot}%{dracut_dst}
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{_prefix}/lib/systemd/system
+install -p -m 644 dist/systemd/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/system/cryptpilot.service
 install -d -p %{buildroot}/etc/cryptpilot
 install -p -m 600 dist/etc/global.toml.template %{buildroot}/etc/cryptpilot/global.toml.template
 install -p -m 600 dist/etc/fde.toml.template %{buildroot}/etc/cryptpilot/fde.toml.template
@@ -87,23 +87,20 @@ install -p -m 600 dist/etc/volumes/oidc.toml.template %{buildroot}/etc/cryptpilo
 install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
 popd
 
+
 %post
-# Check if it is a install or update
-if [ $1 == 1 ] || [ $1 == 2 ]; then
-  if command -v dracut >&- ; then
-      echo "Updating initrd ..."
-      dracut --force
-  fi
-fi
+systemctl daemon-reload
+
 
 %clean
-rm -f ~/.cargo/config
 rm -rf %{buildroot}
+
 
 %files
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot
 %{_prefix}/bin/cryptpilot-convert
+%{_prefix}/lib/systemd/system/cryptpilot.service
 %dir /etc/cryptpilot
 /etc/cryptpilot/global.toml.template
 /etc/cryptpilot/fde.toml.template
@@ -119,8 +116,23 @@ rm -rf %{buildroot}
 %{dracut_dst}initrd-wait-network-online.sh
 %{dracut_dst}cryptpilot-fde-before-sysroot.service
 %{dracut_dst}cryptpilot-fde-after-sysroot.service
-%{dracut_dst}cryptpilot-auto-open.service
 %{dracut_dst}initrd-wait-network-online.service
+
+
+%preun
+if [ $1 == 0 ]; then #uninstall
+  systemctl unmask cryptpilot.service
+  systemctl stop cryptpilot.service
+  systemctl disable cryptpilot.service
+fi
+
+
+%postun
+if [ $1 == 0 ]; then #uninstall
+  systemctl daemon-reload
+  systemctl reset-failed
+fi
+
 
 %changelog
 * Fri May 23 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.4-1

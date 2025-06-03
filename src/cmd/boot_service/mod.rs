@@ -87,7 +87,7 @@ impl super::Command for BootServiceCommand {
                     .await
                     .context("Failed to setup volumes required by FDE")?;
             }
-            BootStage::InitrdVolumesAutoOpen => {
+            BootStage::SystemVolumesAutoOpen => {
                 setup_user_provided_volumes(&self.boot_service_options)
                     .await
                     .context("Failed to setup volumes user provided automatically")?;

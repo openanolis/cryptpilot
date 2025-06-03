@@ -1,20 +1,17 @@
 [Unit]
 Description=Cryptpilot Volumes Auto Open Service
-DefaultDependencies=no
-ConditionPathExists=/etc/initrd-release
 Requires=network-online.target
 After=network-online.target
 After=cryptpilot-fde-before-sysroot.service
-Before=initrd-root-device.target
 Wants=attestation-agent.service
 After=attestation-agent.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=true
-ExecStart=/usr/bin/cryptpilot boot-service --stage initrd-volumes-auto-open
+ExecStart=/usr/bin/cryptpilot boot-service --stage system-volumes-auto-open
 StandardOutput=journal+console
 StandardError=journal+console
 
 [Install]
-WantedBy=initrd-root-device.target
+WantedBy=multi-user.target

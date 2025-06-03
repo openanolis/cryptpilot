@@ -123,8 +123,8 @@ pub enum BootStage {
     #[clap(name = "initrd-fde-after-sysroot")]
     InitrdFdeAfterSysroot,
 
-    #[clap(name = "initrd-volumes-auto-open")]
-    InitrdVolumesAutoOpen,
+    #[clap(name = "system-volumes-auto-open")]
+    SystemVolumesAutoOpen,
 }
 
 impl Display for BootStage {
@@ -132,7 +132,7 @@ impl Display for BootStage {
         match self {
             BootStage::InitrdFdeBeforeSysroot => write!(f, "initrd-fde-before-sysroot"),
             BootStage::InitrdFdeAfterSysroot => write!(f, "initrd-fde-after-sysroot"),
-            BootStage::InitrdVolumesAutoOpen => write!(f, "initrd-volumes-auto-open"),
+            BootStage::SystemVolumesAutoOpen => write!(f, "system-volumes-auto-open"),
         }
     }
 }

@@ -10,6 +10,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser as _;
+use cli::{BootServiceOptions, BootStage};
 use cmd::{
     boot_service::{
         copy_config::copy_config_to_initrd_state_if_not_exist,
@@ -51,14 +52,19 @@ pub async fn run() -> Result<()> {
     }
 
     // Handle config dir
-    match args.command {
-        cli::GlobalSubcommand::BootService(_) => {
-            // We should load the configs from unsafe space and save them to initrd state for using later.
-            copy_config_to_initrd_state_if_not_exist(true).await?;
-            config::source::set_config_source(CachedConfigSource::new(
-                InitrdStateConfigSource::new(),
-            ))
-            .await;
+    match &args.command {
+        cli::GlobalSubcommand::BootService(BootServiceOptions { stage }) => {
+            if matches!(
+                stage,
+                BootStage::InitrdFdeBeforeSysroot | BootStage::InitrdFdeAfterSysroot
+            ) {
+                // We should load the configs from unsafe space and save them to initrd state for using later.
+                copy_config_to_initrd_state_if_not_exist(true).await?;
+                config::source::set_config_source(CachedConfigSource::new(
+                    InitrdStateConfigSource::new(),
+                ))
+                .await;
+            }
         }
         _ => {
             // Set to the given config dir from cryptpilot command line.
