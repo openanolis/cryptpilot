@@ -34,7 +34,8 @@ When defining a volume using CryptPilot, you first need to place a corresponding
 
 Here is a configuration file example for a volume encrypted with a one-time password: [otp.toml.template](/dist/etc/volumes/otp.toml.template)
 
-> Note: The configuration file name must end with `.toml`, and its content should be in TOML format. Files not ending with `.toml` will be ignored. It is recommended to keep the configuration file name consistent with the volume name, but this is not mandatory.
+> [!NOTE]
+> The configuration file name must end with `.toml`, and its content should be in TOML format. Files not ending with `.toml` will be ignored. It is recommended to keep the configuration file name consistent with the volume name, but this is not mandatory.
 
 Each volume contains the following configuration items:
 
@@ -161,7 +162,7 @@ Configuration file example: [oidc.toml.template](/dist/etc/volumes/oidc.toml.tem
 
 This is a special credential storage type indicating that CryptPilot obtains credentials for decrypting volumes by executing an external program and acquiring credentials from the standard output (stdout) of this external program.
 
-> **Note**
+> [!NOTE]
 > The standard output data of this external program will be directly regarded as the decryption credentials without trimming, string conversion, or involving base64 decoding. Therefore, you need to ensure there are no extra invisible characters such as carriage returns and spaces.
 
 Configuration file example: [exec.toml.template](/dist/etc/volumes/exec.toml.template)

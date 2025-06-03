@@ -178,3 +178,24 @@ Here the volume is opened and it's path is `/dev/mapper/data0`, which contains t
 mkdir -p /mnt/data0
 mount /dev/mapper/data0 /mnt/data0
 ```
+
+Now you can read and write files in the mounted directory.
+
+4. If you want to setup auto open for the volume, you should first set `auto_open = true` in the volume config file. And then you can use the following command to enable the service:
+
+```sh
+systemctl enable --now cryptpilot.service
+```
+
+# Supported Distrubutions
+
+CryptPilot has been tested on the following distributions, and it may not work on other distributions.
+
+- [Anolis OS 8](https://openanolis.cn/anolisos/8)
+- [Anolis OS 23](https://openanolis.cn/anolisos/23)
+- [Alibaba Cloud Linux 3](https://www.aliyun.com/product/alinux)
+
+
+# License
+
+Apache-2.0
