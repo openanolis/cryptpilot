@@ -1,7 +1,14 @@
 #!/bin/bash
 
 check() {
-        return 0
+        if [ -f ${dracutsysrootdir:-}/etc/cryptpilot/fde.toml ]; then
+                # If full-disk encryption is enabled, we need to install the cryptpilot module
+                return 0
+        else
+                # Or else don't install
+                # https://man7.org/linux/man-pages/man7/dracut.modules.7.html
+                return 255
+        fi
 }
 
 install() {
