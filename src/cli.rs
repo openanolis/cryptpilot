@@ -11,7 +11,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: GlobalSubcommand,
 
-    #[clap(long, short = 'd')]
+    #[clap(long, short = 'c')]
     /// Path to the root directory where to load configuration files. Default value is /etc/cryptpilot.
     pub config_dir: Option<String>,
 }

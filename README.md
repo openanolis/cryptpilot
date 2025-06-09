@@ -52,10 +52,10 @@ Here is the content of the `config_dir`:
 └─── fde.toml
 ```
 
-You can check your configs are valid with:
+You can check if your configs are valid with:
 
 ```sh
-cryptpilot -d ~/diskenc/config_dir_exec/ config check --keep-checking
+cryptpilot -c ~/diskenc/config_dir_exec/ config check --keep-checking
 ```
 
 ### Encrypt a OS disk image file
