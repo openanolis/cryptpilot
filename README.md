@@ -75,7 +75,7 @@ Here we will encrypt the disk image file with a provided passphrase (`AAAaaawewe
 And you can start the encryption with:
 
 ```sh
-cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2 --out ./encrypted.qcow2 -c ./config_dir/ --passphrase AAAaaawewe222
+cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2 --out ./encrypted.qcow2 -c ./config_dir/ --rootfs-passphrase AAAaaawewe222
 ```
 
 > Note: You can also use the --package parameter to install some packages/rpms to the disk, before the encryption.
@@ -112,7 +112,7 @@ For those who wish to encrypt a real system disk, you need to unbind the disk fr
 1. Encrypt the disk (assuming the disk is `/dev/nvme2n1`):
 
 ```sh
-cryptpilot-convert --device /dev/nvme2n1 -c ./config_dir/ --passphrase AAAaaawewe222
+cryptpilot-convert --device /dev/nvme2n1 -c ./config_dir/ --rootfs-passphrase AAAaaawewe222
 ```
 
 Now re-bind the disk to the original instance and boot from it.

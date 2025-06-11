@@ -158,17 +158,19 @@ disk::umount_wait_busy() {
 
 proc::print_help_and_exit() {
     echo "Usage:"
-    echo "    $0 --device <device> --config-dir <cryptpilot_config_dir> --passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
-    echo "    $0 --in <input_file> --out <output_file> --config-dir <cryptpilot_config_dir> --passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
+    echo "    $0 --in <input_file> --out <output_file> --config-dir <cryptpilot_config_dir> --rootfs-passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
+    echo "    $0 --in <input_file> --out <output_file> --config-dir <cryptpilot_config_dir> --rootfs-no-encryption [--package <rpm_package>...]"
+    echo "    $0 --device <device> --config-dir <cryptpilot_config_dir> --rootfs-passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
     echo ""
     echo "Options:"
-    echo "  -d, --device <device>                           The device to operate on."
-    echo "      --in <input_file>                           The input OS image file (vhd or qcow2)."
-    echo "      --out <output_file>                         The output OS image file (vhd or qcow2)."
-    echo "  -c, --config-dir <cryptpilot_config_dir>        The directory containing cryptpilot configuration files."
-    echo "      --passphrase <rootfs_encrypt_passphrase>    The passphrase for rootfs encryption."
-    echo "      --package <rpm_package>                     Specify an RPM package name or RPM file to install (can be specified multiple times)."
-    echo "  -h, --help                                      Show this help message and exit."
+    echo "  -d, --device <device>                                   The device to operate on."
+    echo "      --in <input_file>                                   The input OS image file (vhd or qcow2)."
+    echo "      --out <output_file>                                 The output OS image file (vhd or qcow2)."
+    echo "  -c, --config-dir <cryptpilot_config_dir>                The directory containing cryptpilot configuration files."
+    echo "      --rootfs-passphrase <rootfs_encrypt_passphrase>     The passphrase for rootfs encryption."
+    echo "      --rootfs-no-encryption <rootfs_encrypt_passphrase>  Skip rootfs encryption, but keep the rootfs measuring feature enabled."
+    echo "      --package <rpm_package>                             Specify an RPM package name or RPM file to install (can be specified multiple times)."
+    echo "  -h, --help                                              Show this help message and exit."
     exit $1
 }
 
@@ -316,9 +318,9 @@ step:update_rootfs_and_initrd() {
     yum --installroot="${rootfs_mount_point}" clean all
 
     # copy cryptpilot config
-    echo "Copying cryptpilot config from /etc/cryptpilot to target rootfs"
+    echo "Copying cryptpilot config from ${config_dir} to target rootfs"
     mkdir -p "${rootfs_mount_point}/etc/cryptpilot/"
-    cp -a "${config_dir}." "${rootfs_mount_point}/etc/cryptpilot/"
+    cp -a "${config_dir}/." "${rootfs_mount_point}/etc/cryptpilot/"
 
     # update /etc/fstab
     echo "Updating /etc/fstab"
@@ -460,9 +462,9 @@ step::create_lvm_part() {
     proc::exec_subshell_flose_fds vgcreate system $lvm_part
 }
 
-step::setup_rootfs_lv() {
-    local passphrase=$1
-    local rootfs_file_path=$2
+step::setup_rootfs_lv_with_encrypt() {
+    local rootfs_file_path=$1
+    local rootfs_passphrase=$2
 
     local rootfs_size_in_byte
     rootfs_size_in_byte=$(stat --printf="%s" "${rootfs_file_path}")
@@ -471,21 +473,36 @@ step::setup_rootfs_lv() {
     proc::hook_exit "[[ -e /dev/mapper/system-rootfs ]] && disk::dm_remove_all ${device}"
     proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B system # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
     # Create a encrypted volume
-    echo -n "${passphrase}" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 /dev/mapper/system-rootfs -
+    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 /dev/mapper/system-rootfs -
     proc::hook_exit "[[ -e /dev/mapper/rootfs ]] && dmsetup remove rootfs"
-    echo -n "${passphrase}" | cryptsetup open /dev/mapper/system-rootfs rootfs -
+
+    echo -n "${rootfs_passphrase}" | cryptsetup open /dev/mapper/system-rootfs rootfs -
     # Copy rootfs content to the encrypted volume
     dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/rootfs bs=4M
+    dmsetup remove rootfs
+}
+
+step::setup_rootfs_lv_without_encrypt() {
+    local rootfs_file_path=$1
+
+    local rootfs_size_in_byte
+    rootfs_size_in_byte=$(stat --printf="%s" "${rootfs_file_path}")
+    local rootfs_lv_size_in_bytes=$((rootfs_size_in_byte + 16 * 1024 * 1024)) # original rootfs partition size plus LUKS2 header size
+    echo "Creating rootfs logical volume"
+    proc::hook_exit "[[ -e /dev/mapper/system-rootfs ]] && disk::dm_remove_all ${device}"
+    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B system # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
+    # Copy rootfs content to the lvm volume
+    dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/system-rootfs bs=4M
 }
 
 step::setup_rootfs_hash_lv() {
-    local boot_part=$1
+    local rootfs_file_path=$1
+    local boot_part=$2
     local rootfs_hash_file_path="${workdir}/rootfs_hash.img"
-    veritysetup format /dev/mapper/rootfs "${rootfs_hash_file_path}" --format=1 --hash=sha256 |
+    veritysetup format "${rootfs_file_path}" "${rootfs_hash_file_path}" --format=1 --hash=sha256 |
         tee "${workdir}/rootfs_hash.status" |
         gawk '(/^Root hash:/ && $NF ~ /^[0-9a-fA-F]+$/) { print $NF; }' \
             >"${workdir}/rootfs_hash.roothash"
-    dmsetup remove rootfs
     cat "${workdir}/rootfs_hash.status"
 
     local rootfs_hash_size_in_byte
@@ -518,22 +535,22 @@ main() {
         exit 1
     fi
 
+    local operate_on_device
     local device
     local input_file
     local output_file
     local config_dir
-    local passphrase
+    local rootfs_passphrase
+    local rootfs_no_encryption=false
     local packages=()
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
         -d | --device)
-            operate_on_device=true
             device="$2"
             shift 2
             ;;
         --in)
-            operate_on_device=false
             input_file="$2"
             shift 2
             ;;
@@ -545,9 +562,13 @@ main() {
             config_dir="$2"
             shift 2
             ;;
-        --passphrase)
-            passphrase="$2"
+        --rootfs-passphrase)
+            rootfs_passphrase="$2"
             shift 2
+            ;;
+        --rootfs-no-encryption)
+            rootfs_no_encryption=true
+            shift 1
             ;;
         --package)
             packages+=("$2")
@@ -562,26 +583,29 @@ main() {
         esac
     done
 
-    local operate_on_device
     if [ -n "${device:-}" ]; then
         if [ -n "${input_file:-}" ] || [ -n "${output_file:-}" ]; then
-            proc::fatal "Cannot specify both --device and --in/--out file"
+            proc::fatal "Cannot specify both --device and --in/--out"
         fi
         operate_on_device=true
     elif [ -n "${input_file:-}" ] && [ -n "${output_file:-}" ]; then
         operate_on_device=false
     else
-        proc::fatal "Must specify either --device or --in/--out file"
+        proc::fatal "Must specify either --device or --in/--out"
     fi
 
     if [ -z "${config_dir:-}" ]; then
         proc::fatal "Must specify --config-dir"
     elif [ ! -d "${config_dir}" ]; then
         proc::fatal "Cryptpilot config dir ${config_dir} does not exist"
+    else
+        [ -f "${config_dir}/fde.toml" ] || proc::fatal "Cryptpilot Full-Disk Encryption config file must exist: ${config_dir}/fde.toml"
     fi
 
-    if [ -z "${passphrase:-}" ]; then
-        proc::fatal "Must specify --passphrase"
+    if [ -n "${rootfs_passphrase:-}" ] && ! [ "${rootfs_no_encryption}" = false ]; then
+        proc::fatal "Cannot specify both --rootfs-passphrase and --rootfs-no-encryption"
+    elif [ -z "${rootfs_passphrase:-}" ] && [ "${rootfs_no_encryption}" = false ]; then
+        proc::fatal "Must specify either --rootfs-passphrase or --rootfs-no-encryption"
     fi
 
     if [ "${operate_on_device}" = true ]; then
@@ -655,7 +679,7 @@ main() {
         echo "Copying ${input_file} to ${work_file}"
         proc::hook_exit "rm -f ${work_file}"
         cp "${input_file}" "${work_file}"
-        proc::hook_exit "qemu-nbd --disconnect ${device}"
+        proc::hook_exit "qemu-nbd --disconnect ${device} >/dev/null"
         qemu-nbd --connect="${device}" --discard=on --detect-zeroes=unmap "${work_file}"
         sleep 2
         echo "Mapped to NBD device ${device}"
@@ -720,13 +744,17 @@ main() {
     # 7. Setting up rootfs logical volume
     #
     echo "[ 7 ] Setting up rootfs logical volume"
-    step::setup_rootfs_lv "${passphrase}" "${rootfs_file_path}"
+    if [ "${rootfs_no_encryption}" = false ]; then
+        step::setup_rootfs_lv_with_encrypt "${rootfs_file_path}" "${rootfs_passphrase}"
+    else
+        step::setup_rootfs_lv_without_encrypt "${rootfs_file_path}"
+    fi
 
     #
     # 8. Setting up rootfs hash volume
     #
     echo "[ 8 ] Setting up rootfs hash volume"
-    step::setup_rootfs_hash_lv "${boot_part}"
+    step::setup_rootfs_hash_lv "${rootfs_file_path}" "${boot_part}"
 
     #
     # 9. Cleaning up
@@ -736,6 +764,7 @@ main() {
     blockdev --flushbufs "${device}"
 
     if [ "${operate_on_device}" == true ]; then
+        echo "--------------------------------"
         echo "Everything done, the device is ready to use: ${device}"
     else
         #
@@ -756,9 +785,14 @@ main() {
             qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
         fi
 
+        echo "--------------------------------"
         echo "Everything done, the new disk image is ready to use: ${output_file}"
     fi
 
+    echo
+    echo "You can calculate reference value of the disk with:"
+    echo ""
+    echo "    cryptpilot fde show-reference-value --disk ${output_file}"
 }
 
 main "$@"
