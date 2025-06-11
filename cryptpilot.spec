@@ -15,6 +15,7 @@ Requires: lvm2
 Requires: cryptsetup
 Requires: coreutils
 Requires: systemd
+Requires: systemd-udev
 Requires: veritysetup
 Requires: device-mapper-libs
 # mkfs.vfat
@@ -25,6 +26,8 @@ Requires: xfsprogs
 Requires: e2fsprogs
 # swapon
 Requires: util-linux
+# qemu-nbd
+Requires: qemu-img
 
 # If not installed, the kbs and kms-oidc keyprovider will not work.
 Recommends: confidential-data-hub

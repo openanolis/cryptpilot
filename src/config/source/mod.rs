@@ -1,6 +1,7 @@
 pub mod cached;
 pub mod cloud_init;
 pub mod fs;
+pub mod initrd_state;
 
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;

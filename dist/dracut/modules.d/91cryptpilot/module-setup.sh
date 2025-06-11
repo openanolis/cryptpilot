@@ -63,4 +63,6 @@ depends() {
         echo crypt network
         # We need to install ssl ca certs for HTTPS support
         echo url-lib
+        echo attestation-agent
+        echo confidential-data-hub
 }

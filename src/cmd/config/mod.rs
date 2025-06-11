@@ -1,12 +1,10 @@
 use super::{Command, IntoCommand};
 
 pub mod check;
-pub mod dump;
 
-impl IntoCommand for crate::cli::ConfigSubcommand {
+impl IntoCommand for crate::cli::ConfigOptions {
     fn into_command(self) -> Box<dyn Command> {
-        match self {
-            crate::cli::ConfigSubcommand::Dump => Box::new(dump::ConfigDumpCommand {}),
+        match self.command {
             crate::cli::ConfigSubcommand::Check(config_check_options) => {
                 Box::new(check::ConfigCheckCommand {
                     config_check_options,

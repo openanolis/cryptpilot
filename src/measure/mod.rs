@@ -20,6 +20,11 @@ pub trait Measure {
         operation: String,
         content_to_hash: String,
     ) -> Result<()> {
+        let hash = Self::calculate_hashed_measurement_value(content_to_hash)?;
+        self.extend_measurement(operation, hash).await
+    }
+
+    fn calculate_hashed_measurement_value(content_to_hash: String) -> Result<String> {
         let hash = sha2::Sha384::new()
             .chain_update(content_to_hash)
             .finalize()
@@ -30,7 +35,7 @@ pub trait Measure {
             "value": hex::encode(hash),
         });
 
-        self.extend_measurement(operation, hash.to_string()).await
+        Ok(hash.to_string())
     }
 }
 

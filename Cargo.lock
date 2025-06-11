@@ -755,6 +755,7 @@ dependencies = [
  "dialoguer",
  "dirs",
  "documented",
+ "glob",
  "hex",
  "kms",
  "lazy_static",

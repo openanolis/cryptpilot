@@ -13,7 +13,7 @@ const ATTESTATION_AGENT_TTRPC_SOCKET_DEFAULT_PATH: &str =
 
 const ATTESTATION_AGENT_TTRPC_TIMEOUT_NANO: i64 = 5_000_000_000;
 
-const AAEL_DOMAIN: &str = "cryptpilot.alibabacloud.com";
+pub const AAEL_DOMAIN: &str = "cryptpilot.alibabacloud.com";
 
 pub struct AaelMeasure {
     client: AttestationAgentServiceClient,

@@ -1,11 +1,52 @@
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use sha2::Digest;
 
-use crate::config::ConfigBundle;
+use crate::config::{fde::FdeConfig, global::GlobalConfig, ConfigBundle};
 
 use super::ConfigSource;
 
-pub const CLOUD_INIT_CONFIG_BUNDLE_HEADER: &str = "#cryptpilot-config";
+pub const CLOUD_INIT_FDE_CONFIG_BUNDLE_HEADER: &str = "#cryptpilot-fde-config";
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct FdeConfigBundle {
+    /// Global configuration. This is the same as the `/etc/cryptpilot/global.toml` file.
+    pub global: Option<GlobalConfig>,
+
+    /// Configuration related to full disk encryption (FDE). This is the same as the `/etc/cryptpilot/fde.toml` file.
+    pub fde: Option<FdeConfig>,
+}
+
+impl FdeConfigBundle {
+    pub fn gen_hash_content(&self) -> Result<String> {
+        Ok(toml::to_string(&self)?)
+    }
+
+    pub fn gen_hash_content_pretty(&self) -> Result<String> {
+        Ok(toml::to_string_pretty(&self)?)
+    }
+
+    pub fn gen_hash_hex(&self) -> Result<String> {
+        let content_to_hash = self.gen_hash_content()?;
+        let hash = sha2::Sha384::new()
+            .chain_update(&content_to_hash)
+            .finalize()
+            .to_vec();
+        let hash_hex = hex::encode(hash);
+
+        Ok(hash_hex)
+    }
+
+    pub fn flatten_to_config_bundle(self) -> ConfigBundle {
+        ConfigBundle {
+            global: self.global,
+            fde: self.fde,
+            volumes: vec![],
+        }
+    }
+}
 
 /// This is a config source that loads config from aliyun cloud-init user data. It is only supported in aliyun ECS instance, with IMDS enabled.
 /// User is expected to put the config bundle in the user data of the instance, before the instance boots.
@@ -48,14 +89,16 @@ impl CloudInitConfigSource {
             bail!("The cloud-init user data is empty")
         }
 
-        if !user_data.starts_with(CLOUD_INIT_CONFIG_BUNDLE_HEADER) {
+        if !user_data.starts_with(CLOUD_INIT_FDE_CONFIG_BUNDLE_HEADER) {
             bail!(
                 "Cannot find cryptplot header in cloud-init user data, maybe it is not cryptpilot config bundle"
             )
         }
 
-        let config_bundle: ConfigBundle =
+        let fde_config_bundle: FdeConfigBundle =
             toml::from_str(&user_data).context("Failed to parse cloud-init user data")?;
+
+        let config_bundle = fde_config_bundle.flatten_to_config_bundle();
 
         Ok(config_bundle)
     }
@@ -83,7 +126,7 @@ pub mod tests {
     #[test]
     fn test_deserialize_from_initrd() -> Result<()> {
         CloudInitConfigSource::parse_from_user_data(
-            r#"#cryptpilot-config
+            r#"#cryptpilot-fde-config
 
 [global.boot]
 verbose = true

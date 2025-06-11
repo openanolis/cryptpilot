@@ -2,11 +2,11 @@ pub mod copy_config;
 pub mod initrd_state;
 pub mod metadata;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use metadata::Metadata;
 use tokio::{
     fs::{self, File},
@@ -18,7 +18,7 @@ use crate::{
     cli::{BootServiceOptions, BootStage},
     cmd::show::PrintAsTable,
     config::{fde::RwOverlayType, volume::MakeFsType},
-    fs::{cmd::CheckCommandOutput, mount::TmpMountPoint},
+    fs::cmd::CheckCommandOutput,
     measure::{
         AutoDetectMeasure, Measure as _, OPERATION_NAME_FDE_ROOTFS_HASH,
         OPERATION_NAME_INITRD_SWITCH_ROOT,
@@ -27,7 +27,8 @@ use crate::{
     types::IntegrityType,
 };
 
-const METADATA_PATH_IN_BOOT: &'static str = "cryptpilot/metadata.toml";
+use super::fde::disk::{FdeDisk as _, OnExternalFdeDisk};
+
 const ROOTFS_LOGICAL_VOLUME: &'static str = "/dev/mapper/system-rootfs";
 const ROOTFS_LAYER_NAME: &'static str = "rootfs";
 const ROOTFS_LAYER_DEVICE: &'static str = "/dev/mapper/rootfs";
@@ -37,42 +38,6 @@ const ROOTFS_HASH_LOGICAL_VOLUME: &'static str = "/dev/mapper/system-rootfs_hash
 const DATA_LOGICAL_VOLUME: &'static str = "/dev/mapper/system-data";
 const DATA_LAYER_NAME: &'static str = "data";
 const DATA_LAYER_DEVICE: &'static str = "/dev/mapper/data";
-
-pub async fn detect_boot_part() -> Result<String> {
-    Command::new("blkid")
-        .args(["--match-types", "ext4"])
-        .args(["--match-token", r#"PARTLABEL="boot""#])
-        .args(["--list-one", "--output", "device"])
-        .run()
-        .await
-        .and_then(|stdout| {
-            let mut device_name = String::from_utf8(stdout)?;
-            device_name = device_name.trim().into();
-            if device_name.is_empty() {
-                bail!("No boot partition found");
-            }
-            Ok(device_name)
-        })
-        .context("Failed to detect boot partition")
-}
-
-pub async fn detect_root_part() -> Result<String> {
-    Command::new("blkid")
-        .args(["--match-types", "ext4"])
-        .args(["--match-token", r#"LABEL="root""#])
-        .args(["--list-one", "--output", "device"])
-        .run()
-        .await
-        .and_then(|stdout| {
-            let mut device_name = String::from_utf8(stdout)?;
-            device_name = device_name.trim().into();
-            if device_name.is_empty() {
-                bail!("No root partition found");
-            }
-            Ok(device_name)
-        })
-        .context("Failed to detect root partition")
-}
 
 pub struct BootServiceCommand {
     pub boot_service_options: BootServiceOptions,
@@ -134,27 +99,11 @@ async fn check_sysroot() -> Result<()> {
     bail!("Failed to find the device mounted at /sysroot")
 }
 
-async fn load_metadata_from_boot_part_callback(mount_point: PathBuf) -> Result<String> {
-    let metadata_path = mount_point.join(METADATA_PATH_IN_BOOT);
-    Ok(fs::read_to_string(&metadata_path).await?)
-}
-
-// TODO: load metadata from the boot partition once and keep it in ram, so that next time we will get the same result
 async fn load_metadata() -> Result<Metadata> {
-    let boot_part = detect_boot_part().await?;
-
-    let metadata_content =
-        TmpMountPoint::with_new_mount(&boot_part, load_metadata_from_boot_part_callback).await??;
-
-    debug!("Metadata content:\n{}", metadata_content);
-
-    let mut metadata = toml::from_str::<Metadata>(&metadata_content)?;
-
-    // Sanity check on root_hash, since it is from unsafe source
-    let root_hash_bin = hex::decode(metadata.root_hash).context("Bad root hash")?;
-    metadata.root_hash = hex::encode(root_hash_bin);
-
-    Ok(metadata)
+    OnExternalFdeDisk::new_by_probing()
+        .await?
+        .load_metadata()
+        .await
 }
 
 async fn setup_volumes_required_by_fde() -> Result<()> {
@@ -185,7 +134,7 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
         metadata.r#type, metadata.root_hash
     );
     if metadata.r#type != 1 {
-        bail!("Unsupported metadata type: {}", metadata.r#type);
+        bail!("Unsupported cryptpilot metadata type: {}", metadata.r#type);
     }
     // Extend rootfs hash to runtime measurement
     let measure = AutoDetectMeasure::new().await;
@@ -220,8 +169,9 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
         )
         .await?;
     } else {
-        info!("Encryption is disabled for rootfs volume, skip setting up dm-verity")
+        info!("Encryption is disabled for rootfs volume, skip setting up dm-crypt")
     }
+
     info!("Setting up dm-verity for rootfs volume");
     setup_rootfs_dm_verity(
         &metadata.root_hash,

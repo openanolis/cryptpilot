@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -11,7 +11,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: GlobalSubcommand,
 
-    #[clap(long, short = 'c')]
+    #[clap(long, short = 'c', global = true)]
     /// Path to the root directory where to load configuration files. Default value is /etc/cryptpilot.
     pub config_dir: Option<String>,
 }
@@ -37,6 +37,9 @@ pub enum GlobalSubcommand {
     /// Subcommands related to configuration.
     #[command(name = "config")]
     Config(ConfigOptions),
+
+    #[command(name = "fde")]
+    Fde(FdeOptions),
 
     /// Running during system booting (both initrd stage and system stage).
     #[command(name = "boot-service")]
@@ -85,10 +88,6 @@ pub struct ConfigOptions {
 #[derive(Subcommand, Debug)]
 #[command(args_conflicts_with_subcommands = true)]
 pub enum ConfigSubcommand {
-    /// Dump all the config to a config bundle, which can be used in cloud-init user data.
-    #[command(name = "dump")]
-    Dump,
-
     /// Check if the config is valid.
     #[command(name = "check")]
     Check(ConfigCheckOptions),
@@ -98,13 +97,44 @@ pub enum ConfigSubcommand {
 pub struct ConfigCheckOptions {
     /// Keep checking the config even if one of the config is invalid.
     #[clap(long)]
-    #[arg(value_enum)]
     pub keep_checking: bool,
 
     /// Skip verifing for fetching the encryption key from the configed key provider.
     #[clap(long)]
-    #[arg(value_enum)]
-    pub skip_check_key: bool,
+    pub skip_check_passphrase: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct FdeOptions {
+    #[command(subcommand)]
+    pub command: FdeSubcommand,
+
+    /// Operate on the specified disk instead of the running system. The path can be a file or block device.
+    #[clap(long, global = true)]
+    pub disk: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum FdeSubcommand {
+    /// Show claims related to FDE.
+    #[command(name = "show-reference-value")]
+    ShowReferenceValue {
+        #[clap(long, required = true)]
+        stage: ShowReferenceValueStage,
+    },
+
+    /// Dump fde config and global config as toml, which can be used in cloud-init user data.
+    #[command(name = "dump-config")]
+    DumpConfig,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum ShowReferenceValueStage {
+    #[clap(name = "initrd")]
+    Initrd,
+
+    #[clap(name = "system")]
+    System,
 }
 
 #[derive(Parser, Debug)]

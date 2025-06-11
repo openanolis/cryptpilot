@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use fde::FdeConfig;
 use global::GlobalConfig;
 use serde::{Deserialize, Serialize};
-use source::ConfigSource;
+use source::{cloud_init::FdeConfigBundle, ConfigSource};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
@@ -21,7 +21,7 @@ pub struct ConfigBundle {
     pub fde: Option<FdeConfig>,
 
     /// Configurations for data volumes. This is the same as the configs under `/etc/cryptpilot/volumes/` directory.
-    #[serde(default = "Default::default")]
+    #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub volumes: Vec<volume::VolumeConfig>,
 }
 
@@ -33,5 +33,14 @@ impl ConfigSource for ConfigBundle {
 
     async fn get_config(&self) -> Result<ConfigBundle> {
         Ok(self.clone())
+    }
+}
+
+impl ConfigBundle {
+    pub fn strip_as_fde_config_bundle(self) -> FdeConfigBundle {
+        FdeConfigBundle {
+            global: self.global,
+            fde: self.fde,
+        }
     }
 }

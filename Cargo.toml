@@ -18,6 +18,7 @@ devicemapper = "0.34.4"
 dialoguer = "0.11.0"
 dirs = "6.0.0"
 documented = "0.9.1"
+glob = "0.3.2"
 hex = "0.4.3"
 kms = {git = "https://github.com/confidential-containers/guest-components.git", tag = "v0.10.0", optional = true, default-features = false, features = ["aliyun"]}
 lazy_static = "1.5.0"

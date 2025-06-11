@@ -4,6 +4,7 @@ use async_trait::async_trait;
 pub mod boot_service;
 pub mod close;
 pub mod config;
+pub mod fde;
 pub mod init;
 pub mod open;
 pub mod show;
@@ -32,14 +33,13 @@ impl IntoCommand for crate::cli::GlobalSubcommand {
             crate::cli::GlobalSubcommand::Close(close_options) => {
                 Box::new(close::CloseCommand { close_options })
             }
-            crate::cli::GlobalSubcommand::Config(config_options) => {
-                config_options.command.into_command()
-            }
+            crate::cli::GlobalSubcommand::Config(config_options) => config_options.into_command(),
             crate::cli::GlobalSubcommand::BootService(boot_service_options) => {
                 Box::new(boot_service::BootServiceCommand {
                     boot_service_options,
                 })
             }
+            crate::cli::GlobalSubcommand::Fde(fde_options) => fde_options.into_command(),
         }
     }
 }

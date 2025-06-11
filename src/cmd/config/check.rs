@@ -87,8 +87,8 @@ impl super::super::Command for ConfigCheckCommand {
                     }
                 }
 
-                if self.config_check_options.skip_check_key {
-                    tracing::warn!("Skipping key check for volume \"{}\" due to \"--skip-check-key\" is set", volume.volume);
+                if self.config_check_options.skip_check_passphrase {
+                    tracing::warn!("Skipping key check for volume \"{}\" due to \"--skip-check-passphrase\" is set", volume.volume);
                 } else {
                     // Check if the key provider can get the key
                     let key_provider = volume.encrypt.key_provider.clone().into_provider();
@@ -145,8 +145,8 @@ impl super::super::Command for ConfigCheckCommand {
                 for (volume_debug_name, encrypt) in encrypt_configs {
                     tracing::info!("Checking config for FDE \"{}\" volume", volume_debug_name);
 
-                    if self.config_check_options.skip_check_key {
-                        tracing::warn!("Skipping key check for FDE volume \"{}\" due to \"--skip-check-key\" is set", volume_debug_name);
+                    if self.config_check_options.skip_check_passphrase {
+                        tracing::warn!("Skipping key check for FDE volume \"{}\" due to \"--skip-check-passphrase\" is set", volume_debug_name);
                 } else {
                         let key_provider = encrypt.key_provider.clone().into_provider();
                         match key_provider.get_key().await.with_context(|| {

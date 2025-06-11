@@ -10,15 +10,11 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser as _;
-use cli::{BootServiceOptions, BootStage};
-use cmd::{
-    boot_service::{
-        copy_config::copy_config_to_initrd_state_if_not_exist,
-        initrd_state::InitrdStateConfigSource,
-    },
-    IntoCommand as _,
+use cli::{BootServiceOptions, BootStage, FdeOptions, GlobalSubcommand};
+use cmd::{boot_service::copy_config::copy_config_to_initrd_state_if_not_exist, IntoCommand as _};
+use config::source::{
+    cached::CachedConfigSource, fs::FileSystemConfigSource, initrd_state::InitrdStateConfigSource,
 };
-use config::source::{cached::CachedConfigSource, fs::FileSystemConfigSource};
 use log::{debug, info};
 use shadow_rs::shadow;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
@@ -66,12 +62,18 @@ pub async fn run() -> Result<()> {
                 .await;
             }
         }
+        GlobalSubcommand::Fde(FdeOptions { .. }) => {
+            if args.config_dir.is_some() {
+                bail!("Cannot specify `--config-dir` with `fde` subcommand")
+            }
+        }
         _ => {
             // Set to the given config dir from cryptpilot command line.
             if let Some(config_dir) = args.config_dir {
                 if !Path::new(&config_dir).exists() || !Path::new(&config_dir).is_dir() {
                     bail!("Config dir {config_dir} does not exist or not a directory")
                 }
+
                 config::source::set_config_source(CachedConfigSource::new(
                     FileSystemConfigSource::new(config_dir),
                 ))
