@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.2.4
+Version: 0.2.5
 Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -138,6 +138,14 @@ fi
 
 
 %changelog
+* Thu Jun 12 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.5-1
+- Add "cryptpilot config check" command to check if the config is valid
+- Add support to specify more than one volume name to open/init/close command
+- Remove the "config dump" command
+- Change short form of --config-dir from -d to -c
+- Add the "fde show-reference-value" and "fde dump-config" command
+- Add --rootfs-no-encryption option to cryptpilot-convert to make disk with rootfs volume unencrypted
+
 * Fri May 23 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.4-1
 - Fix broken FDE due to wrong dm-verity kernel module name
 
