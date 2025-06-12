@@ -188,13 +188,17 @@ struct UdevRule {
 
 impl UdevRule {
     pub async fn install_ignore_nbd_rule() -> Result<Self> {
-        if !Path::new("/etc/udev/rules.d").exists() {
-            bail!("/etc/udev/rules.d/ does not exist")
+        let udev_rule_path = Path::new("/run/udev/rules.d");
+        if !udev_rule_path.exists() {
+            tracing::debug!("{udev_rule_path:?} does not exist, creating it");
+            tokio::fs::create_dir_all(udev_rule_path)
+                .await
+                .with_context(|| format!("Failed to create {udev_rule_path:?}"))?;
         }
 
         which::which("udevadm").context("Could not found `udevadm`")?;
 
-        let rule_path = Path::new("/etc/udev/rules.d/99-cryptpilot-ignore.rules");
+        let rule_path = udev_rule_path.join("99-cryptpilot-ignore.rules");
 
         let this = Self {
             rule_path: rule_path.to_path_buf(),
