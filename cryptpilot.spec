@@ -28,6 +28,7 @@ Requires: e2fsprogs
 Requires: util-linux
 # qemu-nbd
 Requires: qemu-img
+Requires: file
 
 # If not installed, the kbs and kms-oidc keyprovider will not work.
 Recommends: confidential-data-hub
