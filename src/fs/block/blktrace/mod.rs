@@ -83,7 +83,7 @@ impl BlkTrace {
             false
         });
         if !mounted {
-            tracing::info!("debugfs not mounted, mounting it now");
+            tracing::debug!("debugfs not mounted, mounting it now");
             tokio::fs::create_dir_all(&debugfs).await?;
 
             tokio::task::spawn_blocking(move || -> Result<_> {

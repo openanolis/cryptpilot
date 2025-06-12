@@ -54,6 +54,8 @@ impl CheckCommandOutput for Command {
         input_bytes: Option<&[u8]>,
         f: impl Fn(i32, Vec<u8>, Vec<u8>) -> Result<R> + Send + Sync,
     ) -> Result<R> {
+        tracing::trace!(cmd=?self.as_std(), "run external cmd");
+
         async {
             // Spawn the command and get output
             let output = async {

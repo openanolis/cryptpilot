@@ -2,6 +2,7 @@
 
 set -e # exit on error
 set -u # exit when variable not set
+shopt -s nullglob
 
 # To avoid locale issues.
 export LC_ALL=C
@@ -125,11 +126,11 @@ disk::align_start_sector() {
 
 # https://unix.stackexchange.com/a/312273
 disk::nbd_available() {
-    [[ $(blockdev --getsize64 $1) -eq 0 ]]
+    [[ $(blockdev --getsize64 $1) == 0 ]]
 }
 
 disk::get_available_nbd() {
-    modprobe nbd max_part=8
+    { lsmod | grep nbd >/dev/null; } || modprobe nbd max_part=8
     # If run in container, use following instead
     #
     # mknod /dev/nbd0 b 43 0
