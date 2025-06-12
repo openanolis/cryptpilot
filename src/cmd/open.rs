@@ -116,6 +116,11 @@ async fn persistent_disk_open(
         .await
         .context("Failed to get passphrase")?;
 
+    info!("Checking passphrase for volume {}", volume_config.volume);
+    crate::fs::luks2::check_passphrase(&volume_config.dev, &passphrase)
+        .await
+        .context("Checking passphrase failed, the passphrase may be changed after the volume is initialized, please correct the passphrase or re-initialize the volume")?;
+
     info!("Setting up mapping for volume {} now", volume_config.volume);
     let integrity = match volume_config.extra_config.integrity {
         Some(true) => IntegrityType::NoJournal,
