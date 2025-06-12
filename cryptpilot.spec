@@ -1,5 +1,5 @@
 %global debug_package %{nil}
-%define release_num 1
+%define release_num 2
 
 Name: cryptpilot
 Version: 0.2.5
@@ -139,6 +139,13 @@ fi
 
 
 %changelog
+* Thu Jun 12 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.5-2
+- cryptpilot-convert: fix failed checking free nbd device when no nbd kernel module avaliable
+- cryptpilot.spec: add missing requires for file package
+- cmd/open: add checking passphrase before open the volume
+- fs/nbd.rs: change udev rule path to volatile runtime directory /run/udev/rules.d
+
+
 * Thu Jun 12 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.5-1
 - Add "cryptpilot config check" command to check if the config is valid
 - Add support to specify more than one volume name to open/init/close command
