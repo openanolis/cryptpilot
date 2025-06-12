@@ -8,9 +8,44 @@ The cryptpilot project aims to provide a way that allows you to securely boot yo
 
 # Installation
 
+## Install on your system
+
 You can found and install the prebuilt binaries the [latest release](https://github.com/openanolis/cryptpilot/releases). Or if you want to build it yourself, you can follow instructions from the [development guide](docs/development.md).
 
 After installing, you can edit the configuration files under `/etc/cryptpilot/`. See the [configuration](docs/configuration.md) for details.
+
+## Try with docker
+
+If you are not running on a [supported distrubutions](#Supported Distrubutions), you can run cryptpilot in a docker container to encrypt a data volume or a bootable OS. 
+
+Here is an example:
+
+1. First, make sure you have nbd kernel module installed.
+
+```sh
+modprobe nbd max_part=8
+```
+
+2. Create a container, and run your command in the container.
+
+```bash
+docker run -it --privileged --ipc=host -v /run/udev/control:/run/udev/control -v /dev:/dev registry.openanolis.cn/openanolis/anolisos:8 bash
+```
+
+> Note: The additional parameters (`--privileged --ipc=host -v /run/udev/control:/run/udev/control -v /dev:/dev`) are required to make `/dev` works properly in the container.
+
+3. Run cryptpilot in the container shell.
+
+
+```bash
+cryptpilot --help
+```
+
+Or
+
+```bash
+cryptpilot-convert --help
+```
 
 
 ## Example: encrypt a bootable OS

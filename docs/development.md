@@ -1,6 +1,6 @@
 # Development
 
-## Build and Install
+## Build and Install RPM Package
 
 It is recommended to build a RPM package and install it on your system.
 
@@ -14,8 +14,7 @@ Then install the rpm package on your system:
 rpm --install /root/rpmbuild/RPMS/x86_64/cryptpilot-*.rpm
 ```
 
-
-## Test
+### Test
 
 We have provided some test cases. You can run them with the following command:
 
