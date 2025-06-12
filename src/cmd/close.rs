@@ -1,6 +1,5 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use log::info;
 
 use crate::cli::CloseOptions;
 
@@ -12,16 +11,16 @@ pub struct CloseCommand {
 impl super::Command for CloseCommand {
     async fn run(&self) -> Result<()> {
         for volume in &self.close_options.volume {
-            info!("Close volume {volume} now");
+            tracing::info!("Close volume {volume} now");
 
             if !crate::fs::luks2::is_active(&volume) {
-                info!("The mapping for {} is not active, nothing to do", volume);
+                tracing::info!("The mapping for {} is not active, nothing to do", volume);
                 continue;
             }
 
-            info!("Removing mapping for {volume}");
+            tracing::info!("Removing mapping for {volume}");
             crate::fs::luks2::close(&volume).await?;
-            info!("The volume {volume} is closed now");
+            tracing::info!("The volume {volume} is closed now");
         }
 
         Ok(())

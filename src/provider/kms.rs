@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use documented::{Documented, DocumentedFields};
 use kms::{plugins::aliyun::AliyunKmsClient, Annotations, Getter as _};
-use log::info;
 use serde::{Deserialize, Serialize};
 
 use crate::types::Passphrase;
@@ -79,7 +78,7 @@ impl KeyProvider for KmsKeyProvider {
         })()
         .context("Failed to decode response from KMS as base64")?;
 
-        info!("The passphrase has been fetched from KMS");
+        tracing::info!("The passphrase has been fetched from KMS");
         return Ok(passphrase);
     }
 

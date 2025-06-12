@@ -18,7 +18,6 @@ use base64::{
     Engine as _,
 };
 use documented::{Documented, DocumentedFields};
-use log::info;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use strum::AsRefStr;
@@ -175,7 +174,7 @@ impl KeyProvider for OidcKeyProvider {
         })()
         .context("Failed to decode response from KMS with OIDC as base64")?;
 
-        info!("The passphrase has been fetched from KMS with OIDC");
+        tracing::info!("The passphrase has been fetched from KMS with OIDC");
         return Ok(passphrase);
     }
 

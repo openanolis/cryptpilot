@@ -3,7 +3,6 @@ use std::path::Path;
 use crate::config::source::cloud_init::FdeConfigBundle;
 
 use anyhow::{Context, Result};
-use log::info;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -20,7 +19,7 @@ impl InitrdState {
         let path = Path::new(CRYPTPILOT_INITRD_STATE_PATH);
         tokio::fs::create_dir_all(path.parent().unwrap()).await?;
         tokio::fs::write(CRYPTPILOT_INITRD_STATE_PATH, str).await?;
-        info!("Successfully wrote initrd state to {CRYPTPILOT_INITRD_STATE_PATH}");
+        tracing::info!("Successfully wrote initrd state to {CRYPTPILOT_INITRD_STATE_PATH}");
         Ok(())
     }
     pub async fn load() -> Result<InitrdState> {

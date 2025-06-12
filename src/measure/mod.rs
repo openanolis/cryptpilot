@@ -4,7 +4,6 @@ pub mod attestation_agent;
 use anyhow::Result;
 use serde_json::json;
 use sha2::Digest;
-use tracing::info;
 
 pub const OPERATION_NAME_LOAD_CONFIG: &str = "load_config";
 pub const OPERATION_NAME_FDE_ROOTFS_HASH: &str = "fde_rootfs_hash";
@@ -55,7 +54,7 @@ impl AutoDetectMeasure {
             {
                 Ok(m) => return m,
                 Err(e) => {
-                    info!(
+                    tracing::info!(
                         "Failed to setup AAEL runtime measurement, disable runtime measurement now: {}",
                         e
                     )

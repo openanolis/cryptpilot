@@ -15,7 +15,6 @@ use cmd::{boot_service::copy_config::copy_config_to_initrd_state_if_not_exist, I
 use config::source::{
     cached::CachedConfigSource, fs::FileSystemConfigSource, initrd_state::InitrdStateConfigSource,
 };
-use log::{debug, info};
 use shadow_rs::shadow;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
@@ -34,14 +33,14 @@ pub async fn run() -> Result<()> {
     let args = cli::Cli::parse();
 
     if let cli::GlobalSubcommand::BootService(boot_service_options) = &args.command {
-        info!(
+        tracing::info!(
             "cryptpilot version: v{}  commit: {}  buildtime: {}",
             build::PKG_VERSION,
             build::COMMIT_HASH,
             build::BUILD_TIME
         );
 
-        info!(
+        tracing::info!(
             "The cryptpilot is running in {} stage",
             boot_service_options.stage
         );
@@ -110,11 +109,11 @@ pub async fn run() -> Result<()> {
                 .context("Failed to update log level to DEBUG")?;
             crate::fs::set_verbose(true).await;
 
-            info!("Log level set to DEBUG");
+            tracing::info!("Log level set to DEBUG");
         }
     }
 
-    debug!(
+    tracing::debug!(
         "Using config source from {:?}",
         crate::config::source::get_config_source()
             .await

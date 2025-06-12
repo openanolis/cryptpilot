@@ -1,5 +1,4 @@
 use anyhow::{bail, Context, Result};
-use log::{info, warn};
 
 use crate::{
     cmd::{
@@ -34,7 +33,7 @@ pub async fn copy_config_to_initrd_state_if_not_exist(extend_measurement: bool) 
             .await
             .context("Failed to extend cryptpilot config hash to runtime measurement")
         {
-            warn!("{e:?}")
+            tracing::warn!("{e:?}")
         }
     }
 
@@ -42,19 +41,19 @@ pub async fn copy_config_to_initrd_state_if_not_exist(extend_measurement: bool) 
 }
 
 async fn load_fde_config_bundle() -> Result<FdeConfigBundle> {
-    info!("Trying to load config from cloud-init");
+    tracing::info!("Trying to load config from cloud-init");
     match load_config_from_cloud_init().await {
         Ok(config) => return Ok(config),
         Err(e) => {
-            info!("Failed to load config from cloud-init: {e:?}");
+            tracing::info!("Failed to load config from cloud-init: {e:?}");
         }
     };
 
-    info!("Trying to load config from from partition");
+    tracing::info!("Trying to load config from from partition");
     match load_config_from_boot_dir().await {
         Ok(config) => return Ok(config),
         Err(e) => {
-            info!("Failed to load config from partition: {e:?}");
+            tracing::info!("Failed to load config from partition: {e:?}");
         }
     };
 

@@ -1,6 +1,5 @@
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
-use log::debug;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -32,9 +31,9 @@ impl FileSystemConfigSource {
     async fn load_global_config(&self) -> Result<Option<GlobalConfig>> {
         let config_path = self.config_dir.join("global.toml");
 
-        debug!("Loading global config from: {config_path:?}");
+        tracing::debug!("Loading global config from: {config_path:?}");
         if !config_path.exists() {
-            debug!("global config not found, skip: {config_path:?}");
+            tracing::debug!("global config not found, skip: {config_path:?}");
             return Ok(None);
         }
 
@@ -53,10 +52,10 @@ impl FileSystemConfigSource {
         let config_path = self.config_dir.join("fde.toml");
 
         if !config_path.exists() {
-            debug!("FDE config not found, skip: {config_path:?}");
+            tracing::debug!("FDE config not found, skip: {config_path:?}");
             return Ok(None);
         }
-        debug!("Loading FDE config from: {config_path:?}");
+        tracing::debug!("Loading FDE config from: {config_path:?}");
 
         let fde_config = tokio::fs::read_to_string(&config_path)
             .await
@@ -73,9 +72,9 @@ impl FileSystemConfigSource {
         let mut volume_configs = Vec::new();
         let config_dir = self.config_dir.join("volumes");
 
-        debug!("Loading volume configs from: {config_dir:?}");
+        tracing::debug!("Loading volume configs from: {config_dir:?}");
         if !config_dir.exists() {
-            debug!("Volume configs directory not found, skip: {config_dir:?}");
+            tracing::debug!("Volume configs directory not found, skip: {config_dir:?}");
             return Ok(vec![]);
         }
 

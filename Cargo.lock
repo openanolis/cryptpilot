@@ -761,7 +761,6 @@ dependencies = [
  "lazy_static",
  "libc",
  "liblmod",
- "log",
  "loopdev-3",
  "mnt",
  "nix 0.29.0",

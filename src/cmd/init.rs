@@ -1,7 +1,6 @@
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use dialoguer::Confirm;
-use log::info;
 use rand::{distributions::Alphanumeric, Rng as _};
 
 use crate::{
@@ -19,14 +18,14 @@ pub struct InitCommand {
 impl super::Command for InitCommand {
     async fn run(&self) -> Result<()> {
         for volume in &self.init_options.volume {
-            info!("Initialize volume {volume} now");
+            tracing::info!("Initialize volume {volume} now");
 
             let volume_config = crate::config::source::get_config_source()
                 .await
                 .get_volume_config(&volume)
                 .await?;
 
-            info!(
+            tracing::info!(
                 "The key_provider type is \"{}\"",
                 serde_variant::to_variant_name(&volume_config.encrypt.key_provider)?
             );
@@ -35,7 +34,7 @@ impl super::Command for InitCommand {
 
             match key_provider.volume_type() {
                 crate::provider::VolumeType::Temporary => {
-                    info!("Not required to initialize");
+                    tracing::info!("Not required to initialize");
                     continue;
                 }
                 crate::provider::VolumeType::Persistent => {
@@ -43,7 +42,7 @@ impl super::Command for InitCommand {
                 }
             }
 
-            info!("The volume {volume} is initialized now");
+            tracing::info!("The volume {volume} is initialized now");
         }
         Ok(())
     }
@@ -74,13 +73,13 @@ async fn persistent_disk_init(
         bail!("The device {} is currently in use", volume_config.dev);
     }
 
-    info!("Fetching passphrase for volume {}", volume_config.volume);
+    tracing::info!("Fetching passphrase for volume {}", volume_config.volume);
     let passphrase = key_provider
         .get_key()
         .await
         .context("Failed to get passphrase")?;
 
-    info!("Formatting {} as LUKS2 volume now", volume_config.dev);
+    tracing::info!("Formatting {} as LUKS2 volume now", volume_config.dev);
     let integrity = match volume_config.extra_config.integrity {
         Some(true) => IntegrityType::Journal,
         Some(false) | None => IntegrityType::None,
@@ -98,11 +97,11 @@ async fn persistent_disk_init(
                 .collect::<String>()
         );
 
-        info!("Setting up a temporary device-mapper volume {tmp_volume_name}",);
+        tracing::info!("Setting up a temporary device-mapper volume {tmp_volume_name}",);
         crate::fs::luks2::open(&tmp_volume_name, &volume_config.dev, &passphrase, integrity)
             .await?;
 
-        info!(
+        tracing::info!(
             "Initializing {makefs} fs on volume {}",
             volume_config.volume
         );

@@ -6,7 +6,6 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
-use log::{error, info, warn};
 use metadata::Metadata;
 use tokio::{
     fs::{self, File},
@@ -64,7 +63,7 @@ impl super::Command for BootServiceCommand {
                     .await
                     .context("Failed to record switch root event to runtime measurement")
                 {
-                    warn!("{e:?}")
+                    tracing::warn!("{e:?}")
                 }
 
                 setup_mounts_required_by_fde()
@@ -73,7 +72,7 @@ impl super::Command for BootServiceCommand {
             }
         }
 
-        info!("Everything have been completed, exit now");
+        tracing::info!("Everything have been completed, exit now");
 
         Ok(())
     }
@@ -112,14 +111,14 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
         .get_fde_config()
         .await?;
     let Some(fde_config) = fde_config else {
-        info!("The system is not configured for FDE, skip setting up now");
+        tracing::info!("The system is not configured for FDE, skip setting up now");
         return Ok(());
     };
 
-    info!("Setting up volumes required by FDE");
+    tracing::info!("Setting up volumes required by FDE");
 
     // 1. Checking and activating LVM volume group 'system'
-    info!("[ 1/4 ] Checking and activating LVM volume group 'system'");
+    tracing::info!("[ 1/4 ] Checking and activating LVM volume group 'system'");
     Command::new("vgchange")
         .args(["-a", "y", "system"])
         .run()
@@ -127,11 +126,12 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
         .context("Failed to activate LVM volume group 'system'")?;
 
     // 2. Load the root-hash and add it to the AAEL
-    info!("[ 2/4 ] Loading root-hash");
+    tracing::info!("[ 2/4 ] Loading root-hash");
     let metadata = load_metadata().await.context("Failed to load metadata")?;
-    info!(
+    tracing::info!(
         "Got metadata type: {}, root-hash: {}",
-        metadata.r#type, metadata.root_hash
+        metadata.r#type,
+        metadata.root_hash
     );
     if metadata.r#type != 1 {
         bail!("Unsupported cryptpilot metadata type: {}", metadata.r#type);
@@ -146,21 +146,21 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
         .await
         .context("Failed to extend rootfs hash to runtime measurement")
     {
-        warn!("{e:?}")
+        tracing::warn!("{e:?}")
     }
 
     // 3. Setup rootfs dm-crypt for rootfs volume
-    info!("[ 3/4 ] Setting up rootfs volume");
+    tracing::info!("[ 3/4 ] Setting up rootfs volume");
     if let Some(encrypt) = &fde_config.rootfs.encrypt {
         // Setup dm-crypt for rootfs lv if required (optional)
-        info!("Fetching passphrase for rootfs volume");
+        tracing::info!("Fetching passphrase for rootfs volume");
         let provider = encrypt.key_provider.clone().into_provider();
         let passphrase = provider
             .get_key()
             .await
             .context("Failed to get passphrase")?;
 
-        info!("Setting up dm-crypt for rootfs volume");
+        tracing::info!("Setting up dm-crypt for rootfs volume");
         crate::fs::luks2::open(
             ROOTFS_DECRYPTED_LAYER_NAME,
             ROOTFS_LOGICAL_VOLUME,
@@ -169,10 +169,10 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
         )
         .await?;
     } else {
-        info!("Encryption is disabled for rootfs volume, skip setting up dm-crypt")
+        tracing::info!("Encryption is disabled for rootfs volume, skip setting up dm-crypt")
     }
 
-    info!("Setting up dm-verity for rootfs volume");
+    tracing::info!("Setting up dm-verity for rootfs volume");
     setup_rootfs_dm_verity(
         &metadata.root_hash,
         if fde_config.rootfs.encrypt.is_some() {
@@ -186,12 +186,12 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
     // Now we have the rootfs ro part
 
     // 4. Open the data logical volume with dm-crypt and dm-integrity on it
-    info!("[ 4/4 ] Setting up data volume");
+    tracing::info!("[ 4/4 ] Setting up data volume");
     {
         // Check if the data logical volume exists
         let create_data_lv = !Path::new(DATA_LOGICAL_VOLUME).exists();
         if create_data_lv {
-            info!(
+            tracing::info!(
                 "Data logical volume does not exist, assume it is first time boot and create it."
             );
 
@@ -223,7 +223,7 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
             .context("Failed to create data logical volume")?;
         }
 
-        info!("Fetching passphrase for data volume");
+        tracing::info!("Fetching passphrase for data volume");
         let provider = fde_config.data.encrypt.key_provider.into_provider();
         let passphrase = provider
             .get_key()
@@ -238,7 +238,7 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
 
         if create_data_lv {
             // Create a LUKS volume on it
-            info!("Creating LUKS2 on data volume");
+            tracing::info!("Creating LUKS2 on data volume");
             crate::fs::luks2::format(DATA_LOGICAL_VOLUME, &passphrase, integrity).await?;
         }
 
@@ -247,33 +247,33 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
 
         if create_data_lv {
             // Create a Ext4 fs on it
-            info!("Creating ext4 fs on data volume");
+            tracing::info!("Creating ext4 fs on data volume");
             crate::fs::luks2::makefs_if_empty(DATA_LAYER_NAME, &MakeFsType::Ext4, integrity)
                 .await?;
         }
     }
 
-    info!("Both rootfs volume and data volume are ready");
+    tracing::info!("Both rootfs volume and data volume are ready");
 
     Ok(())
 }
 
 async fn setup_mounts_required_by_fde() -> Result<()> {
-    info!("Setting up mounts required by FDE");
+    tracing::info!("Setting up mounts required by FDE");
 
     let fde_config = crate::config::source::get_config_source()
         .await
         .get_fde_config()
         .await?;
     let Some(fde_config) = fde_config else {
-        info!("The system is not configured for FDE, skip setting up now");
+        tracing::info!("The system is not configured for FDE, skip setting up now");
         return Ok(());
     };
 
     check_sysroot().await?;
 
     // 1. Mount the data volume to filesystem
-    info!("[ 1/4 ] Mounting data volume");
+    tracing::info!("[ 1/4 ] Mounting data volume");
     async {
         tokio::fs::create_dir_all("/data_volume").await?;
 
@@ -289,7 +289,7 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
     .context("Failed to mount data volume on /data_volume")?;
 
     // 2. Setup the rootfs-overlay. If on ram, create it first. If on disk, just use it to setup overlayfs.
-    info!("[ 2/4 ] Setting up rootfs overlay");
+    tracing::info!("[ 2/4 ] Setting up rootfs overlay");
 
     // Setup a backup of /sysroot at /sysroot_bak before mount overlay fs on it
     let sysroot_bak = Path::new("/sysroot_bak");
@@ -330,7 +330,7 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
 
     let overlay_dir = match overlay_type {
         RwOverlayType::Ram => {
-            info!("Using tmpfs as rootfs overlay");
+            tracing::info!("Using tmpfs as rootfs overlay");
             async {
                 tokio::fs::create_dir_all("/ram_overlay").await?;
 
@@ -363,7 +363,7 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
             Path::new("/ram_overlay")
         }
         RwOverlayType::Disk => {
-            info!("Using data-volume:/overlay as rootfs overlay");
+            tracing::info!("Using data-volume:/overlay as rootfs overlay");
             async {
                 tokio::fs::create_dir_all("/data_volume/overlay/upper").await?;
                 tokio::fs::create_dir_all("/data_volume/overlay/work").await?;
@@ -390,7 +390,7 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
     };
 
     // Setting up mount bind for some special dirs
-    info!("[ 3/4 ] Setting up mount bind");
+    tracing::info!("[ 3/4 ] Setting up mount bind");
     let dirs = [
         "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/",
         "/var/lib/containers/storage/overlay/",
@@ -457,12 +457,12 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
             .await
             .with_context(|| format!("Failed to settiing up mount bind for {dir}"))
         {
-            error!("{e:#}");
+            tracing::error!("{e:#}");
         }
     }
 
     // 4. mount --bind the /data folder
-    info!("[ 4/4 ] Setting up user-data dir: /data");
+    tracing::info!("[ 4/4 ] Setting up user-data dir: /data");
     async {
         tokio::fs::create_dir_all("/data_volume/data").await?;
         tokio::fs::create_dir_all("/sysroot/data").await?;
@@ -514,23 +514,23 @@ async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Resul
 }
 
 async fn setup_user_provided_volumes(boot_service_options: &BootServiceOptions) -> Result<()> {
-    info!("Checking status for all volumes now");
+    tracing::info!("Checking status for all volumes now");
     let volume_configs = crate::config::source::get_config_source()
         .await
         .get_volume_configs()
         .await?;
     if volume_configs.len() == 0 {
-        info!("The volume configs is empty, exit now");
+        tracing::info!("The volume configs is empty, exit now");
         return Ok(());
     }
     volume_configs.print_as_table().await?;
-    info!("Opening volumes according to volume configs");
+    tracing::info!("Opening volumes according to volume configs");
     for volume_config in &volume_configs {
         match boot_service_options.stage {
             BootStage::InitrdFdeBeforeSysroot
                 if volume_config.extra_config.auto_open != Some(true) =>
             {
-                info!(
+                tracing::info!(
                     "Volume {} is skipped since 'auto_open = false'",
                     volume_config.volume
                 );
@@ -542,26 +542,27 @@ async fn setup_user_provided_volumes(boot_service_options: &BootServiceOptions) 
             _ => { /* Accept */ }
         };
 
-        info!(
+        tracing::info!(
             "Setting up mapping for volume {} from device {}",
-            volume_config.volume, volume_config.dev
+            volume_config.volume,
+            volume_config.dev
         );
         match super::open::open_for_specific_volume(&volume_config).await {
             Ok(_) => {
-                info!(
+                tracing::info!(
                     "The mapping for volume {} is active now",
                     volume_config.volume
                 );
             }
             Err(e) => {
-                error!(
+                tracing::error!(
                     "Failed to setup mapping for volume {}: {e:?}",
                     volume_config.volume,
                 )
             }
         };
     }
-    info!("Checking status for all volumes again");
+    tracing::info!("Checking status for all volumes again");
     volume_configs.print_as_table().await?;
     Ok(())
 }

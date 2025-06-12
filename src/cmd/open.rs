@@ -1,6 +1,5 @@
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
-use log::info;
 
 use crate::{
     cli::OpenOptions,
@@ -17,26 +16,26 @@ pub struct OpenCommand {
 impl super::Command for OpenCommand {
     async fn run(&self) -> Result<()> {
         for volume in &self.open_options.volume {
-            info!("Open volume {volume} now");
+            tracing::info!("Open volume {volume} now");
             let volume_config = crate::config::source::get_config_source()
                 .await
                 .get_volume_config(&volume)
                 .await?;
 
             open_for_specific_volume(&volume_config).await?;
-            info!("The volume {volume} is active now");
+            tracing::info!("The volume {volume} is active now");
         }
         Ok(())
     }
 }
 
 pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()> {
-    info!(
+    tracing::info!(
         "The key_provider type is \"{}\"",
         serde_variant::to_variant_name(&volume_config.encrypt.key_provider)?
     );
     if crate::fs::luks2::is_active(&volume_config.volume) {
-        info!("The mapping for {} already exists", volume_config.volume);
+        tracing::info!("The mapping for {} already exists", volume_config.volume);
         return Ok(());
     }
     if crate::fs::luks2::is_dev_in_use(&volume_config.dev).await? {
@@ -64,16 +63,16 @@ async fn temporary_disk_open(
         .get_key()
         .await
         .context("Failed to get passphrase")?;
-    info!("The temporary passphrase generated");
+    tracing::info!("The temporary passphrase generated");
 
-    info!("Formatting {} as LUKS2 volume now", volume_config.dev);
+    tracing::info!("Formatting {} as LUKS2 volume now", volume_config.dev);
     let integrity = match volume_config.extra_config.integrity {
         Some(true) => IntegrityType::NoJournal,
         Some(false) | None => IntegrityType::None,
     };
     crate::fs::luks2::format(&volume_config.dev, &passphrase, integrity).await?;
 
-    info!("Setting up mapping for volume {} now", volume_config.volume);
+    tracing::info!("Setting up mapping for volume {} now", volume_config.volume);
     crate::fs::luks2::open(
         &volume_config.volume,
         &volume_config.dev,
@@ -83,14 +82,14 @@ async fn temporary_disk_open(
     .await?;
 
     if let Some(makefs) = &volume_config.extra_config.makefs {
-        info!(
+        tracing::info!(
             "Initializing {makefs} fs on volume {}",
             volume_config.volume
         );
         match crate::fs::luks2::makefs_if_empty(&volume_config.volume, &makefs, integrity).await {
             Ok(_) => (),
             Err(e) => {
-                info!("Closing volume {} now", volume_config.volume);
+                tracing::info!("Closing volume {} now", volume_config.volume);
                 crate::fs::luks2::close(&volume_config.volume).await?;
                 Err(e)?
             }
@@ -110,18 +109,18 @@ async fn persistent_disk_open(
         );
     }
 
-    info!("Fetching passphrase for volume {}", volume_config.volume);
+    tracing::info!("Fetching passphrase for volume {}", volume_config.volume);
     let passphrase = key_provider
         .get_key()
         .await
         .context("Failed to get passphrase")?;
 
-    info!("Checking passphrase for volume {}", volume_config.volume);
+    tracing::info!("Checking passphrase for volume {}", volume_config.volume);
     crate::fs::luks2::check_passphrase(&volume_config.dev, &passphrase)
         .await
         .context("Checking passphrase failed, the passphrase may be changed after the volume is initialized, please correct the passphrase or re-initialize the volume")?;
 
-    info!("Setting up mapping for volume {} now", volume_config.volume);
+    tracing::info!("Setting up mapping for volume {} now", volume_config.volume);
     let integrity = match volume_config.extra_config.integrity {
         Some(true) => IntegrityType::NoJournal,
         Some(false) | None => IntegrityType::None,

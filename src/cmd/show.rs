@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use comfy_table::modifiers::UTF8_ROUND_CORNERS;
 use comfy_table::presets::UTF8_FULL;
 use comfy_table::*;
-use log::warn;
 
 use crate::cli::ShowOptions;
 use crate::config::encrypt::KeyProviderConfig;
@@ -76,7 +75,7 @@ impl PrintAsTable for [VolumeConfig] {
                 if dev_exist {
                     Cell::new(volume_config.dev.as_str())
                 } else {
-                    warn!("Device {} does not exist", volume_config.dev);
+                    tracing::warn!("Device {} does not exist", volume_config.dev);
                     Cell::new(format!("{} <not exist>", volume_config.dev)).fg(Color::Red)
                 },
                 Cell::new(serde_variant::to_variant_name(
@@ -106,7 +105,7 @@ impl PrintAsTable for [VolumeConfig] {
                                     }
                                 }
                                 Err(e) => {
-                                    warn!("{e:?}");
+                                    tracing::warn!("{e:?}");
                                     Cell::new("Error").fg(Color::Red)
                                 }
                             }

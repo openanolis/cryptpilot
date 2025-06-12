@@ -11,7 +11,6 @@ use std::io::Write as _;
 use anyhow::{Context as _, Result};
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use documented::{Documented, DocumentedFields};
-use log::info;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
@@ -116,7 +115,7 @@ url = "{}"
         })()
         .context("Failed to decode response from KBS as base64")?;
 
-        info!("The passphrase has been fetched from KBS");
+        tracing::info!("The passphrase has been fetched from KBS");
         return Ok(passphrase);
     }
 
