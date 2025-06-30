@@ -112,7 +112,7 @@ disk::assert_disk_not_busy() {
 disk::dm_remove_all() {
     local device="$1"
     for dm_name in $(cat <(lsblk "$device" --list | awk 'NR>1 {print $1}') <(dmsetup ls | awk '{print $1}') | sort | uniq -d); do
-        dmsetup remove "$dm_name"
+        disk::dm_remove_wait_busy "$dm_name"
     done
 }
 
@@ -153,6 +153,19 @@ disk::umount_wait_busy() {
             return 0
         fi
         echo "Waiting for $1 to be unmounted..."
+        sleep 1
+    done
+}
+
+disk::dm_remove_wait_busy() {
+    while true; do
+        if ! [ -e /dev/mapper/$1 ]; then
+            return 0
+        fi
+        if dmsetup remove $1; then
+            return 0
+        fi
+        echo "Waiting for device mapper $1 to be removed..."
         sleep 1
     done
 }
@@ -291,21 +304,21 @@ step:update_rootfs_and_initrd() {
 
     local rootfs_mount_point=${workdir}/rootfs
     mkdir -p "${rootfs_mount_point}"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev && umount ${rootfs_mount_point}/dev"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev && disk::umount_wait_busy ${rootfs_mount_point}/dev"
     mount -t devtmpfs devtmpfs "${rootfs_mount_point}/dev"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev/pts && umount ${rootfs_mount_point}/dev/pts"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev/pts && disk::umount_wait_busy ${rootfs_mount_point}/dev/pts"
     mount -t devpts devpts "${rootfs_mount_point}/dev/pts"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/proc && umount ${rootfs_mount_point}/proc"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/proc && disk::umount_wait_busy ${rootfs_mount_point}/proc"
     mount -t proc proc "${rootfs_mount_point}/proc"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/run && umount ${rootfs_mount_point}/run"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/run && disk::umount_wait_busy ${rootfs_mount_point}/run"
     mount -t tmpfs tmpfs "${rootfs_mount_point}/run"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/sys && umount ${rootfs_mount_point}/sys"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/sys && disk::umount_wait_busy ${rootfs_mount_point}/sys"
     mount -t sysfs sysfs "${rootfs_mount_point}/sys"
     # mount bind boot
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot && umount ${rootfs_mount_point}/boot"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot && disk::umount_wait_busy ${rootfs_mount_point}/boot"
     mount "${boot_file_path}" "${rootfs_mount_point}/boot"
     # also mount the EFI part
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot/efi && umount ${rootfs_mount_point}/boot/efi"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot/efi && disk::umount_wait_busy ${rootfs_mount_point}/boot/efi"
     mount "$efi_part" "${rootfs_mount_point}/boot/efi"
 
     echo "Installing rpm packages"
@@ -383,13 +396,13 @@ rm -rf /var/cache/dnf/*
 
 EOF
     )"
-    umount "${rootfs_mount_point}/boot/efi"
-    umount "${rootfs_mount_point}/boot"
-    umount "${rootfs_mount_point}/sys"
-    umount "${rootfs_mount_point}/run"
-    umount "${rootfs_mount_point}/proc"
-    umount "${rootfs_mount_point}/dev/pts"
-    umount "${rootfs_mount_point}/dev"
+    disk::umount_wait_busy "${rootfs_mount_point}/boot/efi"
+    disk::umount_wait_busy "${rootfs_mount_point}/boot"
+    disk::umount_wait_busy "${rootfs_mount_point}/sys"
+    disk::umount_wait_busy "${rootfs_mount_point}/run"
+    disk::umount_wait_busy "${rootfs_mount_point}/proc"
+    disk::umount_wait_busy "${rootfs_mount_point}/dev/pts"
+    disk::umount_wait_busy "${rootfs_mount_point}/dev"
 
     disk::umount_wait_busy "${rootfs_mount_point}"
 
@@ -475,12 +488,12 @@ step::setup_rootfs_lv_with_encrypt() {
     proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B system # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
     # Create a encrypted volume
     echo -n "${rootfs_passphrase}" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 /dev/mapper/system-rootfs -
-    proc::hook_exit "[[ -e /dev/mapper/rootfs ]] && dmsetup remove rootfs"
+    proc::hook_exit "[[ -e /dev/mapper/rootfs ]] && disk::dm_remove_wait_busy rootfs"
 
     echo -n "${rootfs_passphrase}" | cryptsetup open /dev/mapper/system-rootfs rootfs -
     # Copy rootfs content to the encrypted volume
     dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/rootfs bs=4M
-    dmsetup remove rootfs
+    disk::dm_remove_wait_busy rootfs
 }
 
 step::setup_rootfs_lv_without_encrypt() {
