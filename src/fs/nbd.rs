@@ -27,6 +27,10 @@ pub struct NbdDevice {
 }
 
 impl NbdDevice {
+    pub fn is_module_loaded() -> bool {
+        Path::new("/dev/nbd0").exists()
+    }
+
     pub async fn modprobe() -> Result<()> {
         tokio::task::spawn_blocking(|| {
             liblmod::modprobe(
@@ -48,7 +52,9 @@ impl NbdDevice {
     }
 
     pub async fn get_avaliable() -> Result<NbdDeviceNumber> {
-        Self::modprobe().await?;
+        if !Self::is_module_loaded() {
+            Self::modprobe().await?;
+        }
 
         for i in 0..=99 {
             let dev = PathBuf::from(format!("/dev/nbd{i}"));

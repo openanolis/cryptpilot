@@ -1,5 +1,5 @@
 %global debug_package %{nil}
-%define release_num 3
+%define release_num 4
 
 Name: cryptpilot
 Version: 0.2.5
@@ -139,6 +139,9 @@ fi
 
 
 %changelog
+* Wed Jul  2 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.5-4
+- Fix "Failed to load kernel module 'nbd'" when used in docker container.
+
 * Mon Jun 30 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.5-3
 - cryptpilot-convert: fix occasional "device or resource busy" error when rootfs encryption is enabled
 
