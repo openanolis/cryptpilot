@@ -387,7 +387,23 @@ step::extract_boot_part_from_rootfs() {
 
     log::info "Creating boot partition image of size $BOOT_PART_SIZE"
     fallocate -l "$BOOT_PART_SIZE" "$boot_file_path"
-    yes | mkfs.ext4 "$boot_file_path"
+    VERSION=$(mke2fs -V 2>&1 | head -n1 | awk '{print $2}')
+
+    if printf '%s\n' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+        # Use sort -V for version comparison
+        if printf '%s\n' "1.47.0" "$VERSION" | sort -V | head -n1 | grep -q '1.47.0'; then
+            echo "e2fsprogs version $VERSION >= 1.47.0, proceeding..."
+            yes | mkfs.ext4 -F -O  ^orphan_file,^metadata_csum_seed "$boot_file_path"
+        else
+            echo "e2fsprogs version $VERSION < 1.47.0, skipping advanced features."
+            # Fallback to a standard format command
+            yes | mkfs.ext4 "$boot_file_path"
+        fi
+    else
+        echo "Could not determine e2fsprogs version."
+        exit 1
+    fi
+
     local boot_mount_point=${workdir}/boot
     mkdir -p "$boot_mount_point"
     proc::hook_exit "mountpoint -q ${boot_mount_point} && disk::umount_wait_busy ${boot_mount_point}"
