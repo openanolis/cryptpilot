@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -63,7 +65,10 @@ impl CloudInitConfigSource {
 
     async fn get_cloudinit_user_data() -> Result<String> {
         // Get cloud-init user data from IMDS: https://help.aliyun.com/zh/ecs/user-guide/view-instance-metadata
-        let token = reqwest::Client::new()
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        let token = client
             .put("http://100.100.100.200/latest/api/token")
             .header("X-aliyun-ecs-metadata-token-ttl-seconds", "180")
             .send()
@@ -72,7 +77,7 @@ impl CloudInitConfigSource {
             .text()
             .await?;
 
-        let user_data = reqwest::Client::new()
+        let user_data = client
             .get("http://100.100.100.200/latest/user-data")
             .header("X-aliyun-ecs-metadata-token", token)
             .send()
