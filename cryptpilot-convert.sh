@@ -459,7 +459,13 @@ disk::install_rpm_on_rootfs() {
 
     # Install all packages using yum inside the chroot
     chroot "${rootfs_mount_point}" rpmdb --rebuilddb --dbpath /var/lib/rpm
-    chroot "${rootfs_mount_point}" yum install -y "${all_packages[@]}"
+    chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy}    \
+                                                ${https_proxy:+https_proxy=$https_proxy} \
+                                                ${ftp_proxy:+ftp_proxy=$ftp_proxy}       \
+                                                ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+                                                ${all_proxy:+all_proxy=$all_proxy}       \
+                                                ${no_proxy:+no_proxy=$no_proxy}          \
+                                                yum install -y "${all_packages[@]}"
     chroot "${rootfs_mount_point}" yum clean all
 
     # Remove the copied .rpm files from the chroot after installation
