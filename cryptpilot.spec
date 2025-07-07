@@ -1,5 +1,5 @@
 %global debug_package %{nil}
-%define release_num 4
+%define release_num 5
 
 Name: cryptpilot
 Version: 0.2.5
@@ -139,6 +139,10 @@ fi
 
 
 %changelog
+* Mon Jul  7 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.5-5
+- fde: sync time to system before call cdh if run in aliyun ecs.
+- fde: add timeout fetching config from cloudinit.
+
 * Wed Jul  2 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.5-4
 - Fix "Failed to load kernel module 'nbd'" when used in docker container.
 

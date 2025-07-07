@@ -769,6 +769,7 @@ dependencies = [
  "protobuf 3.4.0",
  "rand 0.8.5",
  "reqwest",
+ "rsntp",
  "rstest",
  "rstest_reuse",
  "scopeguard",
@@ -2947,6 +2948,16 @@ dependencies = [
  "spki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rsntp"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cce5f45764fc4f0da82badc165fec123f137f2b2ba7112778a83575bc6af3e1"
+dependencies = [
+ "chrono",
+ "tokio",
 ]
 
 [[package]]

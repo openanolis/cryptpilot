@@ -1,6 +1,7 @@
 pub mod copy_config;
 pub mod initrd_state;
 pub mod metadata;
+pub mod time_sync;
 
 use std::path::Path;
 
@@ -47,14 +48,11 @@ impl super::Command for BootServiceCommand {
     async fn run(&self) -> Result<()> {
         match &self.boot_service_options.stage {
             BootStage::InitrdFdeBeforeSysroot => {
+                time_sync::sync_time_to_system().await?;
+
                 setup_volumes_required_by_fde()
                     .await
                     .context("Failed to setup volumes required by FDE")?;
-            }
-            BootStage::SystemVolumesAutoOpen => {
-                setup_user_provided_volumes(&self.boot_service_options)
-                    .await
-                    .context("Failed to setup volumes user provided automatically")?;
             }
             BootStage::InitrdFdeAfterSysroot => {
                 let measure = AutoDetectMeasure::new().await;
@@ -69,6 +67,11 @@ impl super::Command for BootServiceCommand {
                 setup_mounts_required_by_fde()
                     .await
                     .context("Failed to setup mounts required by FDE")?;
+            }
+            BootStage::SystemVolumesAutoOpen => {
+                setup_user_provided_volumes(&self.boot_service_options)
+                    .await
+                    .context("Failed to setup volumes user provided automatically")?;
             }
         }
 
