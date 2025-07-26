@@ -183,7 +183,11 @@ proc::print_help_and_exit() {
     echo "  -c, --config-dir <cryptpilot_config_dir>                The directory containing cryptpilot configuration files."
     echo "      --rootfs-passphrase <rootfs_encrypt_passphrase>     The passphrase for rootfs encryption."
     echo "      --rootfs-no-encryption <rootfs_encrypt_passphrase>  Skip rootfs encryption, but keep the rootfs measuring feature enabled."
-    echo "      --package <rpm_package>                             Specify an RPM package name or RPM file to install (can be specified multiple times)."
+    echo "      --rootfs-part-num <rootfs_part_num>                 The partition number of the rootfs partition on the original disk. By default the tool will"
+    echo "                                                          search for the rootfs partition by label='root' and fail if not found. You can override this"
+    echo "                                                          behavior by specifying the partition number."
+    echo "      --package <rpm_package>                             Specify an RPM package name or path to the RPM file to install in to the disk before"
+    echo "                                                          converting. This can be specified multiple times."
     echo "  -h, --help                                              Show this help message and exit."
     exit $1
 }
@@ -199,7 +203,24 @@ proc::exec_subshell_flose_fds() {
 # Determine the right partition number by checking the partition table with partition label
 disk::find_rootfs_partition() {
     local device=$1
+    local specified_part_num=$2 # optional specified partition number
     local part_num=1
+
+    if [[ -n "${specified_part_num}" ]]; then
+        local part_path=${device}p${specified_part_num}
+        if [ ! -b "$part_path" ]; then
+            echo "Specified rootfs partition $part_path does not exist" >&2
+            return 1
+        fi
+        local next_part_path=${device}p$((specified_part_num + 1))
+        if [ -b "$next_part_path" ]; then
+            echo "The specified rootfs partition $part_path should be the last partition" >&2
+            return 1
+        fi
+        echo "$specified_part_num"
+        return 0
+    fi
+
     while true; do
         local part_path=${device}p${part_num}
         if [ ! -b "$part_path" ]; then
@@ -556,6 +577,7 @@ main() {
     local config_dir
     local rootfs_passphrase
     local rootfs_no_encryption=false
+    local rootfs_part_num
     local packages=()
 
     while [[ "$#" -gt 0 ]]; do
@@ -583,6 +605,10 @@ main() {
         --rootfs-no-encryption)
             rootfs_no_encryption=true
             shift 1
+            ;;
+        --rootfs-part-num)
+            rootfs_part_num="$2"
+            shift 2
             ;;
         --package)
             packages+=("$2")
@@ -707,7 +733,7 @@ main() {
     efi_part="${device}p${efi_part_num}"
 
     local rootfs_orig_part_num
-    rootfs_orig_part_num=$(disk::find_rootfs_partition "${device}")
+    rootfs_orig_part_num=$(disk::find_rootfs_partition "${device}" "${rootfs_part_num:-}")
     local rootfs_orig_part
     rootfs_orig_part="${device}p${rootfs_orig_part_num}"
     rootfs_orig_start_sector=$(parted $device --script -- unit s print | grep "^ ${rootfs_orig_part_num}" | awk '{print $2}' | sed 's/s//')
