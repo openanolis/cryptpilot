@@ -359,17 +359,27 @@ step:update_rootfs_and_initrd() {
 
     # update /etc/fstab
     echo "Updating /etc/fstab"
-    local boot_uuid
-    boot_uuid=$(blkid -o value -s UUID $boot_file_path) # get uuid of the boot image
-    local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults 0 2"
     local root_mount_line_number
     root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
     if [ -z "${root_mount_line_number}" ]; then
         proc::fatal "Cannot find mount for / in /etc/fstab"
     fi
+
+    ## insert boot mount line
+    local boot_uuid
+    boot_uuid=$(blkid -o value -s UUID $boot_file_path) # get uuid of the boot image
+    local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults 0 2"
     local boot_mount_insert_line_number
     boot_mount_insert_line_number=$((root_mount_line_number + 1))
     sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
+
+    ## replace the root mount device with /dev/mapper/rootfs
+    local root_mount_line_content
+    root_mount_line_content=$(grep -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1)
+    local root_mount_device
+    root_mount_device=$(echo "${root_mount_line_content}" | awk '{print $1}')
+    sed -i "s|^${root_mount_device}\([[:space:]]\+\)/\([[:space:]]\+\)|/dev/mapper/rootfs\1/\2|" "${rootfs_mount_point}/etc/fstab"
+
 
     # update initrd
     echo "Updating initrd and grub2"
