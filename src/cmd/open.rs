@@ -73,7 +73,7 @@ async fn temporary_disk_open(
     crate::fs::luks2::format(&volume_config.dev, &passphrase, integrity).await?;
 
     tracing::info!("Setting up mapping for volume {} now", volume_config.volume);
-    crate::fs::luks2::open(
+    crate::fs::luks2::open_with_check_passphrase(
         &volume_config.volume,
         &volume_config.dev,
         &passphrase,
@@ -115,17 +115,12 @@ async fn persistent_disk_open(
         .await
         .context("Failed to get passphrase")?;
 
-    tracing::info!("Checking passphrase for volume {}", volume_config.volume);
-    crate::fs::luks2::check_passphrase(&volume_config.dev, &passphrase)
-        .await
-        .context("Checking passphrase failed, the passphrase may be changed after the volume is initialized, please correct the passphrase or re-initialize the volume")?;
-
     tracing::info!("Setting up mapping for volume {} now", volume_config.volume);
     let integrity = match volume_config.extra_config.integrity {
         Some(true) => IntegrityType::NoJournal,
         Some(false) | None => IntegrityType::None,
     };
-    crate::fs::luks2::open(
+    crate::fs::luks2::open_with_check_passphrase(
         &volume_config.volume,
         &volume_config.dev,
         &passphrase,

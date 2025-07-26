@@ -164,7 +164,7 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
             .context("Failed to get passphrase")?;
 
         tracing::info!("Setting up dm-crypt for rootfs volume");
-        crate::fs::luks2::open(
+        crate::fs::luks2::open_with_check_passphrase(
             ROOTFS_DECRYPTED_LAYER_NAME,
             ROOTFS_LOGICAL_VOLUME,
             &passphrase,
@@ -245,7 +245,7 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
             crate::fs::luks2::format(DATA_LOGICAL_VOLUME, &passphrase, integrity).await?;
         }
 
-        crate::fs::luks2::open(DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, &passphrase, integrity)
+        crate::fs::luks2::open_with_check_passphrase(DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, &passphrase, integrity)
             .await?;
 
         if create_data_lv {

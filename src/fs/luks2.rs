@@ -78,7 +78,7 @@ pub async fn check_passphrase(dev: &str, passphrase: &Passphrase) -> Result<(), 
     Ok(())
 }
 
-pub async fn open(
+pub async fn open_with_check_passphrase(
     volume: &str,
     dev: &str,
     passphrase: &Passphrase,
@@ -88,6 +88,10 @@ pub async fn open(
     let volume = volume.to_owned();
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
+
+    crate::fs::luks2::check_passphrase(&dev, &passphrase)
+        .await
+        .with_context(||format!("Passphrase verification failed for volume {}: the passphrase is likely incorrect. Please check your passphrase configuration.", volume))?;
 
     let mut cmd = Command::new("cryptsetup");
     if verbose {
