@@ -408,6 +408,21 @@ step:update_rootfs_and_initrd() {
     root_mount_device=$(echo "${root_mount_line_content}" | awk '{print $1}')
     sed -i "s|^${root_mount_device}\([[:space:]]\+\)/\([[:space:]]\+\)|/dev/mapper/rootfs\1/\2|" "${rootfs_mount_point}/etc/fstab"
 
+    # Ensure GRUB always uses /dev/mapper/rootfs as root device
+    log::info "Configuring GRUB to always use /dev/mapper/rootfs as root device"
+    local grub_config_file="${rootfs_mount_point}/etc/default/grub"
+    if [ -f "$grub_config_file" ]; then
+        # Remove any existing root= parameter from GRUB_CMDLINE_LINUX
+        sed -i 's/root=[^[:space:]]*//g' "$grub_config_file"
+
+        # Force to use /dev/mapper/rootfs
+        # https://wiki.gentoo.org/wiki/GRUB/Configuration_variables
+        echo 'GRUB_DEVICE="/dev/mapper/rootfs"' >> "$grub_config_file"
+        echo 'GRUB_DISABLE_LINUX_UUID=true' >> "$grub_config_file"
+    else
+        log::error "Grub config file ${grub_config_file} not exist"
+        return 1
+    fi
 
     # update initrd
     log::info "Updating initrd and grub2"
