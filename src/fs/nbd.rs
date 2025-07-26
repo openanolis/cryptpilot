@@ -139,7 +139,7 @@ impl NbdDevice {
                 .await
                 .with_context(|| format!("Failed to read file {:?}", entry))?;
 
-            dm_names.push(dm_name);
+            dm_names.push(dm_name.trim_end().to_owned()); // Remove trailing newline
         }
 
         if !dm_names.is_empty() {
