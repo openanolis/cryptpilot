@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -63,32 +61,6 @@ impl CloudInitConfigSource {
         Self {}
     }
 
-    async fn get_cloudinit_user_data() -> Result<String> {
-        // Get cloud-init user data from IMDS: https://help.aliyun.com/zh/ecs/user-guide/view-instance-metadata
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?;
-        let token = client
-            .put("http://100.100.100.200/latest/api/token")
-            .header("X-aliyun-ecs-metadata-token-ttl-seconds", "180")
-            .send()
-            .await
-            .context("Failed to get IMDS token")?
-            .text()
-            .await?;
-
-        let user_data = client
-            .get("http://100.100.100.200/latest/user-data")
-            .header("X-aliyun-ecs-metadata-token", token)
-            .send()
-            .await
-            .context("Failed to get cloud-init user data from IMDS")?
-            .text()
-            .await?;
-
-        Ok(user_data)
-    }
-
     fn parse_from_user_data(user_data: &str) -> Result<ConfigBundle> {
         if user_data.trim().is_empty() {
             bail!("The cloud-init user data is empty")
@@ -116,11 +88,16 @@ impl ConfigSource for CloudInitConfigSource {
     }
 
     async fn get_config(&self) -> Result<ConfigBundle> {
-        let user_data = Self::get_cloudinit_user_data().await?;
-        Self::parse_from_user_data(&user_data)
+        let is_ecs = crate::vendor::aliyun::check_is_aliyun_ecs().await;
+        if !is_ecs {
+            bail!("Not a Aliyun ECS instance, skip fetching config from cloud-init user data");
+        } else {
+            let user_data =
+                crate::vendor::aliyun::cloudinit::get_aliyun_ecs_cloudinit_user_data().await?;
+            Self::parse_from_user_data(&user_data)
+        }
     }
 }
-
 #[cfg(test)]
 pub mod tests {
 

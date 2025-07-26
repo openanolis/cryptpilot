@@ -5,6 +5,7 @@ pub mod fs;
 pub mod measure;
 pub mod provider;
 pub mod types;
+pub mod vendor;
 
 use std::path::Path;
 
