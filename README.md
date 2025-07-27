@@ -138,7 +138,15 @@ wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/seed.img
 
 After you finished your tests, you can use Ctrl-A C to get to the qemu console, and enter 'quit' to exit qemu.
 
-4. Upload the encrypted disk image file to Aliyun and boot from it.
+4. Calculate the reference values from the encrypted disk image file:
+
+```sh
+cryptpilot fde show-reference-value --stage system --disk ./encrypted.qcow2
+```
+
+You can then upload them to the [Reference Value Provider Service](https://github.com/confidential-containers/trustee/tree/main/rvps).
+
+5. Upload the encrypted disk image file to Aliyun and boot from it.
 
 ### Encrypt a real system disk
 
@@ -150,7 +158,7 @@ For those who wish to encrypt a real system disk, you need to unbind the disk fr
 cryptpilot-convert --device /dev/nvme2n1 -c ./config_dir/ --rootfs-passphrase AAAaaawewe222
 ```
 
-Now re-bind the disk to the original instance and boot from it.
+Now you can re-bind the disk to the original instance and boot from it.
 
 ## Example: setting up encrypted data partations
 
