@@ -235,15 +235,15 @@ systemctl enable --now cryptpilot.service
 This project includes CI tests for various encryption scenarios:
 
 1. System disk encryption test (test-system-encryption.sh) - Tests full disk encryption with exec provider
-2. KMS volume encryption test (test-kms-volume.sh) - Tests data volume encryption with KMS-like provider
+2. KBS volume encryption test (test-kbs-volume.sh) - Tests data volume encryption with KBS-like provider
 
 You can run these tests locally:
 ```sh
 # Run system encryption test
 sudo ./test-system-encryption.sh
 
-# Run KMS volume test
-sudo ./test-kms-volume.sh
+# Run KBS volume test
+sudo ./test-kbs-volume.sh
 ```
 
 # Supported Distrubutions
