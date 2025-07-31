@@ -563,7 +563,19 @@ step::shrink_and_extract_rootfs_part() {
 
     # Adjust file system content, all move to front
     log::info "Checking and shrinking rootfs filesystem"
-    e2fsck -y -f "${rootfs_orig_part}"
+
+    if e2fsck -y -f "${rootfs_orig_part}"; then
+        echo "Filesystem clean or repaired."
+    else
+        rc=$?
+        if [[ $rc -eq 1 ]]; then
+            echo "Filesystem had errors but was fixed."
+        else
+            echo "e2fsck failed with exit code $rc"
+            return $rc
+        fi
+    fi
+
     resize2fs -M "${rootfs_orig_part}"
     # TODO: support filesystem other than ext4
     local after_shrink_block_size
