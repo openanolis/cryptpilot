@@ -315,21 +315,11 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
     let overlay_type = fde_config.rootfs.rw_overlay.unwrap_or(RwOverlayType::Disk);
 
     // Load overlay module if not loaded
-    tokio::task::spawn_blocking(|| {
-        liblmod::modprobe(
-            "overlay".to_string(),
-            "".to_string(),
-            liblmod::Selection::Current,
-        )
-        .or_else(|e| {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(e);
-            }
-            Ok(())
-        })
-        .context("Failed to load kernel module 'overlay'")
-    })
-    .await??;
+    Command::new("modprobe")
+    .arg("overlay")
+    .run()
+    .await
+    .context("Failed to load kernel module 'overlay'")?;
 
     let overlay_dir = match overlay_type {
         RwOverlayType::Ram => {
@@ -485,21 +475,11 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
 
 async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Result<()> {
     async {
-        tokio::task::spawn_blocking(|| {
-            liblmod::modprobe(
-                "dm-verity".to_string(),
-                "".to_string(),
-                liblmod::Selection::Current,
-            )
-            .or_else(|e| {
-                if e.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(e);
-                }
-                Ok(())
-            })
-            .context("Failed to load kernel module 'dm-verity'")
-        })
-        .await??;
+        Command::new("modprobe")
+        .arg("dm-verity")
+        .run()
+        .await
+        .context("Failed to load kernel module 'dm-verity'")?;
 
         Command::new("veritysetup")
             .arg("open")

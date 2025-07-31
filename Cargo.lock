@@ -760,7 +760,6 @@ dependencies = [
  "kms",
  "lazy_static",
  "libc",
- "liblmod",
  "loopdev-3",
  "mnt",
  "nix 0.29.0",
@@ -1742,12 +1741,6 @@ dependencies = [
  "libz-sys",
  "pkg-config",
 ]
-
-[[package]]
-name = "liblmod"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b221585d3f0053b5b80768e115b50edcd5c423b703a9c2c5cbf4bcf417ab227c"
 
 [[package]]
 name = "libloading"

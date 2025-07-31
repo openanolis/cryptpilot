@@ -32,21 +32,11 @@ impl NbdDevice {
     }
 
     pub async fn modprobe() -> Result<()> {
-        tokio::task::spawn_blocking(|| {
-            liblmod::modprobe(
-                "nbd".to_string(),
-                "max_part=8".to_string(),
-                liblmod::Selection::Current,
-            )
-            .or_else(|e| {
-                if e.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(e);
-                }
-                Ok(())
-            })
-            .context("Failed to load kernel module 'nbd'")
-        })
-        .await??;
+        Command::new("modprobe")
+        .args(["nbd", "max_part=8"])
+        .run()
+        .await
+        .context("Failed to load kernel module 'nbd'")?;
 
         Ok(())
     }

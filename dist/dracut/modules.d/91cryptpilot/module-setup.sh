@@ -21,6 +21,7 @@ install() {
         inst_multiple dd tail grep sort
         # required by 'file' command
         inst_multiple file
+        inst_multiple modprobe
         inst_simple /usr/share/misc/magic
         inst_simple /usr/share/misc/magic.mgc
         # For debug only

@@ -18,6 +18,7 @@ Requires: systemd
 Requires: systemd-udev
 Requires: veritysetup
 Requires: device-mapper-libs
+Requires: kmod
 # mkfs.vfat
 Requires: dosfstools
 # mkfs.xfs
