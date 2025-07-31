@@ -456,6 +456,9 @@ step:update_rootfs_and_initrd() {
     mkdir -p "${rootfs_mount_point}/etc/cryptpilot/"
     cp -a "${config_dir}/." "${rootfs_mount_point}/etc/cryptpilot/"
 
+    # Prevent duplicate mounting of efi partitions
+    sed -i '/[[:space:]]\/boot\/efi[[:space:]]/ s/defaults,/defaults,noauto,nofail,/' "${rootfs_mount_point}/etc/fstab"
+
     if [ "$boot_part_num" = "0xff" ];then
         # update /etc/fstab
         log::info "Updating /etc/fstab"
@@ -468,7 +471,7 @@ step:update_rootfs_and_initrd() {
         ## insert boot mount line
         local boot_uuid
         boot_uuid=$(blkid -o value -s UUID $boot_file_path) # get uuid of the boot image
-        local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults 0 2"
+        local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults,noauto,nofail 0 2"
         local boot_mount_insert_line_number
         boot_mount_insert_line_number=$((root_mount_line_number + 1))
         sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
