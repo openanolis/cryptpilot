@@ -287,42 +287,57 @@ disk::find_rootfs_partition() {
     return 1
 }
 
-# find efi partition by PARTLABEL
+# find_efi_partition: locate EFI System partition number by multiple heuristics
 disk::find_efi_partition() {
-    local device=$1
-    local part_num=1
-    while true; do
-        local part_path=${device}p${part_num}
-        if [ ! -b "$part_path" ]; then
-            break # try again with another method
-        fi
-        local part_label
-        part_label=$(blkid -o value -s PARTLABEL $part_path)
-        if [[ "$part_label" == EFI* ]]; then
-            echo "$part_num"
-            return 0
-        fi
-        part_num=$((part_num + 1))
-    done
+  local device=$1
+  local tmpmnt=$(mktemp -d)
+  trap 'rm -rf "$tmpmnt"' EXIT
 
-    # find efi partition by SEC_TYPE="msdos" and TYPE="vfat"
-    local part_num=1
-    while true; do
-        local part_path=${device}p${part_num}
-        if [ ! -b "$part_path" ]; then
-            log::error "Cannot find efi partition"
-            return 1
-        fi
-        local sec_type
-        sec_type=$(blkid -o value -s SEC_TYPE $part_path)
-        local part_type
-        part_type=$(blkid -o value -s TYPE $part_path)
-        if [[ "$sec_type" == "msdos" ]] && [[ "$part_type" == "vfat" ]]; then
-            echo "$part_num"
+  # Iterate all partition nodes under device
+  while IFS= read -r part; do
+    [[ "$part" =~ [0-9]+$ ]] || continue
+
+    # 1) PARTLABEL starts with "EFI"
+    local label
+    label=$(blkid -o value -s PARTLABEL "$part" 2>/dev/null)
+    if [[ "$label" == EFI* ]]; then
+      echo "${part##*p}" && return 0
+    fi
+
+    # 2) GPT PARTTYPE GUID matches EFI System GUID
+    local ptype
+    ptype=$(blkid -o value -s PARTTYPE "$part" 2>/dev/null)
+    if [[ "${ptype,,}" == "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ]]; then
+      echo "${part##*p}" && return 0
+    fi
+
+    # 3) vfat filesystem with msdos sec_type
+    local sec_type fstype
+    sec_type=$(blkid -o value -s SEC_TYPE "$part" 2>/dev/null)
+    fstype=$(blkid -o value -s TYPE "$part" 2>/dev/null)
+    if [[ "${sec_type,,}" == "msdos" && "${fstype,,}" == "vfat" ]]; then
+      echo "${part##*p}" && return 0
+    fi
+
+    # 4) mount and inspect: must have EFI/ and no vmlinuz-* files
+    if mount -o ro "$part" "$tmpmnt" 2>/dev/null; then
+    # Check for the existence of the EFI directory
+    if [ -d "$tmpmnt/EFI" ]; then
+        # Check that there are no vmlinuz-* files under the root
+        vms=( "$tmpmnt"/vmlinuz-* )
+        if [ "${#vms[@]}" -eq 0 ]; then
+            umount "$tmpmnt"
+            echo "${part##*p}"
             return 0
         fi
-        part_num=$((part_num + 1))
-    done
+    fi
+    umount "$tmpmnt"
+    fi
+
+  done < <(lsblk -lnpo NAME "$device")
+
+  echo "cannot find EFI partition on $device" >&2
+  echo "$no_part_num" && return 0
 }
 
 step::setup_workdir() {
