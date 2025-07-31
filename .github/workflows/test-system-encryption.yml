@@ -1,0 +1,45 @@
+name: Test System Disk Encryption
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-encryption:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86 \
+          qemu-kvm \
+          qemu-utils \
+          wget \
+          curl \
+          socat \
+          build-essential \
+          pkg-config \
+          libssl-dev \
+          libdevmapper-dev \
+          libsystemd-dev
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Build cryptpilot
+      run: |
+        cargo build --release
+
+    - name: Run system encryption test
+      run: |
+        chmod +x test-system-encryption.sh
+        timeout 300s ./test-system-encryption.sh --ci
