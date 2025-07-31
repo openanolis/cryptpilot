@@ -340,6 +340,33 @@ disk::find_efi_partition() {
   echo "$no_part_num" && return 0
 }
 
+disk::find_boot_partition() {
+  local device=$1
+  local tmpmnt=$(mktemp -d)
+  trap 'rm -rf "$tmpmnt"' EXIT
+
+  while IFS= read -r part; do
+    [[ "$part" =~ [0-9]+$ ]] || continue
+
+    # Mount Partition (read-only)
+    if mount -o ro "$part" "$tmpmnt" 2>/dev/null; then
+        # Check for common boot content directly under mount point
+        # Collect all matches
+        vms=( "$tmpmnt"/vmlinuz-* )
+        if [ "${#vms[@]}" -gt 0 ]; then
+            # At least one vmlinuz-* actually exists
+            umount "$tmpmnt"
+            echo "${part##*p}"
+            return 0
+        fi
+        umount "$tmpmnt"
+    fi
+  done < <(lsblk -lnpo NAME "$device")
+
+  echo "cannot find boot partition on $device" >&2
+  echo "$no_part_num" && return 0
+}
+
 step::setup_workdir() {
     # init a tmp workdir with mktemp
     workdir=$(mktemp -d "/tmp/.cryptpilot-convert-XXXXXXXX")
