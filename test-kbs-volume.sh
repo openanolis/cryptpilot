@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Test script for KMS volume encryption with cryptpilot
-# This script tests the KMS credential provider for data volume encryption
+# Test script for KBS volume encryption with cryptpilot
+# This script tests the KBS credential provider for data volume encryption
 
 set -e  # Exit on any error
 
 # Default configuration
-CONFIG_DIR="test-kms-config"
+CONFIG_DIR="test-kbs-config"
 LOG_FILE="test-output.log"
 
 # Colors for output
@@ -20,14 +20,14 @@ show_help() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Test script for cryptpilot KMS volume encryption.
+Test script for cryptpilot KBS volume encryption.
 
 OPTIONS:
     -h, --help              Show this help message
     -k, --keep-files        Keep test files after execution
 
 EXAMPLES:
-    $0                  # Run KMS volume test
+    $0                  # Run KBS volume test
     $0 --keep-files     # Run test but keep files
 
 EOF
@@ -73,8 +73,15 @@ cleanup() {
         log "Cleaning up..."
         [[ -d "${CONFIG_DIR}" ]] && rm -rf "${CONFIG_DIR}"
         [[ -f "${LOG_FILE}" ]] && rm -f "${LOG_FILE}"
-        [[ -b "/dev/loop99" ]] && sudo losetup -d /dev/loop99 2>/dev/null || true
+        
+        # Detach any loop device associated with test-disk.img
+        if sudo losetup -a | grep -q "test-disk.img"; then
+            LOOP_DEV=$(sudo losetup -a | grep "test-disk.img" | cut -d: -f1)
+            sudo losetup -d $LOOP_DEV 2>/dev/null || true
+        fi
+        
         [[ -f "test-disk.img" ]] && rm -f "test-disk.img"
+        [[ -d "/tmp/kbs-test-mount" ]] && rmdir /tmp/kbs-test-mount 2>/dev/null || true
     else
         log "Keeping test files as requested"
     fi
@@ -82,24 +89,24 @@ cleanup() {
 
 trap cleanup EXIT
 
-# Setup config directory for KMS volume
+# Setup config directory for KBS volume
 setup_config() {
-    log "Setting up cryptpilot config for KMS volume..."
+    log "Setting up cryptpilot config for KBS volume..."
     mkdir -p "${CONFIG_DIR}/volumes"
     
-    # Create a KMS volume config (using mock values for CI)
-    cat > "${CONFIG_DIR}/volumes/kms-test.toml" << EOF
-volume = "kms-test"
+    # Create a KBS volume config (using mock values for CI)
+    cat > "${CONFIG_DIR}/volumes/kbs-test.toml" << EOF
+volume = "kbs-test"
 dev = "/dev/loop99p1"
 auto_open = true
 makefs = "ext4"
 integrity = true
 
-# For CI test, we use exec provider to simulate KMS behavior
-# In real usage, this would be [encrypt.kms] with actual KMS configuration
+# For CI test, we use exec provider to simulate KBS behavior
+# In real usage, this would be [encrypt.kbs] with actual KBS configuration
 [encrypt.exec]
 command = "echo"
-args = ["-n", "test-passphrase-for-kms"]
+args = ["-n", "test-passphrase-for-kbs"]
 EOF
 }
 
@@ -110,9 +117,31 @@ create_test_disk() {
     # Create a 100MB disk image
     dd if=/dev/zero of=test-disk.img bs=1M count=100
     
-    # Set up loop device as /dev/loop99
-    sudo losetup -P /dev/loop99 test-disk.img
-    LOOP_DEV="/dev/loop99"
+    # Detach loop device if already attached
+    for i in {0..9}; do
+        if sudo losetup -a | grep -q "test-disk.img"; then
+            LOOP_DEV=$(sudo losetup -a | grep "test-disk.img" | cut -d: -f1)
+            sudo losetup -d $LOOP_DEV 2>/dev/null || true
+        fi
+    done
+    
+    # Set up loop device (try different numbers if /dev/loop99 is busy)
+    LOOP_DEV=""
+    for i in {99..90}; do
+        if ! sudo losetup -P /dev/loop$i test-disk.img 2>/dev/null; then
+            continue
+        else
+            LOOP_DEV="/dev/loop$i"
+            break
+        fi
+    done
+    
+    if [[ -z "$LOOP_DEV" ]]; then
+        error "Failed to set up loop device"
+    fi
+    
+    # Update the config file to use the actual loop device
+    sed -i "s|/dev/loop99|${LOOP_DEV}|g" ${CONFIG_DIR}/volumes/kbs-test.toml
     
     # Create GPT partition table and one partition
     sudo parted --script $LOOP_DEV \
@@ -127,10 +156,10 @@ create_test_disk() {
 
 # Test volume initialization
 test_volume_init() {
-    log "Initializing KMS volume..."
+    log "Initializing KBS volume..."
     
     # Initialize the volume
-    if ! sudo cryptpilot init kms-test -c "${CONFIG_DIR}" -y > "${LOG_FILE}" 2>&1; then
+    if ! sudo cryptpilot init kbs-test -c "${CONFIG_DIR}" -y > "${LOG_FILE}" 2>&1; then
         echo "Failed to initialize volume. Log output:"
         cat "${LOG_FILE}"
         return 1
@@ -141,18 +170,18 @@ test_volume_init() {
 
 # Test volume opening
 test_volume_open() {
-    log "Opening KMS volume..."
+    log "Opening KBS volume..."
     
     # Open the volume
-    if ! sudo cryptpilot open kms-test -c "${CONFIG_DIR}" > "${LOG_FILE}" 2>&1; then
+    if ! sudo cryptpilot open kbs-test -c "${CONFIG_DIR}" > "${LOG_FILE}" 2>&1; then
         echo "Failed to open volume. Log output:"
         cat "${LOG_FILE}"
         return 1
     fi
     
     # Check if the device mapper device exists
-    if [[ ! -b "/dev/mapper/kms-test" ]]; then
-        echo "Device mapper device /dev/mapper/kms-test not found"
+    if [[ ! -b "/dev/mapper/kbs-test" ]]; then
+        echo "Device mapper device /dev/mapper/kbs-test not found"
         return 1
     fi
     
@@ -171,13 +200,13 @@ test_volume_show() {
     fi
     
     # Check if our volume is listed and opened
-    if ! grep -q "kms-test" "${LOG_FILE}"; then
-        echo "Volume kms-test not found in show output"
+    if ! grep -q "kbs-test" "${LOG_FILE}"; then
+        echo "Volume kbs-test not found in show output"
         return 1
     fi
     
     if ! grep -q "True" "${LOG_FILE}"; then
-        echo "Volume kms-test is not opened according to show output"
+        echo "Volume kbs-test is not opened according to show output"
         return 1
     fi
     
@@ -189,44 +218,44 @@ test_filesystem_ops() {
     log "Testing filesystem operations..."
     
     # Create mount point
-    mkdir -p /tmp/kms-test-mount
+    mkdir -p /tmp/kbs-test-mount
     
     # Mount the volume
-    if ! sudo mount /dev/mapper/kms-test /tmp/kms-test-mount; then
+    if ! sudo mount /dev/mapper/kbs-test /tmp/kbs-test-mount; then
         error "Failed to mount volume"
     fi
     
     # Test writing and reading a file
-    echo "test content" | sudo tee /tmp/kms-test-mount/test-file > /dev/null
-    if [[ ! -f "/tmp/kms-test-mount/test-file" ]]; then
+    echo "test content" | sudo tee /tmp/kbs-test-mount/test-file > /dev/null
+    if [[ ! -f "/tmp/kbs-test-mount/test-file" ]]; then
         error "Failed to create test file"
     fi
     
-    content=$(sudo cat /tmp/kms-test-mount/test-file)
+    content=$(sudo cat /tmp/kbs-test-mount/test-file)
     if [[ "$content" != "test content" ]]; then
         error "File content mismatch"
     fi
     
     # Unmount the volume
-    sudo umount /tmp/kms-test-mount
+    sudo umount /tmp/kbs-test-mount
     
     log "Filesystem operations tested successfully"
 }
 
 # Test volume closing
 test_volume_close() {
-    log "Closing KMS volume..."
+    log "Closing KBS volume..."
     
     # Close the volume
-    if ! sudo cryptpilot close kms-test -c "${CONFIG_DIR}" > "${LOG_FILE}" 2>&1; then
+    if ! sudo cryptpilot close kbs-test -c "${CONFIG_DIR}" > "${LOG_FILE}" 2>&1; then
         echo "Failed to close volume. Log output:"
         cat "${LOG_FILE}"
         return 1
     fi
     
     # Check that the device mapper device no longer exists
-    if [[ -b "/dev/mapper/kms-test" ]]; then
-        echo "Device mapper device /dev/mapper/kms-test still exists after closing"
+    if [[ -b "/dev/mapper/kbs-test" ]]; then
+        echo "Device mapper device /dev/mapper/kbs-test still exists after closing"
         return 1
     fi
     
@@ -237,7 +266,7 @@ test_volume_close() {
 main() {
     parse_args "$@"
     
-    log "Starting KMS volume encryption test"
+    log "Starting KBS volume encryption test"
     
     # Setup config
     setup_config
@@ -266,7 +295,7 @@ main() {
         error "Volume closing failed"
     fi
     
-    log "KMS volume encryption test completed successfully!"
+    log "KBS volume encryption test completed successfully!"
 }
 
 # Run main function
