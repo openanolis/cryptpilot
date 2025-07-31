@@ -2,8 +2,8 @@
 Description=Cryptpilot FDE Service (before /sysroot mount)
 DefaultDependencies=no
 ConditionPathExists=/etc/initrd-release
-Requires=network-online.target
-After=network-online.target
+Requires=network-online.target systemd-udev-settle.service
+After=network-online.target systemd-udev-settle.service
 Before=initrd-root-device.target
 Wants=attestation-agent.service
 After=attestation-agent.service
