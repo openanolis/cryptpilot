@@ -15,12 +15,53 @@ pub struct TmpMountPoint {
 
 impl TmpMountPoint {
     pub async fn mount(dev: impl AsRef<Path>) -> Result<Self> {
+
+        let dev = dev.as_ref();
+
+        // Check whether the equipment has been mounted
+        let output = Command::new("findmnt")
+            .arg("-n")
+            .arg("-o")
+            .arg("TARGET")
+            .arg(dev)
+            .output()
+            .await?;
+
+        if output.status.success() {
+            let existing_mount = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            tracing::info!("Device {dev:?} already mounted at {existing_mount}");
+
+            if existing_mount == "/boot" {
+                // Create a temporary directory
+                let temp_dir = tempfile::Builder::new()
+                .prefix("cryptpilot-mount-")
+                .tempdir()?;
+
+                // Execute bind mount /boot to the temporary directory
+                let status = Command::new("mount")
+                    .arg("--bind")
+                    .arg("/boot")
+                    .arg(temp_dir.path())
+                    .status()
+                    .await?;
+
+                if !status.success() {
+                    anyhow::bail!("Failed to bind-mount /boot to temp dir");
+                }
+
+                // Return the wrapped TmpMountPoint
+                return Ok(Self {
+                    mount_dir: temp_dir,
+                    dev: dev.to_path_buf(),
+                });
+            }
+        }
+
         let mount_dir = tempfile::Builder::new()
             .prefix("cryptpilot-mount-")
             .tempdir()?;
         let mount_point = mount_dir.path();
 
-        let dev = dev.as_ref();
         Command::new("mount")
             .arg(dev)
             .arg(mount_point)
