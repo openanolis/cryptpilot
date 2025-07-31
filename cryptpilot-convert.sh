@@ -405,6 +405,7 @@ step::extract_boot_part_from_rootfs() {
     ln -s -f . ${boot_mount_point}/boot
 
     disk::umount_wait_busy ${boot_mount_point}
+    disk::umount_wait_busy ${rootfs_mount_point}
 }
 
 step:update_rootfs_and_initrd() {
@@ -413,6 +414,8 @@ step:update_rootfs_and_initrd() {
 
     local rootfs_mount_point=${workdir}/rootfs
     mkdir -p "${rootfs_mount_point}"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point} && disk::umount_wait_busy ${rootfs_mount_point}"
+    mount "${rootfs_orig_part}" "${rootfs_mount_point}"
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev && disk::umount_wait_busy ${rootfs_mount_point}/dev"
     mount -t devtmpfs devtmpfs "${rootfs_mount_point}/dev"
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev/pts && disk::umount_wait_busy ${rootfs_mount_point}/dev/pts"
@@ -425,10 +428,18 @@ step:update_rootfs_and_initrd() {
     mount -t sysfs sysfs "${rootfs_mount_point}/sys"
     # mount bind boot
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot && disk::umount_wait_busy ${rootfs_mount_point}/boot"
-    mount "${boot_file_path}" "${rootfs_mount_point}/boot"
+
+    if [ "$boot_part_num" = "$no_part_num" ];then
+        mount "${boot_file_path}" "${rootfs_mount_point}/boot"
+    else
+        mount "${boot_part}" "${rootfs_mount_point}/boot"
+    fi
     # also mount the EFI part
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot/efi && disk::umount_wait_busy ${rootfs_mount_point}/boot/efi"
-    mount "$efi_part" "${rootfs_mount_point}/boot/efi"
+
+    if [ $efi_part_num != $no_part_num ];then
+        mount "$efi_part" "${rootfs_mount_point}/boot/efi"
+    fi
 
     log::info "Installing rpm packages"
     packages+=("cryptpilot")
@@ -445,21 +456,23 @@ step:update_rootfs_and_initrd() {
     mkdir -p "${rootfs_mount_point}/etc/cryptpilot/"
     cp -a "${config_dir}/." "${rootfs_mount_point}/etc/cryptpilot/"
 
-    # update /etc/fstab
-    log::info "Updating /etc/fstab"
-    local root_mount_line_number
-    root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
-    if [ -z "${root_mount_line_number}" ]; then
-        proc::fatal "Cannot find mount for / in /etc/fstab"
-    fi
+    if [ "$boot_part_num" = "0xff" ];then
+        # update /etc/fstab
+        log::info "Updating /etc/fstab"
+        local root_mount_line_number
+        root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
+        if [ -z "${root_mount_line_number}" ]; then
+            proc::fatal "Cannot find mount for / in /etc/fstab"
+        fi
 
-    ## insert boot mount line
-    local boot_uuid
-    boot_uuid=$(blkid -o value -s UUID $boot_file_path) # get uuid of the boot image
-    local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults 0 2"
-    local boot_mount_insert_line_number
-    boot_mount_insert_line_number=$((root_mount_line_number + 1))
-    sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
+        ## insert boot mount line
+        local boot_uuid
+        boot_uuid=$(blkid -o value -s UUID $boot_file_path) # get uuid of the boot image
+        local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults 0 2"
+        local boot_mount_insert_line_number
+        boot_mount_insert_line_number=$((root_mount_line_number + 1))
+        sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
+    fi
 
     ## replace the root mount device with /dev/mapper/rootfs
     local root_mount_line_content
@@ -601,11 +614,16 @@ step::create_boot_part() {
 step::create_lvm_part() {
     local lvm_start_sector=$1
 
-    local lvm_part_num=$((rootfs_orig_part_num + 1))
+    local lvm_end_sector=$2
+    if [ $boot_part_num != $no_part_num ];then
+        local lvm_part_num=$rootfs_orig_part_num
+    else
+        local lvm_part_num=$((rootfs_orig_part_num + 1))
+    fi
     local lvm_part="${device}p${lvm_part_num}"
     lvm_start_sector=$(disk::align_start_sector "${lvm_start_sector}")
-    log::info "Creating lvm partition as LVM PV ($lvm_start_sector ... END sectors)"
-    parted $device --script -- mkpart system "${lvm_start_sector}s" 100%
+    echo "Creating lvm partition as LVM PV ($lvm_start_sector ... $lvm_end_sector END sectors)"
+    parted $device --script -- mkpart  primary "${lvm_start_sector}s" "${lvm_end_sector}s"
     parted $device --script -- set "${lvm_part_num}" lvm on
     partprobe $device
 
@@ -700,6 +718,7 @@ main() {
     local rootfs_no_encryption=false
     local rootfs_part_num
     local packages=()
+    no_part_num=0xff
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -848,31 +867,38 @@ main() {
 
     disk::assert_disk_not_busy "${device}"
 
-    local efi_part_num
     efi_part_num=$(disk::find_efi_partition "${device}")
     local efi_part
     efi_part="${device}p${efi_part_num}"
+
+    boot_part_num=$(disk::find_boot_partition "${device}")
+    local boot_part
+    boot_part="${device}p${boot_part_num}"
 
     local rootfs_orig_part_num
     rootfs_orig_part_num=$(disk::find_rootfs_partition "${device}" "${rootfs_part_num:-}")
     local rootfs_orig_part
     rootfs_orig_part="${device}p${rootfs_orig_part_num}"
     rootfs_orig_start_sector=$(parted $device --script -- unit s print | grep "^ ${rootfs_orig_part_num}" | awk '{print $2}' | sed 's/s//')
+    rootfs_orig_end_sector=$(parted $device --script -- unit s print | grep "^ ${rootfs_orig_part_num}" | awk '{print $3}' | sed 's/s//')
 
     local sector_size
     sector_size=$(blockdev --getss "${device}")
     log::info "Information about the disk:"
     echo "    Device: $device"
     echo "    Sector size: ${sector_size} bytes"
-    echo "    EFI partition: $efi_part"
+    [ "$efi_part_num" != "$no_part_num" ] && echo "    EFI partition: $efi_part"
+    [ "$boot_part_num" != "$no_part_num" ] && echo "    BOOT partition: $boot_part"
     echo "    Rootfs partition: $rootfs_orig_part"
 
     #
     # 2. Extracting /boot to boot partition
     #
-    log::step "[ 2 ] Extracting /boot to boot partition"
-    local boot_file_path
-    step::extract_boot_part_from_rootfs "$rootfs_orig_part"
+    local boot_file_path=""
+    if [ $boot_part_num = $no_part_num ];then
+        log::step "[ 2 ] Extracting /boot to boot partition"
+        step::extract_boot_part_from_rootfs "$rootfs_orig_part"
+    fi
 
     #
     # 3. Update rootfs and initrd
@@ -890,16 +916,22 @@ main() {
     #
     # 5. Create a boot partition
     #
-    log::step "[ 5 ] Creating boot partition"
-    local boot_part_end_sector
-    local boot_part
-    step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
+    if [ $boot_part_num = $no_part_num ];then
+        echo "[ 5 ] Creating boot partition"
+        local boot_part_end_sector
+        local boot_part
+        step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
+    fi
 
     #
     # 6. Creating lvm partition
     #
     log::step "[ 6 ] Creating lvm partition"
-    step::create_lvm_part "$((boot_part_end_sector + 1))"
+    if [ $boot_part_num != $no_part_num ];then
+        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_end_sector"
+    else
+        step::create_lvm_part "$((boot_part_end_sector + 1))" "$rootfs_orig_end_sector"
+    fi
 
     #
     # 7. Setting up rootfs logical volume
