@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
 use block_devs::BlckExt;
-use tokio::{fs::File, process::Command};
+use tokio::{fs, fs::File, process::Command};
+use tempfile::tempdir;
+use anyhow::anyhow;
 
 use crate::{
     cmd::boot_service::metadata::Metadata,
@@ -123,27 +125,102 @@ impl OnExternalFdeDisk {
         })
     }
 
-    async fn detect_boot_part(hint_device: Option<&Path>) -> Result<PathBuf> {
-        let mut cmd = Command::new("blkid");
-        cmd.args(["--match-types", "ext4"])
-            .args(["--match-token", r#"PARTLABEL="boot""#])
-            .args(["--list-one", "--output", "device"]);
+    pub async fn detect_boot_part(hint_device: Option<&Path>) -> Result<PathBuf> {
+
+        // 1. Execute 'findmnt-n-o SOURCE /boot' to return the device path where '/boot' is mounted
+        let mut command = Command::new("findmnt");
+        command.args(["-n", "-o", "SOURCE", "/boot"]);
+        match command.run().await {
+            Ok(stdout) => {
+                let stdout_str = String::from_utf8_lossy(&stdout).trim().to_string();
+                if !stdout_str.is_empty() {
+                    // Return the device path, such as /dev/sda1
+                    return Ok(PathBuf::from(stdout_str));
+                }
+            }
+            Err(e) => {
+                tracing::warn!("findmnt failed: {}", e);
+            }
+        }
+
+        // 2. Try GPT-style PARTLABEL match
+        let mut gpt_cmd = Command::new("blkid");
+        gpt_cmd.args([
+            "--match-types", "ext4",
+            "--match-token", r#"PARTLABEL="boot""#,
+            "--list-one", "--output", "device",
+        ]);
 
         if let Some(hint_device) = hint_device {
-            cmd.arg(hint_device);
-        };
+            gpt_cmd.arg(hint_device);
+        }
 
-        cmd.run()
+        let gpt_result = gpt_cmd.output().await?;
+        let gpt_device = String::from_utf8_lossy(&gpt_result.stdout).trim().to_string();
+
+        if !gpt_device.is_empty() {
+            return Ok(PathBuf::from(gpt_device));
+        }
+
+        // 3. Try MBR-style fallback: search all ext4 partitions and check contents
+        let output = Command::new("lsblk")
+            .args(["-lnpo", "NAME,FSTYPE"])
+            .run()
             .await
-            .and_then(|stdout| {
-                let mut device_name = String::from_utf8(stdout)?;
-                device_name = device_name.trim().into();
-                if device_name.is_empty() {
-                    bail!("No boot partition found");
+            .context("lsblk failed")?;
+
+        let content = String::from_utf8_lossy(&output);
+        for line in content.lines() {
+            let fields: Vec<&str> = line.trim().split_whitespace().collect();
+            if fields.len() != 2 {
+                continue;
+            }
+
+            let dev = fields[0];
+
+            // Try mounting and checking for boot content
+            let tmpdir = tempdir().context("Failed to create temp mount dir")?;
+            let mount_path = tmpdir.path();
+            let mount_str = mount_path.to_str().ok_or_else(|| anyhow!("Invalid mount path: non-UTF8"))?;
+
+            let already_mounted = Command::new("findmnt")
+            .args(["-n", "-o", "TARGET", dev])
+            .run()
+            .await
+            .is_ok();
+
+            if !already_mounted {
+                if Command::new("mount")
+                    .args(["-o", "ro", dev, mount_str])
+                    .run()
+                    .await
+                    .is_err()
+                {
+                     continue;
                 }
-                Ok(PathBuf::from(device_name))
-            })
-            .context("Failed to detect boot partition")
+            }
+
+            let mut has_boot_kernel = false;
+
+            let mut entries = fs::read_dir(mount_path).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let name = entry.file_name();
+                if name.to_string_lossy().starts_with("vmlinuz") {
+                    has_boot_kernel = true;
+                    break;
+                }
+            }
+
+            // Unmount after check
+            let _ = Command::new("umount").arg(mount_path).status().await;
+
+            if has_boot_kernel  {
+                return Ok(PathBuf::from(dev));
+            }
+
+        }
+
+        bail!("No boot partition found (GPT and MBR methods both failed)");
     }
 }
 
@@ -153,7 +230,6 @@ impl FdeDisk for OnExternalFdeDisk {
         let config_dir = self
             .boot_dev_tmp_mount
             .mount_point()
-            .join("boot")
             .join(CRYPTPILOT_CONFIG_DIR_UNTRUSTED_IN_BOOT);
         if !config_dir.exists() {
             bail!("No config dir found in boot partition. The disk may not be a encrypted disk.")
@@ -165,7 +241,6 @@ impl FdeDisk for OnExternalFdeDisk {
         let metadata_file = self
             .boot_dev_tmp_mount
             .mount_point()
-            .join("boot")
             .join(METADATA_PATH_IN_BOOT);
 
         if !metadata_file.exists() {
