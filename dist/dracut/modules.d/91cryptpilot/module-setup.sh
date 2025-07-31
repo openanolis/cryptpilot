@@ -17,7 +17,7 @@ install() {
         # TODO: simplify this
         inst_multiple cryptsetup veritysetup mkfs.ext4 mkfs.vfat mkfs.xfs mkswap base64 /usr/lib/systemd/systemd-makefs
         inst_multiple vgchange lvcreate
-        inst_multiple blkid
+        inst_multiple blkid lsblk
         inst_multiple dd tail grep sort
         # required by 'file' command
         inst_multiple file
@@ -65,4 +65,5 @@ depends() {
         echo url-lib
         echo attestation-agent
         echo confidential-data-hub
+        echo network-manager
 }

@@ -231,13 +231,11 @@ disk::find_rootfs_partition() {
     local device=$1
     local specified_part_num=$2 # optional specified partition number
     local part_num=1
+    local tmpmnt=$(mktemp -d)
 
     if [[ -n "${specified_part_num}" ]]; then
         local part_path=${device}p${specified_part_num}
-        if [ ! -b "$part_path" ]; then
-            log::error "Specified rootfs partition $part_path does not exist"
-            return 1
-        fi
+        [ -b "$part_path" ] || break
         local next_part_path=${device}p$((specified_part_num + 1))
         if [ -b "$next_part_path" ]; then
             log::error "The specified rootfs partition $part_path should be the last partition"
@@ -249,62 +247,121 @@ disk::find_rootfs_partition() {
 
     while true; do
         local part_path=${device}p${part_num}
-        if [ ! -b "$part_path" ]; then
-            log::error "Cannot find rootfs partition"
-            return 1
-        fi
+        [ -b "$part_path" ] || break
         local label
         label=$(blkid -o value -s LABEL $part_path)
         if [ "$label" = "root" ]; then
-            # make sure it's the last partition
-            local next_part_path=${device}p$((part_num + 1))
-            if [ -b "$next_part_path" ]; then
-                log::error "The rootfs partition should be the last partition"
-                return 1
-            fi
             echo "$part_num"
             return 0
         fi
         part_num=$((part_num + 1))
     done
+
+    # Collect all partition names + sizes, sort by size descending
+    mapfile -t parts < <(
+        lsblk -lnpo NAME,TYPE,SIZE "$device" |
+        awk '$2=="part" {print $1, $3}' |
+        sort -k2,2nr
+    )
+
+    for entry in "${parts[@]}"; do
+        read -r part sz <<<"$entry"
+
+        # Try mounting without specifying fstype
+        if mount -o ro "$part" "$tmpmnt" 2>/dev/null; then
+        if [[ -d "$tmpmnt/etc" && -d "$tmpmnt/bin" && -d "$tmpmnt/usr" ]]; then
+            umount "$tmpmnt"
+            rmdir "$tmpmnt"
+            echo "$part" | grep -oP 'p\K[0-9]+'
+            return 0
+        fi
+        umount "$tmpmnt"
+        fi
+    done
+
+    rmdir "$tmpmnt"
+    echo "Error: cannot find rootfs partition on $device" >&2
+    return 1
 }
 
-# find efi partition by PARTLABEL
+# find_efi_partition: locate EFI System partition number by multiple heuristics
 disk::find_efi_partition() {
-    local device=$1
-    local part_num=1
-    while true; do
-        local part_path=${device}p${part_num}
-        if [ ! -b "$part_path" ]; then
-            break # try again with another method
-        fi
-        local part_label
-        part_label=$(blkid -o value -s PARTLABEL $part_path)
-        if [[ "$part_label" == EFI* ]]; then
-            echo "$part_num"
-            return 0
-        fi
-        part_num=$((part_num + 1))
-    done
+  local device=$1
+  local tmpmnt=$(mktemp -d)
+  trap 'rm -rf "$tmpmnt"' EXIT
 
-    # find efi partition by SEC_TYPE="msdos" and TYPE="vfat"
-    local part_num=1
-    while true; do
-        local part_path=${device}p${part_num}
-        if [ ! -b "$part_path" ]; then
-            log::error "Cannot find efi partition"
-            return 1
-        fi
-        local sec_type
-        sec_type=$(blkid -o value -s SEC_TYPE $part_path)
-        local part_type
-        part_type=$(blkid -o value -s TYPE $part_path)
-        if [[ "$sec_type" == "msdos" ]] && [[ "$part_type" == "vfat" ]]; then
-            echo "$part_num"
+  # Iterate all partition nodes under device
+  while IFS= read -r part; do
+    [[ "$part" =~ [0-9]+$ ]] || continue
+
+    # 1) PARTLABEL starts with "EFI"
+    local label
+    label=$(blkid -o value -s PARTLABEL "$part" 2>/dev/null)
+    if [[ "$label" == EFI* ]]; then
+      echo "${part##*p}" && return 0
+    fi
+
+    # 2) GPT PARTTYPE GUID matches EFI System GUID
+    local ptype
+    ptype=$(blkid -o value -s PARTTYPE "$part" 2>/dev/null)
+    if [[ "${ptype,,}" == "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ]]; then
+      echo "${part##*p}" && return 0
+    fi
+
+    # 3) vfat filesystem with msdos sec_type
+    local sec_type fstype
+    sec_type=$(blkid -o value -s SEC_TYPE "$part" 2>/dev/null)
+    fstype=$(blkid -o value -s TYPE "$part" 2>/dev/null)
+    if [[ "${sec_type,,}" == "msdos" && "${fstype,,}" == "vfat" ]]; then
+      echo "${part##*p}" && return 0
+    fi
+
+    # 4) mount and inspect: must have EFI/ and no vmlinuz-* files
+    if mount -o ro "$part" "$tmpmnt" 2>/dev/null; then
+    # Check for the existence of the EFI directory
+    if [ -d "$tmpmnt/EFI" ]; then
+        # Check that there are no vmlinuz-* files under the root
+        vms=( "$tmpmnt"/vmlinuz-* )
+        if [ "${#vms[@]}" -eq 0 ]; then
+            umount "$tmpmnt"
+            echo "${part##*p}"
             return 0
         fi
-        part_num=$((part_num + 1))
-    done
+    fi
+    umount "$tmpmnt"
+    fi
+
+  done < <(lsblk -lnpo NAME "$device")
+
+  echo "cannot find EFI partition on $device" >&2
+  echo "$no_part_num" && return 0
+}
+
+disk::find_boot_partition() {
+  local device=$1
+  local tmpmnt=$(mktemp -d)
+  trap 'rm -rf "$tmpmnt"' EXIT
+
+  while IFS= read -r part; do
+    [[ "$part" =~ [0-9]+$ ]] || continue
+
+    # Mount Partition (read-only)
+    if mount -o ro "$part" "$tmpmnt" 2>/dev/null; then
+        # Check for common boot content directly under mount point
+        # Collect all matches
+        vms=( "$tmpmnt"/vmlinuz-* )
+        if [ "${#vms[@]}" -gt 0 ]; then
+            # At least one vmlinuz-* actually exists
+            umount "$tmpmnt"
+            echo "${part##*p}"
+            return 0
+        fi
+        umount "$tmpmnt"
+    fi
+  done < <(lsblk -lnpo NAME "$device")
+
+  echo "cannot find boot partition on $device" >&2
+  echo "$no_part_num" && return 0
 }
 
 step::setup_workdir() {
@@ -345,6 +402,7 @@ step::extract_boot_part_from_rootfs() {
     ln -s -f . ${boot_mount_point}/boot
 
     disk::umount_wait_busy ${boot_mount_point}
+    disk::umount_wait_busy ${rootfs_mount_point}
 }
 
 step:update_rootfs_and_initrd() {
@@ -353,6 +411,8 @@ step:update_rootfs_and_initrd() {
 
     local rootfs_mount_point=${workdir}/rootfs
     mkdir -p "${rootfs_mount_point}"
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point} && disk::umount_wait_busy ${rootfs_mount_point}"
+    mount "${rootfs_orig_part}" "${rootfs_mount_point}"
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev && disk::umount_wait_busy ${rootfs_mount_point}/dev"
     mount -t devtmpfs devtmpfs "${rootfs_mount_point}/dev"
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev/pts && disk::umount_wait_busy ${rootfs_mount_point}/dev/pts"
@@ -365,18 +425,33 @@ step:update_rootfs_and_initrd() {
     mount -t sysfs sysfs "${rootfs_mount_point}/sys"
     # mount bind boot
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot && disk::umount_wait_busy ${rootfs_mount_point}/boot"
-    mount "${boot_file_path}" "${rootfs_mount_point}/boot"
+
+    if [ "$boot_part_num" = "$no_part_num" ];then
+        mount "${boot_file_path}" "${rootfs_mount_point}/boot"
+    else
+        mount "${boot_part}" "${rootfs_mount_point}/boot"
+    fi
     # also mount the EFI part
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot/efi && disk::umount_wait_busy ${rootfs_mount_point}/boot/efi"
-    mount "$efi_part" "${rootfs_mount_point}/boot/efi"
+
+    if [ $efi_part_num != $no_part_num ];then
+        mount "$efi_part" "${rootfs_mount_point}/boot/efi"
+    fi
 
     log::info "Installing rpm packages"
     packages+=("cryptpilot")
     packages+=("attestation-agent")
     packages+=("confidential-data-hub")
+
+    source "${rootfs_mount_point}"/etc/os-release
     # yum-config-manager --installroot="${rootfs_mount_point}" --add-repo ${YUM_DCAP_REPO}
     if [ ${#packages[@]} -gt 0 ]; then
-        yum --installroot="${rootfs_mount_point}" install -y "${packages[@]}"
+        if [ "$VERSION" = "23.3" ];then
+            yum --nogpgcheck --releasever=$VERSION --installroot="${rootfs_mount_point}" install -y "${packages[@]}"
+        else
+            rpmdb --rebuilddb --dbpath ${rootfs_mount_point}/var/lib/rpm
+            yum --installroot="${rootfs_mount_point}" install -y "${packages[@]}"
+        fi
     fi
     yum --installroot="${rootfs_mount_point}" clean all
 
@@ -385,21 +460,26 @@ step:update_rootfs_and_initrd() {
     mkdir -p "${rootfs_mount_point}/etc/cryptpilot/"
     cp -a "${config_dir}/." "${rootfs_mount_point}/etc/cryptpilot/"
 
-    # update /etc/fstab
-    log::info "Updating /etc/fstab"
-    local root_mount_line_number
-    root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
-    if [ -z "${root_mount_line_number}" ]; then
-        proc::fatal "Cannot find mount for / in /etc/fstab"
-    fi
+    # Prevent duplicate mounting of efi partitions
+    sed -i '/[[:space:]]\/boot\/efi[[:space:]]/ s/defaults,/defaults,noauto,nofail,/' "${rootfs_mount_point}/etc/fstab"
 
-    ## insert boot mount line
-    local boot_uuid
-    boot_uuid=$(blkid -o value -s UUID $boot_file_path) # get uuid of the boot image
-    local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults 0 2"
-    local boot_mount_insert_line_number
-    boot_mount_insert_line_number=$((root_mount_line_number + 1))
-    sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
+    if [ "$boot_part_num" = "0xff" ];then
+        # update /etc/fstab
+        log::info "Updating /etc/fstab"
+        local root_mount_line_number
+        root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
+        if [ -z "${root_mount_line_number}" ]; then
+            proc::fatal "Cannot find mount for / in /etc/fstab"
+        fi
+
+        ## insert boot mount line
+        local boot_uuid
+        boot_uuid=$(blkid -o value -s UUID $boot_file_path) # get uuid of the boot image
+        local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults,noauto,nofail 0 2"
+        local boot_mount_insert_line_number
+        boot_mount_insert_line_number=$((root_mount_line_number + 1))
+        sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
+    fi
 
     ## replace the root mount device with /dev/mapper/rootfs
     local root_mount_line_content
@@ -490,7 +570,19 @@ step::shrink_and_extract_rootfs_part() {
 
     # Adjust file system content, all move to front
     log::info "Checking and shrinking rootfs filesystem"
-    e2fsck -y -f "${rootfs_orig_part}"
+
+    if e2fsck -y -f "${rootfs_orig_part}"; then
+        echo "Filesystem clean or repaired."
+    else
+        rc=$?
+        if [[ $rc -eq 1 ]]; then
+            echo "Filesystem had errors but was fixed."
+        else
+            echo "e2fsck failed with exit code $rc"
+            return $rc
+        fi
+    fi
+
     resize2fs -M "${rootfs_orig_part}"
     # TODO: support filesystem other than ext4
     local after_shrink_block_size
@@ -541,11 +633,16 @@ step::create_boot_part() {
 step::create_lvm_part() {
     local lvm_start_sector=$1
 
-    local lvm_part_num=$((rootfs_orig_part_num + 1))
+    local lvm_end_sector=$2
+    if [ $boot_part_num != $no_part_num ];then
+        local lvm_part_num=$rootfs_orig_part_num
+    else
+        local lvm_part_num=$((rootfs_orig_part_num + 1))
+    fi
     local lvm_part="${device}p${lvm_part_num}"
     lvm_start_sector=$(disk::align_start_sector "${lvm_start_sector}")
-    log::info "Creating lvm partition as LVM PV ($lvm_start_sector ... END sectors)"
-    parted $device --script -- mkpart system "${lvm_start_sector}s" 100%
+    echo "Creating lvm partition as LVM PV ($lvm_start_sector ... $lvm_end_sector END sectors)"
+    parted $device --script -- mkpart  primary "${lvm_start_sector}s" "${lvm_end_sector}s"
     parted $device --script -- set "${lvm_part_num}" lvm on
     partprobe $device
 
@@ -640,6 +737,7 @@ main() {
     local rootfs_no_encryption=false
     local rootfs_part_num
     local packages=()
+    no_part_num=0xff
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -788,31 +886,38 @@ main() {
 
     disk::assert_disk_not_busy "${device}"
 
-    local efi_part_num
     efi_part_num=$(disk::find_efi_partition "${device}")
     local efi_part
     efi_part="${device}p${efi_part_num}"
+
+    boot_part_num=$(disk::find_boot_partition "${device}")
+    local boot_part
+    boot_part="${device}p${boot_part_num}"
 
     local rootfs_orig_part_num
     rootfs_orig_part_num=$(disk::find_rootfs_partition "${device}" "${rootfs_part_num:-}")
     local rootfs_orig_part
     rootfs_orig_part="${device}p${rootfs_orig_part_num}"
     rootfs_orig_start_sector=$(parted $device --script -- unit s print | grep "^ ${rootfs_orig_part_num}" | awk '{print $2}' | sed 's/s//')
+    rootfs_orig_end_sector=$(parted $device --script -- unit s print | grep "^ ${rootfs_orig_part_num}" | awk '{print $3}' | sed 's/s//')
 
     local sector_size
     sector_size=$(blockdev --getss "${device}")
     log::info "Information about the disk:"
     echo "    Device: $device"
     echo "    Sector size: ${sector_size} bytes"
-    echo "    EFI partition: $efi_part"
+    [ "$efi_part_num" != "$no_part_num" ] && echo "    EFI partition: $efi_part"
+    [ "$boot_part_num" != "$no_part_num" ] && echo "    BOOT partition: $boot_part"
     echo "    Rootfs partition: $rootfs_orig_part"
 
     #
     # 2. Extracting /boot to boot partition
     #
-    log::step "[ 2 ] Extracting /boot to boot partition"
-    local boot_file_path
-    step::extract_boot_part_from_rootfs "$rootfs_orig_part"
+    local boot_file_path=""
+    if [ $boot_part_num = $no_part_num ];then
+        log::step "[ 2 ] Extracting /boot to boot partition"
+        step::extract_boot_part_from_rootfs "$rootfs_orig_part"
+    fi
 
     #
     # 3. Update rootfs and initrd
@@ -830,16 +935,22 @@ main() {
     #
     # 5. Create a boot partition
     #
-    log::step "[ 5 ] Creating boot partition"
-    local boot_part_end_sector
-    local boot_part
-    step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
+    if [ $boot_part_num = $no_part_num ];then
+        echo "[ 5 ] Creating boot partition"
+        local boot_part_end_sector
+        local boot_part
+        step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
+    fi
 
     #
     # 6. Creating lvm partition
     #
     log::step "[ 6 ] Creating lvm partition"
-    step::create_lvm_part "$((boot_part_end_sector + 1))"
+    if [ $boot_part_num != $no_part_num ];then
+        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_end_sector"
+    else
+        step::create_lvm_part "$((boot_part_end_sector + 1))" "$rootfs_orig_end_sector"
+    fi
 
     #
     # 7. Setting up rootfs logical volume
