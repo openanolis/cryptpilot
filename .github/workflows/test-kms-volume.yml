@@ -1,0 +1,47 @@
+name: Test KMS Volume Encryption
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-kms-volume:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          wget \
+          curl \
+          build-essential \
+          pkg-config \
+          libssl-dev \
+          libdevmapper-dev \
+          libsystemd-dev \
+          parted
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Build cryptpilot
+      run: |
+        cargo build --release
+
+    - name: Install cryptpilot
+      run: |
+        sudo cp target/release/cryptpilot /usr/local/bin/
+        sudo cp target/release/cryptpilot-convert /usr/local/bin/
+
+    - name: Run KMS volume encryption test
+      run: |
+        chmod +x test-kms-volume.sh
+        sudo ./test-kms-volume.sh --keep-files

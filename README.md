@@ -230,6 +230,22 @@ Now you can read and write files in the mounted directory.
 systemctl enable --now cryptpilot.service
 ```
 
+## CI Tests
+
+This project includes CI tests for various encryption scenarios:
+
+1. System disk encryption test (test-system-encryption.sh) - Tests full disk encryption with exec provider
+2. KMS volume encryption test (test-kms-volume.sh) - Tests data volume encryption with KMS-like provider
+
+You can run these tests locally:
+```sh
+# Run system encryption test
+sudo ./test-system-encryption.sh
+
+# Run KMS volume test
+sudo ./test-kms-volume.sh
+```
+
 # Supported Distrubutions
 
 CryptPilot has been tested on the following distributions, and it may not work on other distributions.
