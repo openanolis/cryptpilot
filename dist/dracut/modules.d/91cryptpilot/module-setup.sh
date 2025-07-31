@@ -65,4 +65,5 @@ depends() {
         echo url-lib
         echo attestation-agent
         echo confidential-data-hub
+        echo network-manager
 }
