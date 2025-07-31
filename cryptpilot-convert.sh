@@ -231,6 +231,7 @@ disk::find_rootfs_partition() {
     local device=$1
     local specified_part_num=$2 # optional specified partition number
     local part_num=1
+    local tmpmnt=$(mktemp -d)
 
     if [[ -n "${specified_part_num}" ]]; then
         local part_path=${device}p${specified_part_num}
@@ -249,24 +250,41 @@ disk::find_rootfs_partition() {
 
     while true; do
         local part_path=${device}p${part_num}
-        if [ ! -b "$part_path" ]; then
-            log::error "Cannot find rootfs partition"
-            return 1
-        fi
+        [ -b "$part_path" ] || break
         local label
         label=$(blkid -o value -s LABEL $part_path)
         if [ "$label" = "root" ]; then
-            # make sure it's the last partition
-            local next_part_path=${device}p$((part_num + 1))
-            if [ -b "$next_part_path" ]; then
-                log::error "The rootfs partition should be the last partition"
-                return 1
-            fi
             echo "$part_num"
             return 0
         fi
         part_num=$((part_num + 1))
     done
+
+    # Collect all partition names + sizes, sort by size descending
+    mapfile -t parts < <(
+        lsblk -lnpo NAME,TYPE,SIZE "$device" |
+        awk '$2=="part" {print $1, $3}' |
+        sort -k2,2nr
+    )
+
+    for entry in "${parts[@]}"; do
+        read -r part sz <<<"$entry"
+
+        # Try mounting without specifying fstype
+        if mount -o ro "$part" "$tmpmnt" 2>/dev/null; then
+        if [[ -d "$tmpmnt/etc" && -d "$tmpmnt/bin" && -d "$tmpmnt/usr" ]]; then
+            umount "$tmpmnt"
+            rmdir "$tmpmnt"
+            echo "$part" | grep -oP 'p\K[0-9]+'
+            return 0
+        fi
+        umount "$tmpmnt"
+        fi
+    done
+
+    rmdir "$tmpmnt"
+    echo "Error: cannot find rootfs partition on $device" >&2
+    return 1
 }
 
 # find efi partition by PARTLABEL
