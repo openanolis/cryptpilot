@@ -109,3 +109,11 @@ install-test-depend:
 
 	which prove || { yum install -y perl-Test-Harness ; }
 	which stress-ng || { yum install -y http://mirrors.openanolis.cn/anolis/8/AppStream/x86_64/os/Packages/stress-ng-0.17.08-2.0.1.an8.x86_64.rpm ; }
+
+.PHONE: shellcheck
+shellcheck:
+	@command -v shellcheck >&- || { \
+		echo "shellcheck not found, please installing it from https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.linux.x86_64.tar.xz" ; \
+	}
+	find . -name '*.sh' -exec shellcheck {} \;
+
