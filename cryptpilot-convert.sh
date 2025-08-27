@@ -413,10 +413,49 @@ step::extract_boot_part_from_rootfs() {
     disk::umount_wait_busy "${rootfs_mount_point}"
 }
 
+disk::install_rpm_on_rootfs() {
+    local rootfs_mount_point="$1"
+    shift
+    local packages=("$@")
+
+    packages+=("cryptpilot")
+    packages+=("attestation-agent")
+    packages+=("confidential-data-hub")
+
+    local copied_rpms=()  # Will store the local paths inside chroot to the copied .rpm files
+    local all_packages=() # Will be used as arguments to yum install
+
+    # Loop through all items in the packages array
+    for package in "${packages[@]}"; do
+        if [[ -f "$package" && "$package" == *.rpm ]]; then
+            # This is a valid .rpm file on the host
+            base_name=$(basename "$package")
+            cp "$package" "${rootfs_mount_point}/tmp/" # Copy into rootfs /tmp/
+            copied_rpms+=("/tmp/$base_name")           # Record path inside rootfs
+            all_packages+=("/tmp/$base_name")          # Add to installation list
+        else
+            # Assume this is a regular package name (to be installed via yum)
+            all_packages+=("$package")
+        fi
+    done
+
+    # Install all packages using yum inside the chroot
+    chroot "${rootfs_mount_point}" rpmdb --rebuilddb --dbpath /var/lib/rpm
+    chroot "${rootfs_mount_point}" yum install -y "${all_packages[@]}"
+    chroot "${rootfs_mount_point}" yum clean all
+
+    # Remove the copied .rpm files from the chroot after installation
+    for rpm in "${copied_rpms[@]}"; do
+        rm -f "${rootfs_mount_point}${rpm}"
+    done
+
+}
+
 step:update_rootfs_and_initrd() {
     local efi_part=$1
     local boot_file_path=$2
 
+    log::info "Prepare chroot environment"
     local rootfs_mount_point=${workdir}/rootfs
     mkdir -p "${rootfs_mount_point}"
     proc::hook_exit "mountpoint -q ${rootfs_mount_point} && disk::umount_wait_busy ${rootfs_mount_point}"
@@ -433,7 +472,6 @@ step:update_rootfs_and_initrd() {
     mount -t sysfs sysfs "${rootfs_mount_point}/sys"
     # mount bind boot
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot && disk::umount_wait_busy ${rootfs_mount_point}/boot"
-
     if [ "$boot_part_exist" = "false" ]; then
         mount "${boot_file_path}" "${rootfs_mount_point}/boot"
     else
@@ -441,40 +479,30 @@ step:update_rootfs_and_initrd() {
     fi
     # also mount the EFI part
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot/efi && disk::umount_wait_busy ${rootfs_mount_point}/boot/efi"
-
     if [ "$efi_part_exist" = "true" ]; then
         mount "$efi_part" "${rootfs_mount_point}/boot/efi"
     fi
+    # mount bind the /etc/resolv.conf
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/etc/resolv.conf && disk::umount_wait_busy ${rootfs_mount_point}/etc/resolv.conf"
+    mount --bind "$(realpath /etc/resolv.conf)" "${rootfs_mount_point}/etc/resolv.conf"
+    # mount bind the /etc/hosts
+    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/etc/hosts && disk::umount_wait_busy ${rootfs_mount_point}/etc/hosts"
+    mount --bind "$(realpath /etc/hosts)" "${rootfs_mount_point}/etc/hosts"
 
     log::info "Installing rpm packages"
-    packages+=("cryptpilot")
-    packages+=("attestation-agent")
-    packages+=("confidential-data-hub")
-
-    # shellcheck disable=SC1091
-    source "${rootfs_mount_point}"/etc/os-release
-    # yum-config-manager --installroot="${rootfs_mount_point}" --add-repo ${YUM_DCAP_REPO}
-    if [ ${#packages[@]} -gt 0 ]; then
-        if [ "$VERSION" = "23.3" ]; then
-            yum --nogpgcheck --releasever="$VERSION" --installroot="${rootfs_mount_point}" install -y "${packages[@]}"
-        else
-            rpmdb --rebuilddb --dbpath "${rootfs_mount_point}"/var/lib/rpm
-            yum --installroot="${rootfs_mount_point}" install -y "${packages[@]}"
-        fi
-    fi
-    yum --installroot="${rootfs_mount_point}" clean all
+    disk::install_rpm_on_rootfs "$rootfs_mount_point" "${packages[@]}"
 
     # copy cryptpilot config
-    log::info "Copying cryptpilot config from ${config_dir} to target rootfs"
+    log::info "Installing cryptpilot config from ${config_dir} to target rootfs"
     mkdir -p "${rootfs_mount_point}/etc/cryptpilot/"
     cp -a "${config_dir}/." "${rootfs_mount_point}/etc/cryptpilot/"
 
+    log::info "Updating /etc/fstab"
     # Prevent duplicate mounting of efi partitions
     sed -i '/[[:space:]]\/boot\/efi[[:space:]]/ s/defaults,/defaults,noauto,nofail,/' "${rootfs_mount_point}/etc/fstab"
 
     if [ "$boot_part_exist" = "false" ]; then
         # update /etc/fstab
-        log::info "Updating /etc/fstab"
         local root_mount_line_number
         root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
         if [ -z "${root_mount_line_number}" ]; then
@@ -514,7 +542,7 @@ step:update_rootfs_and_initrd() {
     fi
 
     # update initrd
-    log::info "Updating initrd and grub2"
+    log::info "Updating initrd and grub config"
     chroot "${rootfs_mount_point}" bash -c "$(
         cat <<'EOF'
 #!/bin/bash
@@ -559,6 +587,11 @@ rm -rf /var/cache/dnf/*
 
 EOF
     )"
+
+    log::info "Cleaning up chroot environment"
+
+    disk::umount_wait_busy "${rootfs_mount_point}/etc/hosts"
+    disk::umount_wait_busy "${rootfs_mount_point}/etc/resolv.conf"
     disk::umount_wait_busy "${rootfs_mount_point}/boot/efi"
     disk::umount_wait_busy "${rootfs_mount_point}/boot"
     disk::umount_wait_busy "${rootfs_mount_point}/sys"
@@ -932,10 +965,12 @@ main() {
     #
     # 2. Extracting /boot to boot partition
     #
+    log::step "[ 2 ] Extracting /boot to boot partition"
     local boot_file_path=""
     if [ "$boot_part_exist" = "false" ]; then
-        log::step "[ 2 ] Extracting /boot to boot partition"
         step::extract_boot_part_from_rootfs "$rootfs_orig_part"
+    else
+        log::step "Skipped since boot partition already exist"
     fi
 
     #
@@ -954,10 +989,12 @@ main() {
     #
     # 5. Create a boot partition
     #
+    echo "[ 5 ] Creating boot partition"
     if [ "$boot_part_exist" = "false" ]; then
-        echo "[ 5 ] Creating boot partition"
         local boot_part_end_sector
         step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
+    else
+        log::step "Skipped since boot partition already exist"
     fi
 
     #
