@@ -34,17 +34,17 @@ impl super::super::Command for ShowReferenceValueCommand {
 
         let mut map = HashMap::new();
         map.insert(
-            format!("tdx.AA.eventlog.{AAEL_DOMAIN}.{OPERATION_NAME_LOAD_CONFIG}"),
+            format!("AA.eventlog.{AAEL_DOMAIN}.{OPERATION_NAME_LOAD_CONFIG}"),
             vec![hash_hex],
         );
         map.insert(
-            format!("tdx.AA.eventlog.{AAEL_DOMAIN}.{OPERATION_NAME_FDE_ROOTFS_HASH}"),
+            format!("AA.eventlog.{AAEL_DOMAIN}.{OPERATION_NAME_FDE_ROOTFS_HASH}"),
             vec![root_hash],
         );
 
         if matches!(self.stage, ShowReferenceValueStage::System) {
             map.insert(
-                format!("tdx.AA.eventlog.{AAEL_DOMAIN}.{OPERATION_NAME_INITRD_SWITCH_ROOT}"),
+                format!("AA.eventlog.{AAEL_DOMAIN}.{OPERATION_NAME_INITRD_SWITCH_ROOT}"),
                 vec!["{}".to_string()],
             );
         }

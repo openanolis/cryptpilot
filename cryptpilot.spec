@@ -90,6 +90,8 @@ install -p -m 600 dist/etc/volumes/kbs.toml.template %{buildroot}/etc/cryptpilot
 install -p -m 600 dist/etc/volumes/kms.toml.template %{buildroot}/etc/cryptpilot/volumes/kms.toml.template
 install -p -m 600 dist/etc/volumes/oidc.toml.template %{buildroot}/etc/cryptpilot/volumes/oidc.toml.template
 install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
+install -d -p %{buildroot}/usr/share/cryptpilot
+install -p -m 644 dist/usr/share/cryptpilot/policy.rego %{buildroot}/usr/share/cryptpilot/policy.rego
 popd
 
 
@@ -122,6 +124,8 @@ rm -rf %{buildroot}
 %{dracut_dst}cryptpilot-fde-before-sysroot.service
 %{dracut_dst}cryptpilot-fde-after-sysroot.service
 %{dracut_dst}initrd-wait-network-online.service
+%dir /usr/share/cryptpilot
+/usr/share/cryptpilot/policy.rego
 
 
 %preun
