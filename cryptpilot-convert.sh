@@ -556,15 +556,23 @@ set -u
 BASH_XTRACEFD=3
 set -x
 
-KERNELIMG=$(ls -1 /boot/vmlinuz-* 2>/dev/null | grep -v "rescue" | head -1)
-if [ -z "$KERNELIMG" ] ; then
-    echo 'No kernel image found, skipping initrd stuff.'>&2
-    exit 1
+KERNELIMG=/boot/vmlinuz
+if [ ! -f "$KERNELIMG" ]; then
+    echo "No kernel image found at $KERNELIMG, trying fallback..." >&2
+    KERNELIMG=$(ls /boot/vmlinuz-* 2>/dev/null | grep -v "rescue" | sort -V | tail -1)
 fi
-echo "Detected kernel image: $KERNELIMG"
-KERNELVER=${KERNELIMG#/boot/vmlinuz-}
-echo "Generating initrd with dracut"    
-dracut -N --kver $KERNELVER --fstab --add-fstab /etc/fstab --force -v
+
+# Parse symbolic links to obtain the real file path
+REAL_KERNELIMG=$(readlink -f "$KERNELIMG")
+
+echo "Detected kernel image: $REAL_KERNELIMG"
+
+# Extract the kernel version number
+KERNELVER=${REAL_KERNELIMG#/boot/vmlinuz-}
+echo "Kernel version: $KERNELVER"
+
+echo "Generating initrd with dracut"
+dracut -N --kver "$KERNELVER" --fstab --add-fstab /etc/fstab --force -v
 
 grub2_cfg=""
 if [ -e /etc/grub2.cfg ] ; then
