@@ -684,6 +684,8 @@ step::create_boot_part() {
     boot_part_end_sector=$((boot_start_sector + boot_size_in_sector - 1))
     log::info "Creating boot partition ($boot_start_sector ... $boot_part_end_sector sectors)"
     parted "$device" --script -- mkpart boot ext4 "${boot_start_sector}"s ${boot_part_end_sector}s
+    partprobe "$device"
+    udevadm settle --timeout=10
     boot_part="${device}p${boot_part_num}"
     [[ $boot_size_in_bytes == $(blockdev --getsize64 "$boot_part") ]] || log::error "Wrong size, something wrong in the script"
     log::info "Writing boot filesystem to partition"
