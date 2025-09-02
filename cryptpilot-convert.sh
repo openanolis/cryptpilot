@@ -484,11 +484,15 @@ step:update_rootfs_and_initrd() {
     fi
     # mount bind the /etc/resolv.conf
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/etc/resolv.conf && disk::umount_wait_busy ${rootfs_mount_point}/etc/resolv.conf"
-    mount --bind "$(realpath /etc/resolv.conf)" "${rootfs_mount_point}/etc/resolv.conf"
+    mv "${rootfs_mount_point}/etc/resolv.conf" "${rootfs_mount_point}/etc/resolv.conf.cryptpilot"
+    touch "${rootfs_mount_point}/etc/resolv.conf"
+    mount -o bind,ro "$(realpath /etc/resolv.conf)" "${rootfs_mount_point}/etc/resolv.conf"
     # mount bind the /etc/hosts
     proc::hook_exit "mountpoint -q ${rootfs_mount_point}/etc/hosts && disk::umount_wait_busy ${rootfs_mount_point}/etc/hosts"
-    mount --bind "$(realpath /etc/hosts)" "${rootfs_mount_point}/etc/hosts"
 
+    mv "${rootfs_mount_point}/etc/hosts" "${rootfs_mount_point}/etc/hosts.cryptpilot"
+    touch "${rootfs_mount_point}/etc/hosts"
+    mount -o bind,ro "$(realpath /etc/hosts)" "${rootfs_mount_point}/etc/hosts"
     log::info "Installing rpm packages"
     disk::install_rpm_on_rootfs "$rootfs_mount_point" "${packages[@]}"
 
@@ -591,7 +595,13 @@ EOF
     log::info "Cleaning up chroot environment"
 
     disk::umount_wait_busy "${rootfs_mount_point}/etc/hosts"
+    rm -f "${rootfs_mount_point}/etc/hosts"
+    mv "${rootfs_mount_point}/etc/hosts.cryptpilot" "${rootfs_mount_point}/etc/hosts"
+
     disk::umount_wait_busy "${rootfs_mount_point}/etc/resolv.conf"
+    rm -f "${rootfs_mount_point}/etc/resolv.conf"
+    mv "${rootfs_mount_point}/etc/resolv.conf.cryptpilot" "${rootfs_mount_point}/etc/resolv.conf"
+
     disk::umount_wait_busy "${rootfs_mount_point}/boot/efi"
     disk::umount_wait_busy "${rootfs_mount_point}/boot"
     disk::umount_wait_busy "${rootfs_mount_point}/sys"
