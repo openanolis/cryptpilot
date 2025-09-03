@@ -33,10 +33,10 @@ impl NbdDevice {
 
     pub async fn modprobe() -> Result<()> {
         Command::new("modprobe")
-        .args(["nbd", "max_part=8"])
-        .run()
-        .await
-        .context("Failed to load kernel module 'nbd'")?;
+            .args(["nbd", "max_part=8"])
+            .run()
+            .await
+            .context("Failed to load kernel module 'nbd'")?;
 
         Ok(())
     }

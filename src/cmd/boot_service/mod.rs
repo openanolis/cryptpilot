@@ -245,8 +245,13 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
             crate::fs::luks2::format(DATA_LOGICAL_VOLUME, &passphrase, integrity).await?;
         }
 
-        crate::fs::luks2::open_with_check_passphrase(DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, &passphrase, integrity)
-            .await?;
+        crate::fs::luks2::open_with_check_passphrase(
+            DATA_LAYER_NAME,
+            DATA_LOGICAL_VOLUME,
+            &passphrase,
+            integrity,
+        )
+        .await?;
 
         if create_data_lv {
             // Create a Ext4 fs on it
@@ -316,10 +321,10 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
 
     // Load overlay module if not loaded
     Command::new("modprobe")
-    .arg("overlay")
-    .run()
-    .await
-    .context("Failed to load kernel module 'overlay'")?;
+        .arg("overlay")
+        .run()
+        .await
+        .context("Failed to load kernel module 'overlay'")?;
 
     let overlay_dir = match overlay_type {
         RwOverlayType::Ram => {
@@ -476,10 +481,10 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
 async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Result<()> {
     async {
         Command::new("modprobe")
-        .arg("dm-verity")
-        .run()
-        .await
-        .context("Failed to load kernel module 'dm-verity'")?;
+            .arg("dm-verity")
+            .run()
+            .await
+            .context("Failed to load kernel module 'dm-verity'")?;
 
         Command::new("veritysetup")
             .arg("open")
