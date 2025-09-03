@@ -873,6 +873,7 @@ dependencies = [
  "ctor",
  "devicemapper",
  "dialoguer",
+ "digest",
  "dirs",
  "documented",
  "futures-lite",
@@ -900,6 +901,7 @@ dependencies = [
  "serde_variant",
  "sha2",
  "shadow-rs",
+ "sm3",
  "strum",
  "tempfile",
  "tokio",
@@ -3510,6 +3512,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f92a496fb766b417c996b9c5e57daf2f7ad3b0bebe1ccfca4856390e3d3bb67"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "sm3"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebb9a3b702d0a7e33bc4d85a14456633d2b165c2ad839c5fd9a8417c1ab15860"
+dependencies = [
+ "digest",
 ]
 
 [[package]]

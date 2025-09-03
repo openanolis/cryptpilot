@@ -27,15 +27,77 @@ pub enum PartitionTableType {
     Gpt,
 }
 
+#[derive(Debug, Clone)]
+pub struct MeasurementedBootComponents {
+    pub kernel_cmdline: String,
+    pub kernel: Vec<u8>,
+    pub initrd: Vec<u8>,
+    pub grub: Vec<u8>,
+    pub shim: Vec<u8>,
+}
+
+impl MeasurementedBootComponents {
+    pub fn cal_hash<T>(&self) -> Result<BootComponentsHashValue>
+    where
+        T: digest::Digest + digest::Update,
+    {
+        let kernel_cmdline_hash = {
+            let mut hasher = T::new();
+            Digest::update(&mut hasher, &self.kernel_cmdline);
+            hex::encode(hasher.finalize())
+        };
+
+        // Calculate SHA384 hashes
+        let kernel_hash = {
+            let mut hasher = T::new();
+            Digest::update(&mut hasher, &self.kernel);
+            hex::encode(hasher.finalize())
+        };
+
+        let initrd_hash = {
+            let mut hasher = T::new();
+            Digest::update(&mut hasher, &self.initrd);
+            hex::encode(hasher.finalize())
+        };
+
+        // Try to read GRUB and SHIM for measurement
+        let (grub_authenticode_hash, shim_authenticode_hash) = {
+            // Calculate SHA384 hashes for GRUB and SHIM
+            let grub_hash = {
+                let mut hasher = T::new();
+                let pe = parse_pe(&self.grub)?;
+                authenticode::authenticode_digest(&*pe, &mut hasher)?;
+                hex::encode(hasher.finalize())
+            };
+
+            let shim_hash = {
+                let mut hasher = T::new();
+                let pe = parse_pe(&self.shim)?;
+                authenticode::authenticode_digest(&*pe, &mut hasher)?;
+                hex::encode(hasher.finalize())
+            };
+
+            (grub_hash, shim_hash)
+        };
+
+        Ok(BootComponentsHashValue {
+            kernel_cmdline_hash,
+            kernel_hash,
+            initrd_hash,
+            grub_authenticode_hash,
+            shim_authenticode_hash,
+        })
+    }
+}
+
 /// Structure to hold kernel and initrd information
 #[derive(Debug, Clone)]
-pub struct BootMeasurement {
-    pub kernel_cmdline: String,
-    pub kernel_cmdline_sha384: String,
-    pub kernel_sha384: String,
-    pub initrd_sha384: String,
-    pub grub_authenticode_sha384: String,
-    pub shim_authenticode_sha384: String,
+pub struct BootComponentsHashValue {
+    pub kernel_cmdline_hash: String,
+    pub kernel_hash: String,
+    pub initrd_hash: String,
+    pub grub_authenticode_hash: String,
+    pub shim_authenticode_hash: String,
 }
 
 #[async_trait]
@@ -44,7 +106,7 @@ pub trait FdeDisk: Send + Sync {
 
     async fn load_metadata(&self) -> Result<Metadata>;
 
-    async fn get_boot_measurement(&self) -> Result<BootMeasurement> {
+    async fn get_boot_measurement(&self) -> Result<MeasurementedBootComponents> {
         // Get the saved entry from GRUB environment
         let grub_env = self.get_grub_env().await?;
 
@@ -139,7 +201,7 @@ pub trait FdeDisk: Send + Sync {
     async fn process_boot_measurement(
         &self,
         grub_vars: &std::collections::HashMap<String, String>,
-    ) -> Result<BootMeasurement> {
+    ) -> Result<MeasurementedBootComponents> {
         let saved_entry = grub_vars
             .get("saved_entry")
             .ok_or_else(|| anyhow::anyhow!("saved_entry not found in GRUB environment"))?;
@@ -206,25 +268,15 @@ pub trait FdeDisk: Send + Sync {
         let kernel_path = Path::new(&kernel_path);
 
         // Calculate SHA384 hashes
-        let kernel_sha384 = {
-            let content = self
-                .read_file_on_disk(&kernel_path)
-                .await
-                .with_context(|| format!("Failed to read kernel file at {:?}", kernel_path))?;
-            let mut hasher = sha2::Sha384::new();
-            hasher.update(&content);
-            format!("{:x}", hasher.finalize())
-        };
+        let kernel = self
+            .read_file_on_disk(&kernel_path)
+            .await
+            .with_context(|| format!("Failed to read kernel file at {:?}", kernel_path))?;
 
-        let initrd_sha384 = {
-            let content = self
-                .read_file_on_disk(Path::new(&initrd_path))
-                .await
-                .with_context(|| format!("Failed to read initrd file at {}", initrd_path))?;
-            let mut hasher = sha2::Sha384::new();
-            hasher.update(&content);
-            format!("{:x}", hasher.finalize())
-        };
+        let initrd = self
+            .read_file_on_disk(Path::new(&initrd_path))
+            .await
+            .with_context(|| format!("Failed to read initrd file at {}", initrd_path))?;
 
         // Construct full kernel command line with inferred device identifier prefix
         let full_kernel_cmdline = {
@@ -272,44 +324,18 @@ pub trait FdeDisk: Send + Sync {
             )
         };
 
-        let kernel_cmdline_sha384 = {
-            let mut hasher = sha2::Sha384::new();
-            hasher.update(&full_kernel_cmdline);
-            format!("{:x}", hasher.finalize())
-        };
-
         // Try to read GRUB and SHIM for measurement
-        let (grub_authenticode_sha384, shim_authenticode_sha384) = {
-            let (grub_data, shim_data) = self
-                .read_grub_and_shim()
-                .await
-                .context("Failed to read GRUB and SHIM binaries")?;
+        let (grub, shim) = self
+            .read_grub_and_shim()
+            .await
+            .context("Failed to read GRUB and SHIM binaries")?;
 
-            // Calculate SHA384 hashes for GRUB and SHIM
-            let grub_hash = {
-                let mut hasher = sha2::Sha384::new();
-                let pe = parse_pe(&grub_data)?;
-                authenticode::authenticode_digest(&*pe, &mut hasher)?;
-                format!("{:x}", hasher.finalize())
-            };
-
-            let shim_hash = {
-                let mut hasher = sha2::Sha384::new();
-                let pe = parse_pe(&shim_data)?;
-                authenticode::authenticode_digest(&*pe, &mut hasher)?;
-                format!("{:x}", hasher.finalize())
-            };
-
-            (grub_hash, shim_hash)
-        };
-
-        Ok(BootMeasurement {
+        Ok(MeasurementedBootComponents {
             kernel_cmdline: full_kernel_cmdline,
-            kernel_cmdline_sha384,
-            kernel_sha384,
-            initrd_sha384,
-            grub_authenticode_sha384,
-            shim_authenticode_sha384,
+            kernel,
+            initrd,
+            grub,
+            shim,
         })
     }
 
