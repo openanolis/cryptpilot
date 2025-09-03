@@ -6,6 +6,7 @@ use indexmap::IndexMap;
 
 use crate::{
     cli::ShowReferenceValueStage,
+    cmd::fde::disk::MeasurementedBootComponents,
     measure::{
         attestation_agent::AAEL_DOMAIN, OPERATION_NAME_FDE_ROOTFS_HASH,
         OPERATION_NAME_INITRD_SWITCH_ROOT, OPERATION_NAME_LOAD_CONFIG,
@@ -52,36 +53,15 @@ impl super::super::Command for ShowReferenceValueCommand {
         }
 
         tracing::debug!("Getting boot related measurement");
+
         let boot_measurement = fde_disk.get_boot_measurement().await?;
+
+        inseart_with_hash::<sha2::Sha384>(&boot_measurement, &mut map, "SHA384")?;
+        inseart_with_hash::<sm3::Sm3>(&boot_measurement, &mut map, "SM3")?;
 
         map.insert(
             "kernel_cmdline".to_string(),
             vec![boot_measurement.kernel_cmdline],
-        );
-
-        map.insert(
-            "measurement.kernel_cmdline.SHA384".to_string(),
-            vec![boot_measurement.kernel_cmdline_sha384],
-        );
-
-        map.insert(
-            "measurement.kernel.SHA384".to_string(),
-            vec![boot_measurement.kernel_sha384],
-        );
-
-        map.insert(
-            "measurement.initrd.SHA384".to_string(),
-            vec![boot_measurement.initrd_sha384],
-        );
-
-        map.insert(
-            "measurement.grub.SHA384".to_string(),
-            vec![boot_measurement.grub_authenticode_sha384],
-        );
-
-        map.insert(
-            "measurement.shim.SHA384".to_string(),
-            vec![boot_measurement.shim_authenticode_sha384],
         );
 
         let json = serde_json::to_string_pretty(&map)?;
@@ -90,4 +70,42 @@ impl super::super::Command for ShowReferenceValueCommand {
 
         Ok(())
     }
+}
+
+fn inseart_with_hash<T>(
+    boot_measurement: &MeasurementedBootComponents,
+    map: &mut IndexMap<String, Vec<String>>,
+    hash_key: &str,
+) -> Result<()>
+where
+    T: digest::Digest + digest::Update,
+{
+    let hash_value = boot_measurement.cal_hash::<T>()?;
+
+    map.insert(
+        format!("measurement.kernel_cmdline.{hash_key}"),
+        vec![hash_value.kernel_cmdline_hash],
+    );
+
+    map.insert(
+        format!("measurement.kernel.{hash_key}"),
+        vec![hash_value.kernel_hash],
+    );
+
+    map.insert(
+        format!("measurement.initrd.{hash_key}"),
+        vec![hash_value.initrd_hash],
+    );
+
+    map.insert(
+        format!("measurement.grub.{hash_key}"),
+        vec![hash_value.grub_authenticode_hash],
+    );
+
+    map.insert(
+        format!("measurement.shim.{hash_key}"),
+        vec![hash_value.shim_authenticode_hash],
+    );
+
+    Ok(())
 }
