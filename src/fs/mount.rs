@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::anyhow;
 use anyhow::{Context as _, Result};
 use tempfile::TempDir;
 use tokio::process::Command;
-use anyhow::anyhow;
 
 use crate::async_defer;
 
@@ -16,11 +16,11 @@ pub struct TmpMountPoint {
 
 impl TmpMountPoint {
     pub async fn mount(dev: impl AsRef<Path>) -> Result<Self> {
-
         let dev = dev.as_ref();
 
         // Check whether the equipment has been mounted
-        let dev_str = dev.as_os_str()
+        let dev_str = dev
+            .as_os_str()
             .to_str()
             .ok_or_else(|| anyhow!("Non-UTF8 device path"))?;
 
@@ -48,16 +48,18 @@ impl TmpMountPoint {
                 .prefix("cryptpilot-mount-")
                 .tempdir()?;
 
-            let temp_dir_str = temp_dir.path()
+            let temp_dir_str = temp_dir
+                .path()
                 .to_str()
                 .ok_or_else(|| anyhow!("Invalid UTF-8 in temp dir path"))?;
 
             let mut mount_cmd = Command::new("mount");
             mount_cmd.args(["--bind", "/boot", temp_dir_str]);
 
-            mount_cmd.run().await.map_err(|e| {
-                anyhow::anyhow!("Failed to bind-mount /boot to temp dir: {}", e)
-            })?;
+            mount_cmd
+                .run()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to bind-mount /boot to temp dir: {}", e))?;
 
             return Ok(Self {
                 mount_dir: temp_dir,

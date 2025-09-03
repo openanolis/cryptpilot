@@ -98,8 +98,13 @@ async fn persistent_disk_init(
         );
 
         tracing::info!("Setting up a temporary device-mapper volume {tmp_volume_name}",);
-        crate::fs::luks2::open_with_check_passphrase(&tmp_volume_name, &volume_config.dev, &passphrase, integrity)
-            .await?;
+        crate::fs::luks2::open_with_check_passphrase(
+            &tmp_volume_name,
+            &volume_config.dev,
+            &passphrase,
+            integrity,
+        )
+        .await?;
 
         tracing::info!(
             "Initializing {makefs} fs on volume {}",
