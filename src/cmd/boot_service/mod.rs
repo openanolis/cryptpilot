@@ -391,11 +391,12 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
     tracing::info!("[ 3/4 ] Setting up mount bind");
     let dirs = [
         "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/",
-        "/var/lib/containers/storage/overlay/",
+        "/var/lib/containers/",
         "/var/lib/docker/overlay",
     ];
 
     for dir in dirs {
+        tracing::info!("Setting up mount bind for {dir}");
         // check if exist and not empty
         let task = async {
             let target = Path::new("/sysroot/").join(format!("./{dir}"));
