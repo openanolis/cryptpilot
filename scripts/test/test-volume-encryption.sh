@@ -5,6 +5,8 @@
 
 set -e # Exit on any error
 
+TRUSTEE_URL="http://127.0.0.1:8081/api/" # Trustee service URL
+
 # Function to check and install required commands
 check_and_install_commands() {
     local missing_commands=()
@@ -141,11 +143,9 @@ auto_open = true
 makefs = "ext4"
 integrity = true
 
-# For CI test, we use exec provider to simulate KBS behavior
-# In real usage, this would be [encrypt.kbs] with actual KBS configuration
-[encrypt.exec]
-command = "echo"
-args = ["-n", "test-passphrase-for-kbs"]
+[encrypt.kbs]
+kbs_url = "${TRUSTEE_URL}"
+key_uri = "kbs:///default/local-resources/volume"
 EOF
 }
 
