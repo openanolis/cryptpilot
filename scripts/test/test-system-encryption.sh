@@ -24,6 +24,9 @@ DOWNLOAD_ONLY=false
 ENCRYPT_ONLY=false
 KEEP_FILES=false
 
+# Package list for cryptpilot-convert
+PACKAGES=()
+
 # Paths to existing images (prefixed with @ to indicate they should be used as-is)
 EXISTING_IMAGE_PATH=""
 
@@ -66,6 +69,7 @@ OPTIONS:
     --encrypted-name NAME   Specify custom encrypted image filename
     --config-dir DIR        Specify custom config directory
     --passphrase PHRASE     Specify custom passphrase
+    --package PACKAGE       Specify an RPM package name or path to install (can be used multiple times)
     --existing-image PATH   Use existing image file (prefix with @, e.g., @/path/to/image.qcow2)
 
 EXAMPLES:
@@ -74,6 +78,7 @@ EXAMPLES:
     $0 --download-only      # Download images only
     $0 --encrypt-only       # Encrypt existing image
     $0 --ci --keep-files    # Run CI test but keep files
+    $0 --ci --package /path/to/package.rpm --package another-package
     $0 --ci --existing-image @/root/diskenc/aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2
 
 EOF
@@ -138,6 +143,10 @@ parse_args() {
             ;;
         --passphrase)
             PASSPHRASE="$2"
+            shift 2
+            ;;
+        --package)
+            PACKAGES+=("$2")
             shift 2
             ;;
         --existing-image)
@@ -258,7 +267,34 @@ download_image() {
     log "Image downloaded successfully"
 }
 
+# Find cryptpilot-convert command
+find_cryptpilot_convert() {
+    log "Detecting cryptpilot-convert installation..."
 
+    # Check if cryptpilot-convert is available in PATH
+    if command -v cryptpilot-convert >/dev/null 2>&1; then
+        CRYPTPILOT_CONVERT_CMD="cryptpilot-convert"
+        log "Found cryptpilot-convert command: $CRYPTPILOT_CONVERT_CMD"
+        return 0
+    fi
+
+    # Try to use built version
+    if [[ -f "target/release/cryptpilot-convert" ]]; then
+        CRYPTPILOT_CONVERT_CMD="./target/release/cryptpilot-convert"
+        log "Found built cryptpilot-convert: $CRYPTPILOT_CONVERT_CMD"
+        return 0
+    fi
+
+    # Try to use script version
+    if [[ -f "cryptpilot-convert.sh" ]]; then
+        chmod +x cryptpilot-convert.sh
+        CRYPTPILOT_CONVERT_CMD="./cryptpilot-convert.sh"
+        log "Found cryptpilot-convert script: $CRYPTPILOT_CONVERT_CMD"
+        return 0
+    fi
+
+    error "cryptpilot-convert not found"
+}
 
 # Encrypt image with cryptpilot-convert
 encrypt_image() {
@@ -269,26 +305,19 @@ encrypt_image() {
 
     log "Encrypting image with cryptpilot-convert..."
 
-    # Check if cryptpilot-convert is available
-    if ! command -v cryptpilot-convert >/dev/null 2>&1; then
-        # Try to build it if not available
-        if [[ -f "target/release/cryptpilot-convert" ]]; then
-            log "Using built cryptpilot-convert"
-            ./target/release/cryptpilot-convert --in "${IMAGE_NAME}" --out "${ENCRYPTED_IMAGE_NAME}" \
-                --config-dir "${CONFIG_DIR}" --rootfs-passphrase "${PASSPHRASE}" || error "Encryption failed"
-        elif [[ -f "cryptpilot-convert.sh" ]]; then
-            log "Using cryptpilot-convert.sh script"
-            chmod +x cryptpilot-convert.sh
-            ./cryptpilot-convert.sh --in "${IMAGE_NAME}" --out "${ENCRYPTED_IMAGE_NAME}" \
-                --config-dir "${CONFIG_DIR}" --rootfs-passphrase "${PASSPHRASE}" || error "Encryption failed"
-        else
-            error "cryptpilot-convert not found"
-        fi
-    else
-        # Use the binary directly
-        cryptpilot-convert --in "${IMAGE_NAME}" --out "${ENCRYPTED_IMAGE_NAME}" \
-            --config-dir "${CONFIG_DIR}" --rootfs-passphrase "${PASSPHRASE}" || error "Encryption failed"
-    fi
+    # Find cryptpilot-convert command
+    find_cryptpilot_convert
+
+    # Build package arguments
+    local package_args=()
+    for package in "${PACKAGES[@]}"; do
+        package_args+=(--package "$package")
+    done
+
+    # Run cryptpilot-convert
+    "$CRYPTPILOT_CONVERT_CMD" --in "${IMAGE_NAME}" --out "${ENCRYPTED_IMAGE_NAME}" \
+        --config-dir "${CONFIG_DIR}" --rootfs-passphrase "${PASSPHRASE}" \
+        "${package_args[@]}" || error "Encryption failed"
 
     [[ -f "${ENCRYPTED_IMAGE_NAME}" ]] || error "Encrypted image not found after encryption process"
     log "Image encrypted successfully"
