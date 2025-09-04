@@ -7,7 +7,7 @@
 # 3. Download only mode - Just download images
 # 4. Encrypt only mode - Just encrypt an existing image
 
-set -e  # Exit on any error
+set -e # Exit on any error
 
 # Default configuration
 IMAGE_URL="https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2"
@@ -52,7 +52,7 @@ NC='\033[0m' # No Color
 
 # Help message
 show_help() {
-    cat << EOF
+    cat <<EOF
 Usage: $0 [OPTIONS]
 
 Unified test script for cryptpilot system disk encryption.
@@ -101,65 +101,65 @@ error() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -h|--help)
-                show_help
-                exit 0
-                ;;
-            -c|--ci)
-                CI_MODE=true
-                shift
-                ;;
-            -l|--local)
-                LOCAL_MODE=true
-                shift
-                ;;
-            -d|--download-only)
-                DOWNLOAD_ONLY=true
-                shift
-                ;;
-            -e|--encrypt-only)
-                ENCRYPT_ONLY=true
-                shift
-                ;;
-            -k|--keep-files)
-                KEEP_FILES=true
-                shift
-                ;;
-            --image-url)
-                IMAGE_URL="$2"
-                shift 2
-                ;;
-            --seed-url)
-                SEED_URL="$2"
-                shift 2
-                ;;
-            --image-name)
-                IMAGE_NAME="$2"
-                shift 2
-                ;;
-            --encrypted-name)
-                ENCRYPTED_IMAGE_NAME="$2"
-                shift 2
-                ;;
-            --config-dir)
-                CONFIG_DIR="$2"
-                shift 2
-                ;;
-            --passphrase)
-                PASSPHRASE="$2"
-                shift 2
-                ;;
-            --existing-image)
-                EXISTING_IMAGE_PATH="$2"
-                shift 2
-                ;;
-            --existing-seed)
-                EXISTING_SEED_PATH="$2"
-                shift 2
-                ;;
-            *)
-                error "Unknown option: $1"
-                ;;
+        -h | --help)
+            show_help
+            exit 0
+            ;;
+        -c | --ci)
+            CI_MODE=true
+            shift
+            ;;
+        -l | --local)
+            LOCAL_MODE=true
+            shift
+            ;;
+        -d | --download-only)
+            DOWNLOAD_ONLY=true
+            shift
+            ;;
+        -e | --encrypt-only)
+            ENCRYPT_ONLY=true
+            shift
+            ;;
+        -k | --keep-files)
+            KEEP_FILES=true
+            shift
+            ;;
+        --image-url)
+            IMAGE_URL="$2"
+            shift 2
+            ;;
+        --seed-url)
+            SEED_URL="$2"
+            shift 2
+            ;;
+        --image-name)
+            IMAGE_NAME="$2"
+            shift 2
+            ;;
+        --encrypted-name)
+            ENCRYPTED_IMAGE_NAME="$2"
+            shift 2
+            ;;
+        --config-dir)
+            CONFIG_DIR="$2"
+            shift 2
+            ;;
+        --passphrase)
+            PASSPHRASE="$2"
+            shift 2
+            ;;
+        --existing-image)
+            EXISTING_IMAGE_PATH="$2"
+            shift 2
+            ;;
+        --existing-seed)
+            EXISTING_SEED_PATH="$2"
+            shift 2
+            ;;
+        *)
+            error "Unknown option: $1"
+            ;;
         esac
     done
 }
@@ -167,7 +167,7 @@ parse_args() {
 # Find appropriate QEMU command
 find_qemu() {
     log "Detecting QEMU installation..."
-    
+
     # Try different QEMU commands and paths
     for path in "${QEMU_PATHS[@]}"; do
         if [[ -x "$path" ]] || command -v "$path" >/dev/null 2>&1; then
@@ -176,7 +176,7 @@ find_qemu() {
             return 0
         fi
     done
-    
+
     error "No QEMU command found. Please install QEMU (qemu-system-x86 or qemu-kvm)"
 }
 
@@ -198,15 +198,15 @@ cleanup() {
     else
         log "Keeping downloaded files as requested"
     fi
-    
+
     # Kill QEMU process if still running
     if [[ -n "${qemu_pid:-}" ]]; then
         log "Terminating QEMU process ${qemu_pid}"
-        kill ${qemu_pid} 2>/dev/null || true
+        kill "${qemu_pid}" 2>/dev/null || true
         # Wait a moment for graceful termination
         sleep 2
         # Force kill if still running
-        kill -9 ${qemu_pid} 2>/dev/null || true
+        kill -9 "${qemu_pid}" 2>/dev/null || true
     fi
 }
 
@@ -216,8 +216,8 @@ trap cleanup EXIT
 setup_config() {
     log "Setting up cryptpilot config..."
     mkdir -p "${CONFIG_DIR}"
-    
-    cat > "${CONFIG_DIR}/fde.toml" << EOF
+
+    cat >"${CONFIG_DIR}/fde.toml" <<EOF
 [rootfs]
 rw_overlay = "disk"
 
@@ -249,15 +249,15 @@ download_image() {
             error "Specified existing image file not found: $existing_path"
         fi
     fi
-    
+
     if [[ -f "${IMAGE_NAME}" ]]; then
         log "Using existing image file"
         return
     fi
-    
+
     log "Downloading Alinux3 image from ${IMAGE_URL}..."
     log "NOTE: This is a large file (20GB) and may take a while to download"
-    
+
     # Try with wget first (supports resume)
     if command -v wget >/dev/null 2>&1; then
         log "Using wget with resume capability"
@@ -269,7 +269,7 @@ download_image() {
     else
         error "Neither wget nor curl found"
     fi
-    
+
     [[ -f "${IMAGE_NAME}" ]] || error "Image file not found after download"
     log "Image downloaded successfully"
 }
@@ -289,12 +289,12 @@ download_seed() {
             error "Specified existing seed file not found: $existing_path"
         fi
     fi
-    
+
     if [[ -f "${SEED_IMAGE}" ]]; then
         log "Using existing seed image file"
         return
     fi
-    
+
     log "Downloading seed image from ${SEED_URL}..."
     if command -v wget >/dev/null 2>&1; then
         wget -O "${SEED_IMAGE}" "${SEED_URL}" || error "Failed to download seed image with wget"
@@ -303,7 +303,7 @@ download_seed() {
     else
         error "Neither wget nor curl found"
     fi
-    
+
     [[ -f "${SEED_IMAGE}" ]] || error "Seed image file not found after download"
     log "Seed image downloaded successfully"
 }
@@ -314,9 +314,9 @@ encrypt_image() {
         log "Using existing encrypted image file"
         return
     fi
-    
+
     log "Encrypting image with cryptpilot-convert..."
-    
+
     # Check if cryptpilot-convert is available
     if ! command -v cryptpilot-convert >/dev/null 2>&1; then
         # Try to build it if not available
@@ -337,7 +337,7 @@ encrypt_image() {
         cryptpilot-convert --in "${IMAGE_NAME}" --out "${ENCRYPTED_IMAGE_NAME}" \
             --config-dir "${CONFIG_DIR}" --rootfs-passphrase "${PASSPHRASE}" || error "Encryption failed"
     fi
-    
+
     [[ -f "${ENCRYPTED_IMAGE_NAME}" ]] || error "Encrypted image not found after encryption process"
     log "Image encrypted successfully"
 }
@@ -345,13 +345,13 @@ encrypt_image() {
 # Start QEMU with the encrypted image (CI mode)
 start_qemu_ci() {
     log "Starting QEMU with encrypted image (CI mode)..."
-    
+
     # Find appropriate QEMU command
     find_qemu
-    
+
     # Print QEMU command for debugging
     log "QEMU command: $QEMU_CMD -m 2048M -smp 2 -nographic -serial mon:stdio -monitor unix:qemu-monitor.sock,server,nowait -drive file=${ENCRYPTED_IMAGE_NAME},format=qcow2,if=virtio,id=hd0,readonly=off -drive file=${SEED_IMAGE},if=virtio,format=raw -netdev user,id=net0,net=192.168.123.0/24,hostfwd=tcp::2222-:22 -device virtio-net,netdev=net0"
-    
+
     # Start QEMU in background, redirecting output to file for analysis
     $QEMU_CMD \
         -m 2048M \
@@ -363,13 +363,14 @@ start_qemu_ci() {
         -drive file="${SEED_IMAGE}",if=virtio,format=raw \
         -netdev user,id=net0,net=192.168.123.0/24,hostfwd=tcp::2222-:22 \
         -device virtio-net,netdev=net0 \
-        > "${LOG_FILE}" 2>&1 & qemu_pid=$!
-    
+        >"${LOG_FILE}" 2>&1 &
+    qemu_pid=$!
+
     log "QEMU started with PID: ${qemu_pid}"
-    
+
     # Give QEMU some time to start
     sleep 10
-    
+
     # Check if QEMU is still running
     if ! kill -0 ${qemu_pid} 2>/dev/null; then
         error "QEMU process terminated unexpectedly"
@@ -379,16 +380,16 @@ start_qemu_ci() {
 # Verify system boot by checking for login prompt in output (CI mode)
 verify_boot() {
     log "Verifying system boot by checking for login prompt..."
-    
+
     # Wait for system to boot and show login prompt (max 300 seconds)
     local timeout=300
     local count=0
-    
+
     while [[ $count -lt $timeout ]]; do
         # Check if log file exists and has content
         if [[ -f "${LOG_FILE}" ]] && [[ -s "${LOG_FILE}" ]]; then
             log "Log file exists and has content, checking for login prompt..."
-            
+
             # Check if login prompt appears in output log
             if grep -q "login:" "${LOG_FILE}" 2>/dev/null; then
                 log "System boot verified - login prompt detected!"
@@ -396,7 +397,7 @@ verify_boot() {
                 tail -20 "${LOG_FILE}"
                 return 0
             fi
-            
+
             # Also check for Alibaba Cloud Linux login prompt
             if grep -q "Alibaba Cloud Linux" "${LOG_FILE}" 2>/dev/null; then
                 log "System boot verified - Alibaba Cloud Linux detected!"
@@ -404,9 +405,9 @@ verify_boot() {
                 tail -20 "${LOG_FILE}"
                 return 0
             fi
-            
+
             # Show progress every 30 seconds
-            if (( count % 30 == 0 )); then
+            if ((count % 30 == 0)); then
                 log "Still waiting for boot (elapsed: ${count}s)..."
                 log "Last 10 lines of log:"
                 tail -10 "${LOG_FILE}"
@@ -416,16 +417,16 @@ verify_boot() {
         else
             log "Log file does not exist yet (elapsed: ${count}s)"
         fi
-        
+
         # Check if QEMU process is still running
         if ! kill -0 ${qemu_pid} 2>/dev/null; then
             error "QEMU process terminated unexpectedly. Check ${LOG_FILE} for details."
         fi
-        
+
         sleep 1
         ((count++))
     done
-    
+
     # If we get here, the system didn't boot in time
     log "System failed to boot within ${timeout} seconds."
     if [[ -f "${LOG_FILE}" ]]; then
@@ -434,46 +435,46 @@ verify_boot() {
     else
         log "No QEMU output log found."
     fi
-    
+
     error "System failed to boot and show login prompt within ${timeout} seconds."
 }
 
 # Check mount entries in /etc/mtab and device mapper volumes
 check_mount_entries() {
     log "Checking mount entries and device mapper volumes..."
-    
+
     # Wait for system to be fully ready (add a small delay)
     sleep 5
-    
+
     # Try to login via console to verify system is working
     log "Attempting to login via console with username 'alinux' and password 'aliyun'..."
     # Send username and password via QEMU monitor using sendkey command
     for char in a l i n u x; do
-        echo -e "sendkey ${char}\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock > /dev/null 2>&1
+        echo -e "sendkey ${char}\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock >/dev/null 2>&1
         sleep 0.1
     done
-    echo -e "sendkey ret\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock > /dev/null 2>&1
-    
+    echo -e "sendkey ret\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock >/dev/null 2>&1
+
     sleep 1
-    
+
     for char in a l i y u n; do
-        echo -e "sendkey ${char}\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock > /dev/null 2>&1
+        echo -e "sendkey ${char}\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock >/dev/null 2>&1
         sleep 0.1
     done
-    echo -e "sendkey ret\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock > /dev/null 2>&1
-    
+    echo -e "sendkey ret\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock >/dev/null 2>&1
+
     sleep 3
-    
+
     # Try to extract information from QEMU guest
     if [[ -S "qemu-monitor.sock" ]]; then
         log "Extracting information from QEMU guest..."
-        
+
         # Extract /etc/mtab from guest
-        echo -e "human-monitor-command {\"command-line\":\"cat /etc/mtab\"}\nquit" | socat - UNIX-CONNECT:qemu-monitor.sock > mtab_output.txt 2>/dev/null
-        
+        echo -e "human-monitor-command {\"command-line\":\"cat /etc/mtab\"}\nquit" | socat - UNIX-CONNECT:qemu-monitor.sock >mtab_output.txt 2>/dev/null
+
         # Extract /dev/mapper contents from guest
-        echo -e "human-monitor-command {\"command-line\":\"ls -1 /dev/mapper\"}\nquit" | socat - UNIX-CONNECT:qemu-monitor.sock > dev_mapper_output.txt 2>/dev/null
-        
+        echo -e "human-monitor-command {\"command-line\":\"ls -1 /dev/mapper\"}\nquit" | socat - UNIX-CONNECT:qemu-monitor.sock >dev_mapper_output.txt 2>/dev/null
+
         # Check for rootfs mount entry (only checking the first 3 columns)
         if grep -q "^/dev/mapper/rootfs / overlay" mtab_output.txt; then
             log "Rootfs mount entry found in /etc/mtab!"
@@ -483,7 +484,7 @@ check_mount_entries() {
             cat mtab_output.txt
             return 1
         fi
-        
+
         # Check for data mount entry
         if grep -q "^/dev/mapper/data /data " mtab_output.txt; then
             log "Data mount entry found in /etc/mtab!"
@@ -493,7 +494,7 @@ check_mount_entries() {
             cat mtab_output.txt
             return 1
         fi
-        
+
         # Check for rootfs device mapper volume
         if grep -q "^rootfs$" dev_mapper_output.txt; then
             log "Rootfs device mapper volume found!"
@@ -503,7 +504,7 @@ check_mount_entries() {
             cat dev_mapper_output.txt
             return 1
         fi
-        
+
         # Check for data device mapper volume
         if grep -q "^data$" dev_mapper_output.txt; then
             log "Data device mapper volume found!"
@@ -513,7 +514,7 @@ check_mount_entries() {
             cat dev_mapper_output.txt
             return 1
         fi
-        
+
         log "All mount entries and device mapper volumes verified successfully!"
         return 0
     else
@@ -525,10 +526,10 @@ check_mount_entries() {
 # Start QEMU with the encrypted image (Local mode)
 start_qemu_local() {
     log "Starting QEMU with encrypted image (Local mode)..."
-    
+
     # Find appropriate QEMU command
     find_qemu
-    
+
     # Start QEMU with a simplified configuration for testing
     log "Starting QEMU - Press Ctrl+A then X to exit"
     $QEMU_CMD \
@@ -542,16 +543,21 @@ start_qemu_local() {
 
 # Main execution
 main() {
+    if [ "$(id -u)" != "0" ]; then
+        log::error "This script must be run as root"
+        exit 1
+    fi
+
     parse_args "$@"
-    
+
     # Determine mode if not explicitly set
     if [[ "$CI_MODE" == false && "$LOCAL_MODE" == false && "$DOWNLOAD_ONLY" == false && "$ENCRYPT_ONLY" == false ]]; then
         # Default to CI mode
         CI_MODE=true
     fi
-    
+
     log "Starting unified test script for system disk encryption"
-    
+
     # Handle download-only mode
     if [[ "$DOWNLOAD_ONLY" == true ]]; then
         download_image
@@ -559,7 +565,7 @@ main() {
         log "Download-only mode completed successfully!"
         exit 0
     fi
-    
+
     # Handle encrypt-only mode
     if [[ "$ENCRYPT_ONLY" == true ]]; then
         setup_config
@@ -567,17 +573,17 @@ main() {
         log "Encrypt-only mode completed successfully!"
         exit 0
     fi
-    
+
     # Setup config for other modes
     setup_config
-    
+
     # Download images or use existing ones
     download_image
     download_seed
-    
+
     # Encrypt image
     encrypt_image
-    
+
     # Handle CI mode
     if [[ "$CI_MODE" == true ]]; then
         start_qemu_ci
@@ -586,7 +592,7 @@ main() {
         log "CI mode test completed successfully!"
         log "System disk encryption verification passed!"
     fi
-    
+
     # Handle local mode
     if [[ "$LOCAL_MODE" == true ]]; then
         start_qemu_local
