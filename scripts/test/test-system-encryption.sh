@@ -16,7 +16,7 @@ ENCRYPTED_IMAGE_NAME="encrypted.qcow2"
 CONFIG_DIR="test-config"
 PASSPHRASE="AAAaaawewe222"
 LOG_FILE="qemu-output.log"
-TRUSTEE_URL="http://127.0.0.1:8081/api/"  # Trustee service URL
+TRUSTEE_URL="http://10.0.2.2:8081/api/"  # Trustee service URL
 
 # Mode flags
 CI_MODE=false
