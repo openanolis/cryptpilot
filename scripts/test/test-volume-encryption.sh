@@ -5,6 +5,45 @@
 
 set -e # Exit on any error
 
+# Function to check and install required commands
+check_and_install_commands() {
+    local missing_commands=()
+    local install_commands=()
+
+    # List of required commands and their packages (for RHEL/CentOS)
+    local commands_and_packages=(
+        "losetup:util-linux"
+        "parted:parted"
+        "mount:util-linux"
+        "umount:util-linux"
+    )
+
+    # Check which commands are missing
+    for item in "${commands_and_packages[@]}"; do
+        local cmd="${item%%:*}"
+        local pkg="${item#*:}"
+
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_commands+=("$cmd")
+            install_commands+=("$pkg")
+        fi
+    done
+
+    # If there are missing commands, try to install them
+    if [ ${#missing_commands[@]} -gt 0 ]; then
+        echo "Missing required commands: ${missing_commands[*]}"
+
+        echo "Attempting to install missing packages with yum..."
+        if ! yum install -y "${install_commands[@]}"; then
+            echo "Failed to install packages with yum. Please install the following packages manually:"
+            echo "${install_commands[*]}"
+            exit 1
+        fi
+    fi
+
+    echo "All required commands are available."
+}
+
 # Default configuration
 CONFIG_DIR="test-kbs-config"
 LOG_FILE="test-output.log"
@@ -270,6 +309,9 @@ main() {
     fi
 
     parse_args "$@"
+
+    # Check and install required commands
+    check_and_install_commands
 
     log "Starting KBS volume encryption test"
 
