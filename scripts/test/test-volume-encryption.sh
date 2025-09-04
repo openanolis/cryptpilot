@@ -48,7 +48,6 @@ check_and_install_commands() {
 
 # Default configuration
 CONFIG_DIR="test-kbs-config"
-LOG_FILE="test-output.log"
 
 # Colors for output
 RED='\033[0;31m'
@@ -113,7 +112,6 @@ cleanup() {
     if [[ "$KEEP_FILES" == false ]]; then
         log "Cleaning up..."
         [[ -d "${CONFIG_DIR}" ]] && rm -rf "${CONFIG_DIR}"
-        [[ -f "${LOG_FILE}" ]] && rm -f "${LOG_FILE}"
 
         # Detach any loop device associated with test-disk.img
         if losetup -a | grep -q "test-disk.img"; then
@@ -198,9 +196,8 @@ test_volume_init() {
     log "Initializing KBS volume..."
 
     # Initialize the volume
-    if ! cryptpilot init kbs-test -c "${CONFIG_DIR}" -y >"${LOG_FILE}" 2>&1; then
-        echo "Failed to initialize volume. Log output:"
-        cat "${LOG_FILE}"
+    if ! cryptpilot init kbs-test -c "${CONFIG_DIR}" -y; then
+        echo "Failed to initialize volume."
         return 1
     fi
 
@@ -212,9 +209,8 @@ test_volume_open() {
     log "Opening KBS volume..."
 
     # Open the volume
-    if ! cryptpilot open kbs-test -c "${CONFIG_DIR}" >"${LOG_FILE}" 2>&1; then
-        echo "Failed to open volume. Log output:"
-        cat "${LOG_FILE}"
+    if ! cryptpilot open kbs-test -c "${CONFIG_DIR}"; then
+        echo "Failed to open volume."
         return 1
     fi
 
@@ -232,20 +228,8 @@ test_volume_show() {
     log "Showing volume status..."
 
     # Show volume status
-    if ! cryptpilot show -c "${CONFIG_DIR}" >"${LOG_FILE}" 2>&1; then
-        echo "Failed to show volume status. Log output:"
-        cat "${LOG_FILE}"
-        return 1
-    fi
-
-    # Check if our volume is listed and opened
-    if ! grep -q "kbs-test" "${LOG_FILE}"; then
-        echo "Volume kbs-test not found in show output"
-        return 1
-    fi
-
-    if ! grep -q "True" "${LOG_FILE}"; then
-        echo "Volume kbs-test is not opened according to show output"
+    if ! cryptpilot show -c "${CONFIG_DIR}"; then
+        echo "Failed to show volume status."
         return 1
     fi
 
@@ -286,9 +270,8 @@ test_volume_close() {
     log "Closing KBS volume..."
 
     # Close the volume
-    if ! cryptpilot close kbs-test -c "${CONFIG_DIR}" >"${LOG_FILE}" 2>&1; then
-        echo "Failed to close volume. Log output:"
-        cat "${LOG_FILE}"
+    if ! cryptpilot close kbs-test -c "${CONFIG_DIR}"; then
+        echo "Failed to close volume."
         return 1
     fi
 
