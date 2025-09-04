@@ -150,8 +150,8 @@ EOF
 create_test_disk() {
     log "Creating test disk..."
 
-    # Create a 100MB disk image
-    dd if=/dev/zero of=test-disk.img bs=1M count=100
+    # Create a 5GB disk image
+    dd if=/dev/zero of=test-disk.img bs=5M count=1024
 
     # Detach loop device if already attached
     LOOP_DEVICE=$(losetup --associated "$IMAGE" | awk '{print $1}')
@@ -163,6 +163,10 @@ create_test_disk() {
     LOOP_DEV=$(losetup --find)
 
     if [[ -z "$LOOP_DEV" ]]; then
+        error "Failed to found a free loop device"
+    fi
+
+    if ! losetup -P "$LOOP_DEV" test-disk.img 2>/dev/null; then
         error "Failed to set up loop device"
     fi
 
@@ -176,9 +180,23 @@ create_test_disk() {
 test_volume_init() {
     log "Initializing KBS volume..."
 
+    # check if trustee is still running
+    yum install -y iproute
+    ps -ef
+
+    ss --tcp -n --listening
+
     # Initialize the volume
     if ! cryptpilot init kbs-test -c "${CONFIG_DIR}" -y; then
         echo "Failed to initialize volume."
+
+        cat /tmp/trustee-gateway.log
+
+        # check again trustee is still running
+        ps -ef
+
+        ss --tcp -n --listening
+
         return 1
     fi
 

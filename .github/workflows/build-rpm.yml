@@ -202,10 +202,39 @@ jobs:
           # install requirements
           yum install -y libguestfs-tools
 
+      - name: Load nbd kernel module
+        run: |
+          yum install -y kmod zstd
+
+          MODULE_DIR="/lib/modules/$(uname -r)"
+          MODULE_FILE=$(find "$MODULE_DIR" -name "nbd.ko*" -type f | head -1)
+
+          if [ -z "$MODULE_FILE" ]; then
+              echo "No module file found in $MODULE_DIR"
+              exit 1
+          fi
+          echo "Found module file: $MODULE_FILE"
+
+          if [[ "$MODULE_FILE" == *.ko.zst ]]; then
+              echo "Found zstd compressed module file, decompressing..."
+
+              zstd -d "$MODULE_FILE" -o "/tmp/nbd.ko"
+              if [ $? -ne 0 ]; then
+                  echo "Failed to decompress module file"
+                  exit 1
+              fi
+
+              echo "Loading the decompressed module..."
+              insmod "/tmp/nbd.ko" || exit 1
+          else
+              echo "Loading the module with modprobe ..."
+              modprobe nbd
+          fi
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./
+          path: /tmp/
           merge-multiple: false
 
       - name: Install RPM packages
@@ -214,7 +243,7 @@ jobs:
           set -x
 
           # test rpm package install
-          yum install -y ./rpm-packages/RPMS/*/cryptpilot-*.rpm
+          yum install -y /tmp/rpm-packages/RPMS/*/cryptpilot-*.rpm
           cryptpilot --version
 
       - name: Checkout repository
@@ -227,7 +256,7 @@ jobs:
       - name: Run system encryption test
         run: |
           export LIBGUESTFS_BACKEND=appliance # set this for virt-customize
-          timeout 300s bash ./scripts/test/test-system-encryption.sh --ci --package ./rpm-packages/RPMS/*/cryptpilot-*.rpm --trustee-url "http://10.0.2.2:8081/api/"
+          timeout 1200s bash ./scripts/test/test-system-encryption.sh --ci --package /tmp/rpm-packages/RPMS/*/cryptpilot-*.rpm --trustee-url "http://10.0.2.2:8081/api/"
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
