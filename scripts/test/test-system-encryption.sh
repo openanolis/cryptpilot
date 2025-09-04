@@ -385,14 +385,6 @@ verify_boot() {
                 return 0
             fi
 
-            # Also check for Alibaba Cloud Linux login prompt
-            if grep -q "Alibaba Cloud Linux" "${LOG_FILE}" 2>/dev/null; then
-                log "System boot verified - Alibaba Cloud Linux detected!"
-                log "Last 20 lines of output:"
-                tail -20 "${LOG_FILE}"
-                return 0
-            fi
-
             # Show progress every 30 seconds
             if ((count % 30 == 0)); then
                 log "Still waiting for boot (elapsed: ${count}s)..."
@@ -648,7 +640,8 @@ main() {
     encrypt_image
     
     # Calculate reference values
-    calculate_reference_values
+    # TODO: fix the udevadm problem by changing to guestmount https://github.com/openanolis/cryptpilot/actions/runs/17576971966/job/49925051838?pr=21
+    # calculate_reference_values
 
     # Handle CI mode
     if [[ "$CI_MODE" == true ]]; then
