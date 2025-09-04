@@ -15,8 +15,6 @@ IMAGE_NAME="alinux3.qcow2"
 ENCRYPTED_IMAGE_NAME="encrypted.qcow2"
 CONFIG_DIR="test-config"
 PASSPHRASE="AAAaaawewe222"
-SEED_IMAGE="seed.img"
-SEED_URL="https://alinux3.oss-cn-hangzhou.aliyuncs.com/seed.img"
 LOG_FILE="qemu-output.log"
 
 # Mode flags
@@ -28,7 +26,6 @@ KEEP_FILES=false
 
 # Paths to existing images (prefixed with @ to indicate they should be used as-is)
 EXISTING_IMAGE_PATH=""
-EXISTING_SEED_PATH=""
 
 # QEMU command to use
 QEMU_CMD=""
@@ -65,13 +62,11 @@ OPTIONS:
     -e, --encrypt-only      Encrypt existing image only
     -k, --keep-files        Keep downloaded files after execution
     --image-url URL         Specify custom image URL
-    --seed-url URL          Specify custom seed image URL
     --image-name NAME       Specify custom image filename
     --encrypted-name NAME   Specify custom encrypted image filename
     --config-dir DIR        Specify custom config directory
     --passphrase PHRASE     Specify custom passphrase
     --existing-image PATH   Use existing image file (prefix with @, e.g., @/path/to/image.qcow2)
-    --existing-seed PATH    Use existing seed file (prefix with @, e.g., @/path/to/seed.img)
 
 EXAMPLES:
     $0 --ci                 # Run full CI test
@@ -79,7 +74,7 @@ EXAMPLES:
     $0 --download-only      # Download images only
     $0 --encrypt-only       # Encrypt existing image
     $0 --ci --keep-files    # Run CI test but keep files
-    $0 --ci --existing-image @/root/diskenc/aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2 --existing-seed @/root/diskenc/seed.img
+    $0 --ci --existing-image @/root/diskenc/aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2
 
 EOF
 }
@@ -129,10 +124,6 @@ parse_args() {
             IMAGE_URL="$2"
             shift 2
             ;;
-        --seed-url)
-            SEED_URL="$2"
-            shift 2
-            ;;
         --image-name)
             IMAGE_NAME="$2"
             shift 2
@@ -151,10 +142,6 @@ parse_args() {
             ;;
         --existing-image)
             EXISTING_IMAGE_PATH="$2"
-            shift 2
-            ;;
-        --existing-seed)
-            EXISTING_SEED_PATH="$2"
             shift 2
             ;;
         *)
@@ -188,9 +175,6 @@ cleanup() {
         # Only clean up downloaded/created files, not existing ones
         if [[ -z "$EXISTING_IMAGE_PATH" ]]; then
             [[ "$DOWNLOAD_ONLY" == false && "$ENCRYPT_ONLY" == false ]] && [[ -f "${IMAGE_NAME}" ]] && rm -f "${IMAGE_NAME}"
-        fi
-        if [[ -z "$EXISTING_SEED_PATH" ]]; then
-            [[ "$DOWNLOAD_ONLY" == false ]] && [[ -f "${SEED_IMAGE}" ]] && rm -f "${SEED_IMAGE}"
         fi
         [[ "$DOWNLOAD_ONLY" == false ]] && [[ -f "${ENCRYPTED_IMAGE_NAME}" ]] && rm -f "${ENCRYPTED_IMAGE_NAME}"
         [[ -S "qemu-monitor.sock" ]] && rm -f "qemu-monitor.sock"
@@ -274,39 +258,7 @@ download_image() {
     log "Image downloaded successfully"
 }
 
-# Download seed image
-download_seed() {
-    # If existing seed path is provided, use it
-    if [[ -n "$EXISTING_SEED_PATH" ]]; then
-        # Remove the @ prefix
-        local existing_path="${EXISTING_SEED_PATH#@}"
-        if [[ -f "$existing_path" ]]; then
-            log "Using existing seed file: $existing_path"
-            # Create a symlink or copy to our expected name
-            ln -sf "$existing_path" "${SEED_IMAGE}"
-            return
-        else
-            error "Specified existing seed file not found: $existing_path"
-        fi
-    fi
 
-    if [[ -f "${SEED_IMAGE}" ]]; then
-        log "Using existing seed image file"
-        return
-    fi
-
-    log "Downloading seed image from ${SEED_URL}..."
-    if command -v wget >/dev/null 2>&1; then
-        wget -O "${SEED_IMAGE}" "${SEED_URL}" || error "Failed to download seed image with wget"
-    elif command -v curl >/dev/null 2>&1; then
-        curl -L -o "${SEED_IMAGE}" "${SEED_URL}" || error "Failed to download seed image with curl"
-    else
-        error "Neither wget nor curl found"
-    fi
-
-    [[ -f "${SEED_IMAGE}" ]] || error "Seed image file not found after download"
-    log "Seed image downloaded successfully"
-}
 
 # Encrypt image with cryptpilot-convert
 encrypt_image() {
@@ -350,7 +302,7 @@ start_qemu_ci() {
     find_qemu
 
     # Print QEMU command for debugging
-    log "QEMU command: $QEMU_CMD -m 2048M -smp 2 -nographic -serial mon:stdio -monitor unix:qemu-monitor.sock,server,nowait -drive file=${ENCRYPTED_IMAGE_NAME},format=qcow2,if=virtio,id=hd0,readonly=off -drive file=${SEED_IMAGE},if=virtio,format=raw -netdev user,id=net0,net=192.168.123.0/24,hostfwd=tcp::2222-:22 -device virtio-net,netdev=net0"
+    log "QEMU command: $QEMU_CMD -m 2048M -smp 2 -nographic -serial mon:stdio -monitor unix:qemu-monitor.sock,server,nowait -drive file=${ENCRYPTED_IMAGE_NAME},format=qcow2,if=virtio,id=hd0,readonly=off -netdev user,id=net0,net=192.168.123.0/24,hostfwd=tcp::2222-:22 -device virtio-net,netdev=net0"
 
     # Start QEMU in background, redirecting output to file for analysis
     $QEMU_CMD \
@@ -360,7 +312,6 @@ start_qemu_ci() {
         -serial mon:stdio \
         -monitor unix:qemu-monitor.sock,server,nowait \
         -drive file="${ENCRYPTED_IMAGE_NAME}",format=qcow2,if=virtio,id=hd0,readonly=off \
-        -drive file="${SEED_IMAGE}",if=virtio,format=raw \
         -netdev user,id=net0,net=192.168.123.0/24,hostfwd=tcp::2222-:22 \
         -device virtio-net,netdev=net0 \
         >"${LOG_FILE}" 2>&1 &
@@ -447,9 +398,9 @@ check_mount_entries() {
     sleep 5
 
     # Try to login via console to verify system is working
-    log "Attempting to login via console with username 'alinux' and password 'aliyun'..."
+    log "Attempting to login via console with username 'root' and password 'root'..."
     # Send username and password via QEMU monitor using sendkey command
-    for char in a l i n u x; do
+    for char in r o o t; do
         echo -e "sendkey ${char}\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock >/dev/null 2>&1
         sleep 0.1
     done
@@ -457,7 +408,7 @@ check_mount_entries() {
 
     sleep 1
 
-    for char in a l i y u n; do
+    for char in r o o t; do
         echo -e "sendkey ${char}\n" | timeout 10 socat - UNIX-CONNECT:qemu-monitor.sock >/dev/null 2>&1
         sleep 0.1
     done
@@ -537,8 +488,7 @@ start_qemu_local() {
         -smp 2 \
         -nographic \
         -serial mon:stdio \
-        -drive file="${ENCRYPTED_IMAGE_NAME}",format=qcow2,if=virtio,id=hd0,readonly=off \
-        -drive file="${SEED_IMAGE}",if=virtio,format=raw
+        -drive file="${ENCRYPTED_IMAGE_NAME}",format=qcow2,if=virtio,id=hd0,readonly=off
 }
 
 # Main execution
@@ -561,7 +511,6 @@ main() {
     # Handle download-only mode
     if [[ "$DOWNLOAD_ONLY" == true ]]; then
         download_image
-        download_seed
         log "Download-only mode completed successfully!"
         exit 0
     fi
@@ -579,7 +528,9 @@ main() {
 
     # Download images or use existing ones
     download_image
-    download_seed
+    
+    # 使用virt-customize设置root密码
+    set_root_password
 
     # Encrypt image
     encrypt_image
@@ -598,6 +549,21 @@ main() {
         start_qemu_local
         log "Local mode test completed!"
     fi
+}
+
+# Set root password using virt-customize
+set_root_password() {
+    log "Setting root password using virt-customize..."
+    
+    # Check if virt-customize is available
+    if ! command -v virt-customize >/dev/null 2>&1; then
+        error "virt-customize not found. Please install libguestfs-tools package."
+    fi
+    
+    # Use virt-customize to set root password to root
+    virt-customize -a "${IMAGE_NAME}" --root-password password:root || error "Failed to set root password"
+    
+    log "Root password set successfully"
 }
 
 # Run main function

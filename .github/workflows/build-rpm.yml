@@ -198,6 +198,9 @@ jobs:
           # install rpmdevtools
           yum install -y git yum-utils
 
+          # install requirements
+          yum install -y libguestfs-tools
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -222,6 +225,7 @@ jobs:
 
       - name: Run system encryption test
         run: |
+          export LIBGUESTFS_BACKEND=appliance # set this for virt-customize
           timeout 300s sudo bash ./scripts/test/test-system-encryption.sh --ci
 
   release:
