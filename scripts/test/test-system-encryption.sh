@@ -16,6 +16,7 @@ ENCRYPTED_IMAGE_NAME="encrypted.qcow2"
 CONFIG_DIR="test-config"
 PASSPHRASE="AAAaaawewe222"
 LOG_FILE="qemu-output.log"
+TRUSTEE_URL="http://127.0.0.1:8081/api/"  # Trustee service URL
 
 # Mode flags
 CI_MODE=false
@@ -70,6 +71,7 @@ OPTIONS:
     --config-dir DIR        Specify custom config directory
     --passphrase PHRASE     Specify custom passphrase
     --package PACKAGE       Specify an RPM package name or path to install (can be used multiple times)
+    --trustee-url URL       Specify Trustee service URL for remote attestation
     --existing-image PATH   Use existing image file (prefix with @, e.g., @/path/to/image.qcow2)
 
 EXAMPLES:
@@ -79,6 +81,7 @@ EXAMPLES:
     $0 --encrypt-only       # Encrypt existing image
     $0 --ci --keep-files    # Run CI test but keep files
     $0 --ci --package /path/to/package.rpm --package another-package
+    $0 --ci --trustee-url https://trustee.example.com
     $0 --ci --existing-image @/root/diskenc/aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2
 
 EOF
@@ -149,6 +152,10 @@ parse_args() {
             PACKAGES+=("$2")
             shift 2
             ;;
+        --trustee-url)
+            TRUSTEE_URL="$2"
+            shift 2
+            ;;
         --existing-image)
             EXISTING_IMAGE_PATH="$2"
             shift 2
@@ -212,18 +219,18 @@ setup_config() {
 
     cat >"${CONFIG_DIR}/fde.toml" <<EOF
 [rootfs]
-rw_overlay = "disk"
+rw_overlay = "ram"
 
-[rootfs.encrypt.exec]
-command = "echo"
-args = ["-n", "${PASSPHRASE}"]
+[rootfs.encrypt.kbs]
+kbs_url = "${TRUSTEE_URL}"
+key_uri = "kbs:///default/local-resources/rootfs"
 
 [data]
 integrity = true
 
-[data.encrypt.exec]
-command = "echo"
-args = ["-n", "${PASSPHRASE}"]
+[data.encrypt.kbs]
+kbs_url = "${TRUSTEE_URL}"
+key_uri = "kbs:///default/local-resources/data"
 EOF
 }
 
@@ -551,6 +558,51 @@ start_qemu_local() {
         -drive file="${ENCRYPTED_IMAGE_NAME}",format=qcow2,if=virtio,id=hd0,readonly=off
 }
 
+# Calculate reference values for the encrypted disk
+calculate_reference_values() {
+    log "Calculating reference values for encrypted disk..."
+
+    # Check if cryptpilot is available
+    if ! command -v cryptpilot >/dev/null 2>&1; then
+        error "cryptpilot command not found"
+    fi
+    
+    # Calculate reference values
+    log "Generating reference values using cryptpilot..."
+    if cryptpilot fde show-reference-value --stage initrd --disk "${ENCRYPTED_IMAGE_NAME}" > reference-value.json; then
+        log "Reference values calculated and saved to reference-value.json"
+    else
+        error "Failed to calculate reference values"
+    fi
+    
+    # Display reference values
+    log "Reference values:"
+    cat reference-value.json
+    
+    # Register reference values with Trustee service
+    log "Registering reference values with Trustee service..."
+    local provenance
+    provenance=$(cat ./reference-value.json | base64 --wrap=0)
+    
+    cat << EOF > ./register-request.json
+{
+    "version" : "0.1.0",
+    "type": "sample",
+    "payload": "$provenance"
+}
+EOF
+
+    if command -v rvps-tool >/dev/null 2>&1; then
+        if rvps-tool register --path ./register-request.json; then
+            log "Reference values registered successfully with Trustee service"
+        else
+            warn "Failed to register reference values with Trustee service"
+        fi
+    else
+        warn "rvps-tool not found, skipping reference value registration"
+    fi
+}
+
 # Main execution
 main() {
     if [ "$(id -u)" != "0" ]; then
@@ -594,6 +646,9 @@ main() {
 
     # Encrypt image
     encrypt_image
+    
+    # Calculate reference values
+    calculate_reference_values
 
     # Handle CI mode
     if [[ "$CI_MODE" == true ]]; then
