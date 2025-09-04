@@ -2,9 +2,13 @@ name: Test KMS Volume Encryption
 
 on:
   push:
-    branches: [ main, develop ]
+    branches:
+      - master
+    tags:
+      - "v*.*.*"
   pull_request:
-    branches: [ main ]
+    branches:
+      - 'master'
 
 jobs:
   test-kms-volume:
