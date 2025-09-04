@@ -474,6 +474,37 @@ check_mount_entries() {
     fi
 }
 
+# Test container functionality by installing podman and running a simple container
+test_container_functionality() {
+    log "Testing container functionality..."
+
+    if [[ -S "qemu-monitor.sock" ]]; then
+        log "Installing podman and running test container..."
+        
+        # Install podman
+        echo -e "human-monitor-command {\"command-line\":\"yum install -y podman\"}\nquit" | socat - UNIX-CONNECT:qemu-monitor.sock >podman_install_output.txt 2>/dev/null
+        sleep 10
+        
+        # Run test container with echo command
+        echo -e "human-monitor-command {\"command-line\":\"podman run --rm ghcr.io/linuxcontainers/alpine:latest echo 'Hello from container!'\"}\nquit" | socat - UNIX-CONNECT:qemu-monitor.sock >container_test_output.txt 2>/dev/null
+        sleep 5
+        
+        # Check if the container ran successfully
+        if grep -q "Hello from container!" container_test_output.txt; then
+            log "Container test passed successfully!"
+            return 0
+        else
+            log "Container test failed."
+            log "Container test output:"
+            cat container_test_output.txt
+            return 1
+        fi
+    else
+        warn "QEMU monitor socket not available, skipping container functionality test"
+        return 0
+    fi
+}
+
 # Start QEMU with the encrypted image (Local mode)
 start_qemu_local() {
     log "Starting QEMU with encrypted image (Local mode)..."
@@ -540,6 +571,7 @@ main() {
         start_qemu_ci
         verify_boot
         check_mount_entries
+        test_container_functionality
         log "CI mode test completed successfully!"
         log "System disk encryption verification passed!"
     fi
