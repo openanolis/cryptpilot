@@ -15,7 +15,6 @@ check_and_install_commands() {
     # List of required commands and their packages (for RHEL/CentOS)
     local commands_and_packages=(
         "losetup:util-linux"
-        "parted:parted"
         "mount:util-linux"
         "umount:util-linux"
     )
@@ -136,7 +135,7 @@ setup_config() {
     # Create a KBS volume config (using mock values for CI)
     cat >"${CONFIG_DIR}/volumes/kbs-test.toml" <<EOF
 volume = "kbs-test"
-dev = "/dev/loop99p1"
+dev = "${LOOP_DEV}"
 auto_open = true
 makefs = "ext4"
 integrity = true
@@ -155,35 +154,17 @@ create_test_disk() {
     dd if=/dev/zero of=test-disk.img bs=1M count=100
 
     # Detach loop device if already attached
-    for i in {0..9}; do
-        if losetup -a | grep -q "test-disk.img"; then
-            LOOP_DEV=$(losetup -a | grep "test-disk.img" | cut -d: -f1)
-            losetup -d "$LOOP_DEV" 2>/dev/null || true
-        fi
-    done
+    LOOP_DEVICE=$(losetup --associated "$IMAGE" | awk '{print $1}')
+    if [ -n "$LOOP_DEVICE" ]; then
+        losetup -d "$LOOP_DEV" 2>/dev/null || true
+    fi
 
     # Set up loop device (try different numbers if /dev/loop99 is busy)
-    LOOP_DEV=""
-    for i in {99..90}; do
-        if ! losetup -P /dev/loop"$i" test-disk.img 2>/dev/null; then
-            continue
-        else
-            LOOP_DEV="/dev/loop$i"
-            break
-        fi
-    done
+    LOOP_DEV=$(losetup --find)
 
     if [[ -z "$LOOP_DEV" ]]; then
         error "Failed to set up loop device"
     fi
-
-    # Update the config file to use the actual loop device
-    sed -i "s|/dev/loop99|${LOOP_DEV}|g" ${CONFIG_DIR}/volumes/kbs-test.toml
-
-    # Create GPT partition table and one partition
-    parted --script "$LOOP_DEV" \
-        mktable gpt \
-        mkpart primary 1MiB 100%
 
     # Wait for partition to be ready
     sleep 2
@@ -298,11 +279,11 @@ main() {
 
     log "Starting KBS volume encryption test"
 
-    # Setup config
-    setup_config
-
     # Create test disk
     create_test_disk
+
+    # Setup config
+    setup_config
 
     # Test volume operations
     if ! test_volume_init; then
