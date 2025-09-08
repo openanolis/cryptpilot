@@ -624,19 +624,21 @@ impl OnExternalFdeDisk {
     }
 
     pub async fn detect_boot_part(hint_device: Option<&Path>) -> Result<PathBuf> {
-        // 1. Execute 'findmnt-n-o SOURCE /boot' to return the device path where '/boot' is mounted
-        let mut command = Command::new("findmnt");
-        command.args(["-n", "-o", "SOURCE", "/boot"]);
-        match command.run().await {
-            Ok(stdout) => {
-                let stdout_str = String::from_utf8_lossy(&stdout).trim().to_string();
-                if !stdout_str.is_empty() {
-                    // Return the device path, such as /dev/sda1
-                    return Ok(PathBuf::from(stdout_str));
+        if hint_device.is_none() {
+            // 1. Execute 'findmnt-n-o SOURCE /boot' to return the device path where '/boot' is mounted
+            let mut command = Command::new("findmnt");
+            command.args(["-n", "-o", "SOURCE", "/boot"]);
+            match command.run().await {
+                Ok(stdout) => {
+                    let stdout_str = String::from_utf8_lossy(&stdout).trim().to_string();
+                    if !stdout_str.is_empty() {
+                        // Return the device path, such as /dev/sda1
+                        return Ok(PathBuf::from(stdout_str));
+                    }
                 }
-            }
-            Err(e) => {
-                tracing::warn!("findmnt failed: {}", e);
+                Err(e) => {
+                    tracing::warn!("findmnt failed: {}", e);
+                }
             }
         }
 
@@ -728,26 +730,57 @@ impl OnExternalFdeDisk {
     }
 
     async fn detect_efi_part(hint_device: Option<&PathBuf>) -> Result<PathBuf> {
-        let mut cmd = Command::new("blkid");
-        cmd.args(["--match-types", "vfat"])
-            .args(["--match-token", r#"PARTLABEL="EFI System Partition""#])
-            .args(["--list-one", "--output", "device"]);
-
-        if let Some(hint_device) = hint_device {
-            cmd.arg(hint_device);
+        // Obtain all partitions under the device
+        let lsblk_output = {
+            let mut cmd = Command::new("lsblk");
+            cmd.args(["-lnpo", "NAME"]);
+            if let Some(device) = hint_device {
+                cmd.arg(device);
+            }
+            cmd.output().await.context("Failed to list partitions")?
         };
 
-        cmd.run()
-            .await
-            .and_then(|stdout| {
-                let mut device_name = String::from_utf8(stdout)?;
-                device_name = device_name.trim().into();
-                if device_name.is_empty() {
-                    bail!("No EFI partition found");
-                }
-                Ok(PathBuf::from(device_name))
-            })
-            .context("Failed to detect EFI partition")
+        let lsblk_str = String::from_utf8(lsblk_output.stdout)?;
+        let partitions = lsblk_str
+            .lines()
+            .filter(|line| line.chars().last().map(|c| c.is_numeric()).unwrap_or(false))
+            .map(PathBuf::from);
+
+        for part in partitions {
+            // Create a temporary mount point
+            let mount_dir = tempdir().context("Failed to create temp mount dir")?;
+            let mount_path = mount_dir.path();
+
+            // Try to mount the partition in read-only mode
+            let mount_result = Command::new("mount")
+                .args(["-o", "ro"])
+                .arg(&part)
+                .arg(mount_path)
+                .status()
+                .await;
+
+            if mount_result.is_err() || !mount_result.unwrap().success() {
+                continue;
+            }
+
+            // Check whether the EFI directory exists
+            let efi_dir = mount_path.join("EFI");
+            let vmlinuz_files = mount_path.join("vmlinuz-*");
+
+            let has_efi = fs::metadata(&efi_dir).await.is_ok();
+            let has_vmlinuz = glob::glob(vmlinuz_files.to_str().unwrap())?
+                .next()
+                .is_some();
+
+            // Uninstall partition
+            Command::new("umount").arg(mount_path).status().await.ok();
+
+            if has_efi && !has_vmlinuz {
+                return Ok(part);
+            }
+        }
+
+        bail!("No valid EFI partition found");
     }
 }
 
