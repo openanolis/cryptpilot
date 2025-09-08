@@ -312,10 +312,7 @@ pub trait FdeDisk: Send + Sync {
             format!(
                 "{}{} {}",
                 device_identifier,
-                kernel_path
-                    .strip_prefix("/")
-                    .unwrap_or(&kernel_path)
-                    .to_string_lossy(),
+                kernel_path.to_string_lossy(),
                 cmdline
             )
         };
