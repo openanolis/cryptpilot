@@ -99,12 +99,12 @@ where
 
     map.insert(
         format!("measurement.grub.{hash_key}"),
-        vec![hash_value.grub_authenticode_hash],
+        hash_value.grub_authenticode_hashes,
     );
 
     map.insert(
         format!("measurement.shim.{hash_key}"),
-        vec![hash_value.shim_authenticode_hash],
+        hash_value.shim_authenticode_hashes,
     );
 
     Ok(())
