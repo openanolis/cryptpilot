@@ -115,7 +115,7 @@ shellcheck:
 	@command -v shellcheck >&- || { \
 		echo "shellcheck not found, please installing it from https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.linux.x86_64.tar.xz" ; \
 	}
-	find . -name '*.sh' -exec shellcheck {} \;
+	@{ find . -name '*.sh' -printf '%P\0' | xargs -0 shellcheck ; } || { echo ; echo "Shellcheck finished. You can fix with:" ; echo "    find . -name '*.sh' -printf '%P\0' | xargs -0 shellcheck -f diff | patch -p1" ; echo ; exit 1 ; }
 
 .PHONE: clippy
 clippy:
