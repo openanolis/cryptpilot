@@ -10,6 +10,7 @@ use block_devs::BlckExt;
 use futures_lite::stream::StreamExt;
 use object::read::pe::{PeFile32, PeFile64};
 use sha2::Digest;
+use std::process::Stdio;
 use tempfile::tempdir;
 use tokio::{
     fs::{self, File},
@@ -744,6 +745,8 @@ impl OnExternalFdeDisk {
                 .args(["-o", "ro"])
                 .arg(&part)
                 .arg(mount_path)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .status()
                 .await;
 
