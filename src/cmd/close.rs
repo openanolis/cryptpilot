@@ -13,13 +13,13 @@ impl super::Command for CloseCommand {
         for volume in &self.close_options.volume {
             tracing::info!("Close volume {volume} now");
 
-            if !crate::fs::luks2::is_active(&volume) {
+            if !crate::fs::luks2::is_active(volume) {
                 tracing::info!("The mapping for {} is not active, nothing to do", volume);
                 continue;
             }
 
             tracing::info!("Removing mapping for {volume}");
-            crate::fs::luks2::close(&volume).await?;
+            crate::fs::luks2::close(volume).await?;
             tracing::info!("The volume {volume} is closed now");
         }
 

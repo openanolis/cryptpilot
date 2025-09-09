@@ -274,7 +274,7 @@ where
     for (mut key, value) in table.iter_mut() {
         // extract docs
         let field_name = key.get();
-        let Ok(docs) = T::get_field_docs(&field_name) else {
+        let Ok(docs) = T::get_field_docs(field_name) else {
             // ignore fields not known to `T`
             continue;
         };
@@ -383,6 +383,6 @@ fn main() -> Result<()> {
         TemplateType::Fde => get_fde_config().as_annotated_toml()?,
     };
 
-    print!("{}", doc.to_string());
+    print!("{}", doc);
     Ok(())
 }

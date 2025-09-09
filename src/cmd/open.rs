@@ -19,7 +19,7 @@ impl super::Command for OpenCommand {
             tracing::info!("Open volume {volume} now");
             let volume_config = crate::config::source::get_config_source()
                 .await
-                .get_volume_config(&volume)
+                .get_volume_config(volume)
                 .await?;
 
             open_for_specific_volume(&volume_config).await?;
@@ -45,14 +45,15 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
     let key_provider = volume_config.encrypt.key_provider.clone().into_provider();
     let volume_config = volume_config.to_owned();
 
-    Ok(match key_provider.volume_type() {
+    match key_provider.volume_type() {
         crate::provider::VolumeType::Temporary => {
             temporary_disk_open(&volume_config, &key_provider).await?;
         }
         crate::provider::VolumeType::Persistent => {
             persistent_disk_open(&volume_config, &key_provider).await?;
         }
-    })
+    };
+    Ok(())
 }
 
 async fn temporary_disk_open(
@@ -86,7 +87,7 @@ async fn temporary_disk_open(
             "Initializing {makefs} fs on volume {}",
             volume_config.volume
         );
-        match crate::fs::luks2::makefs_if_empty(&volume_config.volume, &makefs, integrity).await {
+        match crate::fs::luks2::makefs_if_empty(&volume_config.volume, makefs, integrity).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::info!("Closing volume {} now", volume_config.volume);

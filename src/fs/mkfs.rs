@@ -39,7 +39,7 @@ impl MakeFs for NormalMakeFs {
 }
 
 impl MakeFsType {
-    fn to_systemd_makefs_fstype(&self) -> &'static str {
+    fn to_systemd_makefs_fstype(self) -> &'static str {
         match self {
             MakeFsType::Swap => "swap",
             MakeFsType::Ext4 => "ext4",
@@ -58,7 +58,7 @@ impl MakeFs for IntegrityNoWipeMakeFs {
         let is_empty_disk = {
             Command::new("file")
                 .args(["-E", "--brief", "--dereference", "--special-files"])
-                .arg(&device_path)
+                .arg(device_path)
                 .env("LC_ALL", "C")
                 .run_with_status_checker(|code, stdout, _| {
                     let stdout = String::from_utf8_lossy(&stdout);
@@ -196,7 +196,7 @@ impl IntegrityNoWipeMakeFs {
                     .await?;
 
                 dummy_device_file.read_exact(&mut buf).await?;
-                real_device_file.write(&buf).await?;
+                real_device_file.write_all(&buf).await?;
             }
             real_device_file.flush().await?;
             Result::<_, anyhow::Error>::Ok(())

@@ -22,7 +22,7 @@ pub trait ConfigSource {
         self.get_config()
             .await
             .map(|config| config.volumes)
-            .with_context(|| format!("Failed to get volume configs for all volumes"))
+            .with_context(|| "Failed to get volume configs for all volumes".to_string())
     }
 
     async fn get_volume_config(&self, volume: &str) -> Result<VolumeConfig> {
@@ -44,14 +44,14 @@ pub trait ConfigSource {
         self.get_config()
             .await
             .map(|config| config.global)
-            .with_context(|| format!("Failed to get global config"))
+            .with_context(|| "Failed to get global config".to_string())
     }
 
     async fn get_fde_config(&self) -> Result<Option<FdeConfig>> {
         self.get_config()
             .await
             .map(|config| config.fde)
-            .with_context(|| format!("Failed to get FDE config"))
+            .with_context(|| "Failed to get FDE config".to_string())
     }
 }
 

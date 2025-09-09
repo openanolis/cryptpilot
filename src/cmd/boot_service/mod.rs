@@ -29,15 +29,15 @@ use crate::{
 
 use super::fde::disk::{FdeDisk as _, OnExternalFdeDisk};
 
-const ROOTFS_LOGICAL_VOLUME: &'static str = "/dev/mapper/system-rootfs";
-const ROOTFS_LAYER_NAME: &'static str = "rootfs";
-const ROOTFS_LAYER_DEVICE: &'static str = "/dev/mapper/rootfs";
-const ROOTFS_DECRYPTED_LAYER_DEVICE: &'static str = "/dev/mapper/rootfs_decrypted";
-const ROOTFS_DECRYPTED_LAYER_NAME: &'static str = "rootfs_decrypted";
-const ROOTFS_HASH_LOGICAL_VOLUME: &'static str = "/dev/mapper/system-rootfs_hash";
-const DATA_LOGICAL_VOLUME: &'static str = "/dev/mapper/system-data";
-const DATA_LAYER_NAME: &'static str = "data";
-const DATA_LAYER_DEVICE: &'static str = "/dev/mapper/data";
+const ROOTFS_LOGICAL_VOLUME: &str = "/dev/mapper/system-rootfs";
+const ROOTFS_LAYER_NAME: &str = "rootfs";
+const ROOTFS_LAYER_DEVICE: &str = "/dev/mapper/rootfs";
+const ROOTFS_DECRYPTED_LAYER_DEVICE: &str = "/dev/mapper/rootfs_decrypted";
+const ROOTFS_DECRYPTED_LAYER_NAME: &str = "rootfs_decrypted";
+const ROOTFS_HASH_LOGICAL_VOLUME: &str = "/dev/mapper/system-rootfs_hash";
+const DATA_LOGICAL_VOLUME: &str = "/dev/mapper/system-data";
+const DATA_LAYER_NAME: &str = "data";
+const DATA_LAYER_DEVICE: &str = "/dev/mapper/data";
 
 pub struct BootServiceCommand {
     pub boot_service_options: BootServiceOptions,
@@ -508,7 +508,7 @@ async fn setup_user_provided_volumes(boot_service_options: &BootServiceOptions) 
         .await
         .get_volume_configs()
         .await?;
-    if volume_configs.len() == 0 {
+    if volume_configs.is_empty() {
         tracing::info!("The volume configs is empty, exit now");
         return Ok(());
     }
@@ -536,7 +536,7 @@ async fn setup_user_provided_volumes(boot_service_options: &BootServiceOptions) 
             volume_config.volume,
             volume_config.dev
         );
-        match super::open::open_for_specific_volume(&volume_config).await {
+        match super::open::open_for_specific_volume(volume_config).await {
             Ok(_) => {
                 tracing::info!(
                     "The mapping for volume {} is active now",

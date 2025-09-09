@@ -16,7 +16,7 @@ pub struct ConfigDumpCommand {
 impl super::super::Command for ConfigDumpCommand {
     async fn run(&self) -> Result<()> {
         let fde_disk: Box<dyn FdeDisk + Send> = match &self.disk {
-            Some(disk) => Box::new(OnExternalFdeDisk::new_from_disk(&disk).await?),
+            Some(disk) => Box::new(OnExternalFdeDisk::new_from_disk(disk).await?),
             None => Box::new(OnCurrentSystemFdeDisk::new().await?),
         };
 

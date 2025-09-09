@@ -67,13 +67,13 @@ impl MeasurementedBootComponents {
         let grub_authenticode_hashes = self
             .grub
             .iter()
-            .map(|bytes| calculate_authenticode_hash::<T>(&bytes))
+            .map(|bytes| calculate_authenticode_hash::<T>(bytes))
             .collect::<Result<Vec<_>>>()?;
 
         let shim_authenticode_hashes = self
             .shim
             .iter()
-            .map(|bytes| calculate_authenticode_hash::<T>(&bytes))
+            .map(|bytes| calculate_authenticode_hash::<T>(bytes))
             .collect::<Result<Vec<_>>>()?;
 
         Ok(BootComponentsHashValue {
@@ -217,11 +217,26 @@ pub trait FdeDisk: Send + Sync {
 
         for line in entry_content.lines() {
             if line.starts_with("linux ") {
-                kernel_path = line.splitn(2, ' ').nth(1).unwrap_or("").trim().to_string();
+                kernel_path = line
+                    .split_once(' ')
+                    .map(|x| x.1)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
             } else if line.starts_with("options ") {
-                cmdline = line.splitn(2, ' ').nth(1).unwrap_or("").trim().to_string();
+                cmdline = line
+                    .split_once(' ')
+                    .map(|x| x.1)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
             } else if line.starts_with("initrd ") {
-                initrd_path = line.splitn(2, ' ').nth(1).unwrap_or("").trim().to_string();
+                initrd_path = line
+                    .split_once(' ')
+                    .map(|x| x.1)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
             }
         }
 
@@ -245,7 +260,7 @@ pub trait FdeDisk: Send + Sync {
 
         // Make kernel path absolute if needed
         if !kernel_path.is_empty() {
-            if kernel_path.starts_with("/") {
+            if kernel_path.starts_with('/') {
                 // Already absolute
             } else {
                 kernel_path = format!("/boot/{}", kernel_path);
@@ -254,7 +269,7 @@ pub trait FdeDisk: Send + Sync {
 
         // Make initrd path absolute if needed
         if !initrd_path.is_empty() {
-            if initrd_path.starts_with("/") {
+            if initrd_path.starts_with('/') {
                 // Already absolute
             } else {
                 initrd_path = format!("/boot/{}", initrd_path);
@@ -265,7 +280,7 @@ pub trait FdeDisk: Send + Sync {
 
         // Calculate SHA384 hashes
         let kernel = self
-            .read_file_on_disk(&kernel_path)
+            .read_file_on_disk(kernel_path)
             .await
             .with_context(|| format!("Failed to read kernel file at {:?}", kernel_path))?;
 
@@ -284,7 +299,7 @@ pub trait FdeDisk: Send + Sync {
                 // Extract partition number from device path
                 // For example, /dev/sda3 -> (hd0,gpt3) or (hd0,msdos3), /dev/nvme0n1p3 -> (hd0,gpt3) or (hd0,msdos3)
                 let boot_dev = self.get_boot_dev();
-                if let Some(partition_num) = boot_dev
+                if let Ok(partition_num) = boot_dev
                     .to_string_lossy()
                     .chars()
                     .rev()
@@ -294,7 +309,6 @@ pub trait FdeDisk: Send + Sync {
                     .rev()
                     .collect::<String>()
                     .parse::<u32>()
-                    .ok()
                 {
                     match partition_type {
                         PartitionTableType::Gpt => format!("(hd0,gpt{})", partition_num),
@@ -408,29 +422,22 @@ pub trait FdeDisk: Send + Sync {
 
         let mut entries = async_walkdir::WalkDir::new(efi_part_root_dir);
 
-        loop {
-            match entries.next().await {
-                Some(Ok(entry)) => {
-                    if matches!(entry.file_type().await.map(|e| e.is_file()), Ok(true)) {
-                        let file_name = entry.file_name().to_string_lossy().to_lowercase();
+        while let Some(Ok(entry)) = entries.next().await {
+            if matches!(entry.file_type().await.map(|e| e.is_file()), Ok(true)) {
+                let file_name = entry.file_name().to_string_lossy().to_lowercase();
 
-                        if file_name == "grubx64.efi" {
-                            tracing::debug!(file=?entry.path(), "Found grubx64.efi");
-                            let mut buf = vec![];
-                            let mut file = File::open(entry.path()).await?;
-                            file.read_to_end(&mut buf).await?;
-                            let _ = grub_data.insert(buf);
-                        } else if file_name == "shimx64.efi" {
-                            tracing::debug!(file=?entry.path(), "Found shimx64.efi");
-                            let mut buf = vec![];
-                            let mut file = File::open(entry.path()).await?;
-                            file.read_to_end(&mut buf).await?;
-                            let _ = shim_data.insert(buf);
-                        }
-                    }
-                }
-                Some(Err(_)) | None => {
-                    break;
+                if file_name == "grubx64.efi" {
+                    tracing::debug!(file=?entry.path(), "Found grubx64.efi");
+                    let mut buf = vec![];
+                    let mut file = File::open(entry.path()).await?;
+                    file.read_to_end(&mut buf).await?;
+                    let _ = grub_data.insert(buf);
+                } else if file_name == "shimx64.efi" {
+                    tracing::debug!(file=?entry.path(), "Found shimx64.efi");
+                    let mut buf = vec![];
+                    let mut file = File::open(entry.path()).await?;
+                    file.read_to_end(&mut buf).await?;
+                    let _ = shim_data.insert(buf);
                 }
             }
         }
@@ -445,8 +452,8 @@ pub trait FdeDisk: Send + Sync {
     fn get_efi_part_root_dir(&self) -> &Path;
 }
 
-const CRYPTPILOT_CONFIG_DIR_UNTRUSTED_IN_BOOT: &'static str = "cryptpilot/config";
-const METADATA_PATH_IN_BOOT: &'static str = "cryptpilot/metadata.toml";
+const CRYPTPILOT_CONFIG_DIR_UNTRUSTED_IN_BOOT: &str = "cryptpilot/config";
+const METADATA_PATH_IN_BOOT: &str = "cryptpilot/metadata.toml";
 
 async fn load_fde_config_bundle_from_dir(config_dir: &Path) -> Result<FdeConfigBundle> {
     Ok(FileSystemConfigSource::new(config_dir)
@@ -662,7 +669,7 @@ impl OnExternalFdeDisk {
 
         let content = String::from_utf8_lossy(&output);
         for line in content.lines() {
-            let fields: Vec<&str> = line.trim().split_whitespace().collect();
+            let fields: Vec<&str> = line.split_whitespace().collect();
             if fields.len() != 2 {
                 continue;
             }

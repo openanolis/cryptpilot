@@ -59,7 +59,7 @@ impl CheckCommandOutput for Command {
         async {
             // Spawn the command and get output
             let output = async {
-                if let Some(_) = input_bytes {
+                if input_bytes.is_some() {
                     self.stdin(Stdio::piped());
                 } else {
                     self.stdin(Stdio::null());
@@ -98,12 +98,12 @@ impl CheckCommandOutput for Command {
                     code.map(|code| code.to_string())
                         .unwrap_or("unknown".to_string()),
                     if stdout.contains('\n') {
-                        format!("(multi-line)\n\t{}", stdout.replace("\n", "\n\t"))
+                        format!("(multi-line)\n\t{}", stdout.replace('\n', "\n\t"))
                     } else {
                         stdout.into()
                     },
                     if stderr.contains('\n') {
-                        format!("(multi-line)\n\t{}", stderr.replace("\n", "\n\t"))
+                        format!("(multi-line)\n\t{}", stderr.replace('\n', "\n\t"))
                     } else {
                         stderr.into()
                     },

@@ -9,6 +9,12 @@ use async_trait::async_trait;
 
 pub struct InitrdStateConfigSource {}
 
+impl Default for InitrdStateConfigSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InitrdStateConfigSource {
     pub fn new() -> Self {
         Self {}

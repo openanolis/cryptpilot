@@ -117,3 +117,6 @@ shellcheck:
 	}
 	find . -name '*.sh' -exec shellcheck {} \;
 
+.PHONE: clippy
+clippy:
+	cargo clippy --all-targets --all-features -- -D warnings

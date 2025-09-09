@@ -65,12 +65,10 @@ impl PrintAsTable for [VolumeConfig] {
                 Cell::new(volume_config.volume.as_str()),
                 if !dev_exist {
                     Cell::new("N/A").fg(Color::Yellow)
+                } else if crate::fs::luks2::is_active(&volume_config.volume) {
+                    Cell::new(volume_config.volume_path().display()).fg(Color::Green)
                 } else {
-                    if crate::fs::luks2::is_active(&volume_config.volume) {
-                        Cell::new(volume_config.volume_path().display()).fg(Color::Green)
-                    } else {
-                        Cell::new("<not opened>").fg(Color::Yellow)
-                    }
+                    Cell::new("<not opened>").fg(Color::Yellow)
                 },
                 if dev_exist {
                     Cell::new(volume_config.dev.as_str())
@@ -92,34 +90,30 @@ impl PrintAsTable for [VolumeConfig] {
                 {
                     if !dev_exist {
                         Cell::new("N/A").fg(Color::Yellow)
+                    } else if let KeyProviderConfig::Otp(_) = volume_config.encrypt.key_provider {
+                        Cell::new("Not Required").fg(Color::Green)
                     } else {
-                        if let KeyProviderConfig::Otp(_) = volume_config.encrypt.key_provider {
-                            Cell::new("Not Required").fg(Color::Green)
-                        } else {
-                            match crate::fs::luks2::is_initialized(&volume_config.dev).await {
-                                Ok(initialized) => {
-                                    if initialized {
-                                        Cell::new("True").fg(Color::Green)
-                                    } else {
-                                        Cell::new("False").fg(Color::Yellow)
-                                    }
+                        match crate::fs::luks2::is_initialized(&volume_config.dev).await {
+                            Ok(initialized) => {
+                                if initialized {
+                                    Cell::new("True").fg(Color::Green)
+                                } else {
+                                    Cell::new("False").fg(Color::Yellow)
                                 }
-                                Err(e) => {
-                                    tracing::warn!("{e:?}");
-                                    Cell::new("Error").fg(Color::Red)
-                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("{e:?}");
+                                Cell::new("Error").fg(Color::Red)
                             }
                         }
                     }
                 },
                 if !dev_exist {
                     Cell::new("N/A").fg(Color::Yellow)
+                } else if crate::fs::luks2::is_active(&volume_config.volume) {
+                    Cell::new("True").fg(Color::Green)
                 } else {
-                    if crate::fs::luks2::is_active(&volume_config.volume) {
-                        Cell::new("True").fg(Color::Green)
-                    } else {
-                        Cell::new("False").fg(Color::Yellow)
-                    }
+                    Cell::new("False").fg(Color::Yellow)
                 },
             ]);
         }

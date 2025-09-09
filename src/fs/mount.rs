@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::anyhow;
 use anyhow::{Context as _, Result};
 use tempfile::TempDir;
 use tokio::process::Command;

@@ -1,3 +1,5 @@
+#![deny(clippy::disallowed_methods)]
+
 pub mod cli;
 pub mod cmd;
 pub mod config;

@@ -110,7 +110,7 @@ url = "{}"
         let passphrase = (|| -> Result<_> {
             let key_base64 = String::from_utf8(key_u8)?;
             let key_base64 = key_base64.trim_end();
-            let key = BASE64_STANDARD.decode(&key_base64)?;
+            let key = BASE64_STANDARD.decode(key_base64)?;
             Ok(Passphrase::from(key))
         })()
         .context("Failed to decode response from KBS as base64")?;

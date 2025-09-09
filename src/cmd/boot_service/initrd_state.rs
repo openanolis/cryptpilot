@@ -11,7 +11,7 @@ pub struct InitrdState {
     pub fde_config_bundle: FdeConfigBundle,
 }
 
-pub const CRYPTPILOT_INITRD_STATE_PATH: &'static str = "/var/run/cryptpilot/initrd_state.toml";
+pub const CRYPTPILOT_INITRD_STATE_PATH: &str = "/var/run/cryptpilot/initrd_state.toml";
 
 impl InitrdState {
     pub async fn save(&self) -> Result<()> {

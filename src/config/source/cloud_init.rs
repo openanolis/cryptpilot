@@ -31,7 +31,7 @@ impl FdeConfigBundle {
     pub fn gen_hash_hex(&self) -> Result<String> {
         let content_to_hash = self.gen_hash_content()?;
         let hash = sha2::Sha384::new()
-            .chain_update(&content_to_hash)
+            .chain_update(content_to_hash)
             .finalize()
             .to_vec();
         let hash_hex = hex::encode(hash);
@@ -56,6 +56,12 @@ impl FdeConfigBundle {
 /// To configure the user data, please refer to this link: https://help.aliyun.com/zh/ecs/user-guide/customize-the-initialization-configuration-for-an-instance
 pub struct CloudInitConfigSource {}
 
+impl Default for CloudInitConfigSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CloudInitConfigSource {
     pub fn new() -> Self {
         Self {}
@@ -73,7 +79,7 @@ impl CloudInitConfigSource {
         }
 
         let fde_config_bundle: FdeConfigBundle =
-            toml::from_str(&user_data).context("Failed to parse cloud-init user data")?;
+            toml::from_str(user_data).context("Failed to parse cloud-init user data")?;
 
         let config_bundle = fde_config_bundle.flatten_to_config_bundle();
 

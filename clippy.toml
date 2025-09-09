@@ -1,0 +1,6 @@
+disallowed-methods = [
+  {path = "std::process::Command::status", reason = "please use 'CheckCommandOutput::run()' instaed"},
+  {path = "std::process::Command::output", reason = "please use 'CheckCommandOutput::run()' instaed"},
+  {path = "tokio::process::Command::status", reason = "please use 'CheckCommandOutput::run()' instaed"},
+  {path = "tokio::process::Command::output", reason = "please use 'CheckCommandOutput::run()' instaed"},
+]

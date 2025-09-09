@@ -143,83 +143,78 @@ impl BlkTrace {
 
         let num_cpus = num_cpus::get();
 
-        let join_handles =
-            (0..num_cpus)
-                .map(|i| {
-                    let tx = tx.clone();
-                    let cancel_token = cancel_token.clone();
-                    let relay_channel =
-                        format!("/sys/kernel/debug/block/{}/trace{}", block_name, i);
+        let join_handles = (0..num_cpus)
+            .map(|i| {
+                let tx = tx.clone();
+                let cancel_token = cancel_token.clone();
+                let relay_channel = format!("/sys/kernel/debug/block/{}/trace{}", block_name, i);
 
-                    tokio::spawn(async move {
-                        // Open the relay channel
-                        let mut file = OpenOptions::new()
-                            .read(true)
-                            .open(&relay_channel)
-                            .await
-                            .context("Failed to open trace file")?;
+                tokio::spawn(async move {
+                    // Open the relay channel
+                    let mut file = OpenOptions::new()
+                        .read(true)
+                        .open(&relay_channel)
+                        .await
+                        .context("Failed to open trace file")?;
 
-                        tracing::trace!(relay_channel, "Starting to read from trace file");
+                    tracing::trace!(relay_channel, "Starting to read from trace file");
 
-                        loop {
-                            // Read blk_event from relay channel
-                            let mut blk_event = MaybeUninit::<blk_io_trace>::uninit();
-                            let ptr = unsafe {
-                                std::mem::transmute::<
-                                    _,
-                                    &mut [u8; std::mem::size_of::<blk_io_trace>()],
-                                >(blk_event.as_mut_ptr())
-                            };
+                    loop {
+                        // Read blk_event from relay channel
+                        let mut blk_event = MaybeUninit::<blk_io_trace>::uninit();
+                        let ptr = unsafe {
+                            &mut *blk_event
+                                .as_mut_ptr()
+                                .cast::<[u8; std::mem::size_of::<blk_io_trace>()]>()
+                        };
 
-                            let mut res = file.read_exact(ptr).await;
-                            if let Err(e) = &res {
-                                if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                                    if cancel_token.is_cancelled() {
-                                        // The tracing task is stopping, wait and try again immediately.
-                                        tokio::time::sleep(std::time::Duration::from_millis(10))
-                                            .await;
-                                        res = file.read_exact(ptr).await;
-                                        if let Err(e) = &res {
-                                            if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                                                // It seems we are actually reached the end of the file here.
-                                                tracing::trace!(relay_channel, "Cancelled now");
-                                                break;
-                                            }
+                        let mut res = file.read_exact(ptr).await;
+                        if let Err(e) = &res {
+                            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                                if cancel_token.is_cancelled() {
+                                    // The tracing task is stopping, wait and try again immediately.
+                                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                                    res = file.read_exact(ptr).await;
+                                    if let Err(e) = &res {
+                                        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                                            // It seems we are actually reached the end of the file here.
+                                            tracing::trace!(relay_channel, "Cancelled now");
+                                            break;
                                         }
-                                    } else {
-                                        // Try again in next loop
-                                        tokio::time::sleep(std::time::Duration::from_millis(10))
-                                            .await;
-                                        continue;
                                     }
+                                } else {
+                                    // Try again in next loop
+                                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                                    continue;
                                 }
                             }
-                            res.context("Failed to read trace event from trace file")?;
-
-                            let blk_event = unsafe { blk_event.assume_init() };
-
-                            ensure!(
-                                blk_event.magic == BLK_IO_TRACE_MAGIC + BLK_IO_TRACE_VERSION,
-                                "blktrace event magic number mismatch"
-                            );
-
-                            let mut data = vec![0; blk_event.pdu_len as usize];
-                            file.read_exact(&mut data)
-                                .await
-                                .context("Failed to read trace event data from trace file")?;
-
-                            tx.send(BlkTraceEvent {
-                                event: blk_event,
-                                data,
-                            })
-                            .await
-                            .context("Failed to send trace event to channel")?;
                         }
+                        res.context("Failed to read trace event from trace file")?;
 
-                        anyhow::Result::<_>::Ok(())
-                    })
+                        let blk_event = unsafe { blk_event.assume_init() };
+
+                        ensure!(
+                            blk_event.magic == BLK_IO_TRACE_MAGIC + BLK_IO_TRACE_VERSION,
+                            "blktrace event magic number mismatch"
+                        );
+
+                        let mut data = vec![0; blk_event.pdu_len as usize];
+                        file.read_exact(&mut data)
+                            .await
+                            .context("Failed to read trace event data from trace file")?;
+
+                        tx.send(BlkTraceEvent {
+                            event: blk_event,
+                            data,
+                        })
+                        .await
+                        .context("Failed to send trace event to channel")?;
+                    }
+
+                    anyhow::Result::<_>::Ok(())
                 })
-                .collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
 
         let join_handle = tokio::spawn(async move {
             let mut traces = vec![];
@@ -386,7 +381,7 @@ pub mod tests {
             tracing::info!("{trace:?}");
         }
 
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
         assert!(count_read > 0);
 
         Ok(())

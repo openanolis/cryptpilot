@@ -22,7 +22,7 @@ impl super::Command for InitCommand {
 
             let volume_config = crate::config::source::get_config_source()
                 .await
-                .get_volume_config(&volume)
+                .get_volume_config(volume)
                 .await?;
 
             tracing::info!(
@@ -111,7 +111,7 @@ async fn persistent_disk_init(
             volume_config.volume
         );
         let mkfs_result =
-            crate::fs::luks2::makefs_if_empty(&tmp_volume_name, &makefs, integrity).await;
+            crate::fs::luks2::makefs_if_empty(&tmp_volume_name, makefs, integrity).await;
         crate::fs::luks2::close(&tmp_volume_name).await?;
         mkfs_result?
     }

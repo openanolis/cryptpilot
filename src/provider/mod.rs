@@ -111,7 +111,7 @@ pub mod tests {
         F: FnOnce(VolumeConfig, PathBuf) -> T,
         T: Future<Output = Result<()>>,
     {
-        open_then(&volume_config, |volume_config| async move {
+        open_then(volume_config, |volume_config| async move {
             let tmp_mount = TmpMountPoint::mount(volume_config.volume_path()).await?;
 
             task(volume_config, tmp_mount.mount_point().to_path_buf()).await
@@ -124,7 +124,7 @@ pub mod tests {
         F: FnOnce(VolumeConfig) -> T,
         T: Future<Output = Result<()>>,
     {
-        open_then(&volume_config, |volume_config| async move {
+        open_then(volume_config, |volume_config| async move {
             Command::new("swapon")
                 .arg(volume_config.volume_path())
                 .run()
@@ -152,7 +152,7 @@ pub mod tests {
         volume_config.volume = format!("test-{}", rand::random::<u64>());
 
         let dummy_device = if volume_config.extra_config.makefs == Some(MakeFsType::Swap) {
-            DummyDevice::setup_on_disk(1 * 1024 * 1024 * 1024 /* 1G */).await?
+            DummyDevice::setup_on_disk(1024 * 1024 * 1024 /* 1G */).await?
         } else {
             DummyDevice::setup_on_tmpfs(100 * 1024 * 1024 * 1024 /* 100G */).await?
         };
@@ -204,11 +204,11 @@ pub mod tests {
                         .build(hier)?;
 
                         let cg_clone = cg.clone();
-                        async_defer! {async{
+                        async_defer! {
                             async{
                                 cg_clone.delete()
                             }
-                        }}
+                        }
 
                         // Run stress-ng to consume swap memory
                         unsafe {
@@ -225,7 +225,7 @@ pub mod tests {
                                 .arg(swap_device_size.to_string())
                                 .pre_exec(move || {
                                     cg.add_task(CgroupPid::from(std::process::id() as u64))
-                                        .map_err(|e| Error::other(e))
+                                        .map_err(Error::other)
                                 })
                                 .run()
                         }

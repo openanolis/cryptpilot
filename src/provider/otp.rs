@@ -19,7 +19,7 @@ pub struct OtpKeyProvider {
 #[async_trait::async_trait]
 impl KeyProvider for OtpKeyProvider {
     fn debug_name(&self) -> String {
-        format!("Secure Random One-Time Password")
+        "Secure Random One-Time Password".to_string()
     }
 
     async fn get_key(&self) -> Result<Passphrase> {

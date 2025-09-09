@@ -25,7 +25,7 @@ impl super::super::Command for ShowReferenceValueCommand {
     async fn run(&self) -> Result<()> {
         tracing::debug!("Get rootfs reference value");
         let fde_disk: Box<dyn FdeDisk + Send + Sync> = match &self.disk {
-            Some(disk) => Box::new(OnExternalFdeDisk::new_from_disk(&disk).await?),
+            Some(disk) => Box::new(OnExternalFdeDisk::new_from_disk(disk).await?),
             None => Box::new(OnCurrentSystemFdeDisk::new().await?),
         };
 
