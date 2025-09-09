@@ -10,7 +10,6 @@ use block_devs::BlckExt;
 use futures_lite::stream::StreamExt;
 use object::read::pe::{PeFile32, PeFile64};
 use sha2::Digest;
-use std::process::Stdio;
 use tempfile::tempdir;
 use tokio::{
     fs::{self, File},
@@ -647,10 +646,8 @@ impl OnExternalFdeDisk {
             gpt_cmd.arg(hint_device);
         }
 
-        let gpt_result = gpt_cmd.output().await?;
-        let gpt_device = String::from_utf8_lossy(&gpt_result.stdout)
-            .trim()
-            .to_string();
+        let gpt_stdout = gpt_cmd.run().await?;
+        let gpt_device = String::from_utf8_lossy(&gpt_stdout).trim().to_string();
 
         if !gpt_device.is_empty() {
             return Ok(PathBuf::from(gpt_device));
@@ -686,12 +683,12 @@ impl OnExternalFdeDisk {
                 .is_ok();
 
             if !already_mounted {
-                if Command::new("mount")
-                    .args(["-o", "ro", dev, mount_str])
+                if let Err(error) = Command::new("mount")
+                    .args(["-o", "ro", &dev, mount_str])
                     .run()
                     .await
-                    .is_err()
                 {
+                    tracing::warn!(?error, "Failed to mount {dev}");
                     continue;
                 }
             }
@@ -708,7 +705,7 @@ impl OnExternalFdeDisk {
             }
 
             // Unmount after check
-            let _ = Command::new("umount").arg(mount_path).status().await;
+            let _ = Command::new("umount").arg(mount_path).run().await;
 
             if has_boot_kernel {
                 return Ok(PathBuf::from(dev));
@@ -720,16 +717,16 @@ impl OnExternalFdeDisk {
 
     async fn detect_efi_part(hint_device: Option<&PathBuf>) -> Result<PathBuf> {
         // Obtain all partitions under the device
-        let lsblk_output = {
+        let lsblk_stdout = {
             let mut cmd = Command::new("lsblk");
             cmd.args(["-lnpo", "NAME"]);
             if let Some(device) = hint_device {
                 cmd.arg(device);
             }
-            cmd.output().await.context("Failed to list partitions")?
+            cmd.run().await.context("Failed to list partitions")?
         };
 
-        let lsblk_str = String::from_utf8(lsblk_output.stdout)?;
+        let lsblk_str = String::from_utf8(lsblk_stdout)?;
         let partitions = lsblk_str
             .lines()
             .filter(|line| line.chars().last().map(|c| c.is_numeric()).unwrap_or(false))
@@ -745,12 +742,10 @@ impl OnExternalFdeDisk {
                 .args(["-o", "ro"])
                 .arg(&part)
                 .arg(mount_path)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
+                .run()
                 .await;
 
-            if mount_result.is_err() || !mount_result.unwrap().success() {
+            if mount_result.is_err() {
                 continue;
             }
 
@@ -764,7 +759,7 @@ impl OnExternalFdeDisk {
                 .is_some();
 
             // Uninstall partition
-            Command::new("umount").arg(mount_path).status().await.ok();
+            let _ = Command::new("umount").arg(mount_path).run().await;
 
             if has_efi && !has_vmlinuz {
                 return Ok(part);
