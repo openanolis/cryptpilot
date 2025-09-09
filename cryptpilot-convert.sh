@@ -221,6 +221,7 @@ proc::print_help_and_exit() {
     echo "      --package <rpm_package>                             Specify an RPM package name or path to the RPM file to install in to the disk before"
     echo "  -b, --boot_part_size <size>                             Instead of using the default partition size(512MB), specify the size of the boot partition"
     echo "                                                          converting. This can be specified multiple times."
+    echo "      --wipe-freed-space                                  Wipe the freed space with zero, so that the qemu-img convert would generate smaller image"
     echo "  -h, --help                                              Show this help message and exit."
     exit "$1"
 }
@@ -664,8 +665,10 @@ step::shrink_and_extract_rootfs_part() {
     rootfs_file_path="${workdir}/rootfs.img"
     log::info "Extract rootfs to file on disk ${rootfs_file_path}"
     dd status=progress if="${rootfs_orig_part}" of="${rootfs_file_path}" "count=${after_shrink_size_in_bytes}" iflag=count_bytes bs=256M
-    log::info "Wipe rootfs partition on device ${before_shrink_size_in_bytes} bytes"
-    dd status=progress if=/dev/zero of="${rootfs_orig_part}" count="${before_shrink_size_in_bytes}" iflag=count_bytes bs=64M # Clean the freed space with zero, so that the qemu-img convert would generate smaller image
+    if [ "${clean_freed_space}" = true ]; then
+        log::info "Wipe rootfs partition on device ${before_shrink_size_in_bytes} bytes"
+        dd status=progress if=/dev/zero of="${rootfs_orig_part}" count="${before_shrink_size_in_bytes}" iflag=count_bytes bs=64M # Clean the freed space with zero, so that the qemu-img convert would generate smaller image
+    fi
 
     # Delete the original rootfs partition
     log::info "Deleting original rootfs partition"
@@ -808,6 +811,7 @@ main() {
     local rootfs_orig_part
     local rootfs_orig_part_num
     local rootfs_orig_part_exist=false
+    local clean_freed_space=false
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -846,6 +850,10 @@ main() {
         -b | --boot_part_size)
             BOOT_PART_SIZE=("$2")
             shift 2
+            ;;
+        --clean-freed-space)
+            clean_freed_space=true
+            shift 1
             ;;
         -h | --help)
             proc::print_help_and_exit 0
