@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use async_trait::async_trait;
@@ -32,8 +35,8 @@ pub struct MeasurementedBootComponents {
     pub kernel_cmdline: String,
     pub kernel: Vec<u8>,
     pub initrd: Vec<u8>,
-    pub grub: Vec<u8>,
-    pub shim: Vec<u8>,
+    pub grub: HashSet<Vec<u8>>,
+    pub shim: HashSet<Vec<u8>>,
 }
 
 impl MeasurementedBootComponents {
@@ -61,31 +64,24 @@ impl MeasurementedBootComponents {
         };
 
         // Try to read GRUB and SHIM for measurement
-        let (grub_authenticode_hash, shim_authenticode_hash) = {
-            // Calculate SHA384 hashes for GRUB and SHIM
-            let grub_hash = {
-                let mut hasher = T::new();
-                let pe = parse_pe(&self.grub)?;
-                authenticode::authenticode_digest(&*pe, &mut hasher)?;
-                hex::encode(hasher.finalize())
-            };
+        let grub_authenticode_hashes = self
+            .grub
+            .iter()
+            .map(|bytes| calculate_authenticode_hash::<T>(&bytes))
+            .collect::<Result<Vec<_>>>()?;
 
-            let shim_hash = {
-                let mut hasher = T::new();
-                let pe = parse_pe(&self.shim)?;
-                authenticode::authenticode_digest(&*pe, &mut hasher)?;
-                hex::encode(hasher.finalize())
-            };
-
-            (grub_hash, shim_hash)
-        };
+        let shim_authenticode_hashes = self
+            .shim
+            .iter()
+            .map(|bytes| calculate_authenticode_hash::<T>(&bytes))
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(BootComponentsHashValue {
             kernel_cmdline_hash,
             kernel_hash,
             initrd_hash,
-            grub_authenticode_hash,
-            shim_authenticode_hash,
+            grub_authenticode_hashes,
+            shim_authenticode_hashes,
         })
     }
 }
@@ -96,8 +92,8 @@ pub struct BootComponentsHashValue {
     pub kernel_cmdline_hash: String,
     pub kernel_hash: String,
     pub initrd_hash: String,
-    pub grub_authenticode_hash: String,
-    pub shim_authenticode_hash: String,
+    pub grub_authenticode_hashes: Vec<String>,
+    pub shim_authenticode_hashes: Vec<String>,
 }
 
 #[async_trait]
@@ -316,10 +312,7 @@ pub trait FdeDisk: Send + Sync {
             format!(
                 "{}{} {}",
                 device_identifier,
-                kernel_path
-                    .strip_prefix("/")
-                    .unwrap_or(&kernel_path)
-                    .to_string_lossy(),
+                kernel_path.to_string_lossy(),
                 cmdline
             )
         };
@@ -406,12 +399,12 @@ pub trait FdeDisk: Send + Sync {
     async fn read_file_on_disk(&self, path: &Path) -> Result<Vec<u8>>;
 
     /// Read GRUB and SHIM EFI binaries
-    async fn read_grub_and_shim(&self) -> Result<(Vec<u8>, Vec<u8>)> {
+    async fn read_grub_and_shim(&self) -> Result<(HashSet<Vec<u8>>, HashSet<Vec<u8>>)> {
         // Walk and search for grubx64.efi and shimx64.efi from /boot/efi
         let efi_part_root_dir = self.get_efi_part_root_dir();
 
-        let mut grub_data: Option<Vec<u8>> = None;
-        let mut shim_data: Option<Vec<u8>> = None;
+        let mut grub_data = HashSet::new();
+        let mut shim_data = HashSet::new();
 
         let mut entries = async_walkdir::WalkDir::new(efi_part_root_dir);
 
@@ -421,23 +414,18 @@ pub trait FdeDisk: Send + Sync {
                     if matches!(entry.file_type().await.map(|e| e.is_file()), Ok(true)) {
                         let file_name = entry.file_name().to_string_lossy().to_lowercase();
 
-                        if file_name == "grubx64.efi" && grub_data.is_none() {
+                        if file_name == "grubx64.efi" {
                             tracing::debug!(file=?entry.path(), "Found grubx64.efi");
                             let mut buf = vec![];
                             let mut file = File::open(entry.path()).await?;
                             file.read_to_end(&mut buf).await?;
-                            grub_data = Some(buf);
-                        } else if file_name == "shimx64.efi" && shim_data.is_none() {
+                            let _ = grub_data.insert(buf);
+                        } else if file_name == "shimx64.efi" {
                             tracing::debug!(file=?entry.path(), "Found shimx64.efi");
                             let mut buf = vec![];
                             let mut file = File::open(entry.path()).await?;
                             file.read_to_end(&mut buf).await?;
-                            shim_data = Some(buf);
-                        }
-
-                        // If we found both files, we can stop searching
-                        if grub_data.is_some() && shim_data.is_some() {
-                            break;
+                            let _ = shim_data.insert(buf);
                         }
                     }
                 }
@@ -447,10 +435,10 @@ pub trait FdeDisk: Send + Sync {
             }
         }
 
-        match (grub_data, shim_data) {
-            (Some(grub), Some(shim)) => Ok((grub, shim)),
-            (None, _) => bail!("GRUB EFI binary (grubx64.efi) not found in /boot/efi"),
-            (_, None) => bail!("SHIM EFI binary (shimx64.efi) not found in /boot/efi"),
+        match (grub_data.is_empty(), shim_data.is_empty()) {
+            (false, false) => Ok((grub_data, shim_data)),
+            (true, _) => bail!("GRUB EFI binary (grubx64.efi) not found in /boot/efi"),
+            (_, true) => bail!("SHIM EFI binary (shimx64.efi) not found in /boot/efi"),
         }
     }
 
@@ -868,4 +856,12 @@ fn parse_pe(bytes: &[u8]) -> Result<Box<dyn PeTrait + '_>, object::read::Error> 
         let pe = PeFile32::parse(bytes)?;
         Ok(Box::new(pe))
     }
+}
+
+fn calculate_authenticode_hash<T: digest::Digest + digest::Update>(bytes: &[u8]) -> Result<String> {
+    let pe = parse_pe(bytes)?;
+    let mut hasher = T::new();
+    authenticode::authenticode_digest(&*pe, &mut hasher)
+        .context("calculate_authenticode_hash failed")?;
+    Ok(hex::encode(hasher.finalize()))
 }

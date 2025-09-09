@@ -392,7 +392,7 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
     let dirs = [
         "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/",
         "/var/lib/containers/",
-        "/var/lib/docker/overlay",
+        "/var/lib/docker/",
     ];
 
     for dir in dirs {
