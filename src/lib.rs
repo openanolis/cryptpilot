@@ -28,7 +28,7 @@ pub async fn run() -> Result<()> {
     let (filter, reload_handle) = tracing_subscriber::reload::Layer::new(filter);
     tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .init();
 
     let args = cli::Cli::parse();
