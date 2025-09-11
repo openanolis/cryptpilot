@@ -98,7 +98,7 @@ CryptPilot使用远程证明（Remote Attestation）技术来实现对根文件�
 ```txt
 # cat /run/attestation-agent/eventlog
 INIT sha384/000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-cryptpilot.alibabacloud.com load_config {"alg":"sha384","value":"b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877"}
+cryptpilot.alibabacloud.com load_config b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877
 cryptpilot.alibabacloud.com fde_rootfs_hash a3f73f5b995e7d8915c998d9f1e56b0e063a6e20c2bbb512e88e8fbc4e8f2965
 cryptpilot.alibabacloud.com initrd_switch_root {}
 ```
@@ -107,7 +107,7 @@ cryptpilot.alibabacloud.com initrd_switch_root {}
 
 | Domain | Operation | 示例值 | 描述 |
 | --- | --- | --- | --- |
-| cryptpilot.alibabacloud.com | load_config | `{"alg":"sha384","value":"b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877"}` | CryptPilot所使用的配置文件的hash值 |
+| cryptpilot.alibabacloud.com | load_config | `b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877` | CryptPilot所使用的配置文件的SHA384值 |
 | cryptpilot.alibabacloud.com | fde_rootfs_hash | `a3f73f5b995e7d8915c998d9f1e56b0e063a6e20c2bbb512e88e8fbc4e8f2965` | 解密后启动的rootfs卷的度量值 |
 | cryptpilot.alibabacloud.com | initrd_switch_root | `{}` | 一个事件记录，用于标识系统当前已经从initrd阶段切换到真实的系统中，该项的值始终为`{}` |
 

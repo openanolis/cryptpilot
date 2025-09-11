@@ -2,7 +2,6 @@
 pub mod attestation_agent;
 
 use anyhow::Result;
-use serde_json::json;
 use sha2::Digest;
 
 pub const OPERATION_NAME_LOAD_CONFIG: &str = "load_config";
@@ -29,12 +28,7 @@ pub trait Measure {
             .finalize()
             .to_vec();
 
-        let hash = json! ({
-            "alg": "sha384",
-            "value": hex::encode(hash),
-        });
-
-        Ok(hash.to_string())
+        Ok(hex::encode(hash))
     }
 }
 
