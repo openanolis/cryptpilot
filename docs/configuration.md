@@ -98,7 +98,7 @@ After entering the system, you can check the EventLog recorded by CryptPilot via
 ```txt
 # cat /run/attestation-agent/eventlog
 INIT sha384/000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-cryptpilot.alibabacloud.com load_config {"alg":"sha384","value":"b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877"}
+cryptpilot.alibabacloud.com load_config b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877
 cryptpilot.alibabacloud.com fde_rootfs_hash a3f73f5b995e7d8915c998d9f1e56b0e063a6e20c2bbb512e88e8fbc4e8f2965
 cryptpilot.alibabacloud.com initrd_switch_root {}
 ```
@@ -107,7 +107,7 @@ As shown above, three EventLogs will be recorded during the CryptPilot startup p
 
 | Domain | Operation | Example Value | Description |
 | --- | --- | --- | --- |
-| cryptpilot.alibabacloud.com | load_config | `{"alg":"sha384","value":"b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877"}` | The hash value of the configuration file used by CryptPilot |
+| cryptpilot.alibabacloud.com | load_config | `b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877` | The SHA384 hash value of the configuration file used by CryptPilot |
 | cryptpilot.alibabacloud.com | fde_rootfs_hash | `a3f73f5b995e7d8915c998d9f1e56b0e063a6e20c2bbb512e88e8fbc4e8f2965` | The measurement value of the decrypted rootfs volume |
 | cryptpilot.alibabacloud.com | initrd_switch_root | `{}` | An event record indicating that the system has switched from the initrd phase to the real system. The value of this item is always `{}` |
 
