@@ -1,8 +1,8 @@
 %global debug_package %{nil}
-%define release_num 5
+%define release_num 1
 
 Name: cryptpilot
-Version: 0.2.5
+Version: 0.2.6
 Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -144,6 +144,53 @@ fi
 
 
 %changelog
+* Mon Sep 15 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.6-1
+- cryptpilot & FDE Enhancements:
+  * Redirect all logs to stderr for consistent logging behavior
+  * Fix kernel module loading failures on specific systems
+  * Resolve race condition where block devices appear after cryptpilot service start
+  * Add passphrase validation before unlocking encrypted volumes
+  * Enforce root=/dev/mapper/rootfs in kernel command line via force override
+  * Fix boot partition detection logic
+  * Improve network stability during early boot
+
+- cryptpilot-convert Improvements:
+  * Speed up conversion of large disk images
+  * Replace yum --installroot with chroot-based package installation
+  * Add --boot_part_size parameter to customize boot partition size
+  * Add --rootfs-part-num to set root filesystem partition number
+  * Enhance EFI and rootfs partition detection based on content inspection
+  * Fix access failure after partition creation
+  * Correctly detect default kernel in multi-kernel systems
+  * Fix encrypted image creation for AnolisOS-23.3-x86_64.qcow2
+  * Prevent repeated mounting of EFI/boot partitions by adding noauto,nofail to fstab
+  * Optimize e2fsck execution logic
+  * Add boot partition pre-check functionality
+  * Improve compatibility with various disk partition layouts
+  * Force override / mount source in /etc/fstab
+  * Add colored logging output for better readability
+  * Enable support for AnolisOS 23.3 and Alinux3 software installation via yum
+
+- show-reference-value Updates:
+  * Support SM3 hash algorithm for reference value calculation
+  * Generate reference values for GRUB, kernel, cmdline, and initrd
+  * Fix kernel path generation issues
+  * Support multiple GRUB and shim binaries in /boot
+  * Suppress noisy mount error messages
+  * Remove irrelevant print output during command execution
+  * Fix failure in cleaning up DM devices from NBD instances
+  * Remove redundant 'tdx' prefix from output
+
+- Container & OverlayFS Fixes:
+  * Fix "not supported as upperdir" error in Docker
+  * Resolve "overlay is not supported over overlayfs" error in Podman
+
+- FDE & Configuration Changes:
+  * Change load_config content format from JSON object to hex hash value
+
+- Infrastructure & Compatibility:
+  * Add Aliyun IMDS availability check before fetching instance config
+
 * Mon Jul  7 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.5-5
 - fde: sync time to system before call cdh if run in aliyun ecs.
 - fde: add timeout fetching config from cloudinit.
