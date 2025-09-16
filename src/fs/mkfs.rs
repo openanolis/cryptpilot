@@ -28,24 +28,20 @@ pub struct NormalMakeFs;
 #[async_trait]
 impl MakeFs for NormalMakeFs {
     async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()> {
-        // There is no need to check volume here since systemd-makefs will check it.
-        Command::new("/usr/lib/systemd/systemd-makefs")
-            .arg(fs_type.to_systemd_makefs_fstype())
+        // Use mkfs commands directly instead of systemd-makefs
+        let (mkfs_cmd, force_arg) = match fs_type {
+            MakeFsType::Swap => ("mkswap", "-f"), // mkswap uses -f for force
+            MakeFsType::Ext4 => ("mkfs.ext4", "-F"), // mkfs.ext4 uses -F for force
+            MakeFsType::Xfs => ("mkfs.xfs", "-f"), // mkfs.xfs uses -f for force
+            MakeFsType::Vfat => ("mkfs.vfat", "-I"), // mkfs.vfat uses -I to force formatting
+        };
+
+        Command::new(mkfs_cmd)
+            .arg(force_arg)
             .arg(device_path.as_ref())
             .run()
             .await?;
         Ok(())
-    }
-}
-
-impl MakeFsType {
-    fn to_systemd_makefs_fstype(self) -> &'static str {
-        match self {
-            MakeFsType::Swap => "swap",
-            MakeFsType::Ext4 => "ext4",
-            MakeFsType::Xfs => "xfs",
-            MakeFsType::Vfat => "vfat",
-        }
     }
 }
 
