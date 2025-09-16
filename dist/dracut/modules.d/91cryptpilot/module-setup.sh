@@ -15,7 +15,7 @@ install() {
         set -e
         set -u
         # TODO: simplify this
-        inst_multiple cryptsetup veritysetup mkfs.ext4 mkfs.vfat mkfs.xfs mkswap base64 /usr/lib/systemd/systemd-makefs
+        inst_multiple cryptsetup veritysetup mkfs.ext4 mkfs.vfat mkfs.xfs mkswap base64
         inst_multiple vgchange lvcreate
         inst_multiple blkid lsblk findmnt
         inst_multiple dd tail grep sort
