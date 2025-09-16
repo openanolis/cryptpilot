@@ -735,8 +735,8 @@ step::create_lvm_part() {
     partprobe "$device"
 
     log::info "Initializing LVM physical volume and volume group"
-    proc::exec_subshell_flose_fds pvcreate "$lvm_part"
-    proc::exec_subshell_flose_fds vgcreate system "$lvm_part"
+    proc::exec_subshell_flose_fds pvcreate --force "$lvm_part"
+    proc::exec_subshell_flose_fds vgcreate --force system "$lvm_part"
 }
 
 step::setup_rootfs_lv_with_encrypt() {
