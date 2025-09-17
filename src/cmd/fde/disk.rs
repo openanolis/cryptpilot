@@ -3,14 +3,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
 use authenticode::PeTrait;
 use block_devs::BlckExt;
 use futures_lite::stream::StreamExt;
 use object::read::pe::{PeFile32, PeFile64};
 use sha2::Digest;
-use tempfile::tempdir;
 use tokio::{
     fs::{self, File},
     io::AsyncReadExt as _,
@@ -673,46 +672,45 @@ impl OnExternalFdeDisk {
             if fields.len() != 2 {
                 continue;
             }
-
             let dev = fields[0];
-
-            // Try mounting and checking for boot content
-            let tmpdir = tempdir().context("Failed to create temp mount dir")?;
-            let mount_path = tmpdir.path();
-            let mount_str = mount_path
-                .to_str()
-                .ok_or_else(|| anyhow!("Invalid mount path: non-UTF8"))?;
-
-            let already_mounted = Command::new("findmnt")
-                .args(["-n", "-o", "TARGET", dev])
-                .run()
-                .await
-                .is_ok();
-
-            if !already_mounted {
-                if let Err(error) = Command::new("mount")
-                    .args(["-o", "ro", &dev, mount_str])
+            let has_boot_kernel = async {
+                // Try mounting and checking for boot content
+                let already_mounted = Command::new("findmnt")
+                    .args(["-n", "-o", "TARGET", dev])
                     .run()
                     .await
-                {
-                    tracing::warn!(?error, "Failed to mount {dev}");
+                    .is_ok();
+
+                if already_mounted {
+                    return Ok(None);
+                }
+                let tmp_mount = TmpMountPoint::mount(&dev).await?;
+
+                let mut has_boot_kernel = false;
+
+                let mut entries = fs::read_dir(tmp_mount.mount_point()).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let name = entry.file_name();
+                    if name.to_string_lossy().starts_with("vmlinuz") {
+                        has_boot_kernel = true;
+                        break;
+                    }
+                }
+
+                Ok::<_, anyhow::Error>(Some(has_boot_kernel))
+            }
+            .await;
+
+            let has_boot_kernel = match has_boot_kernel {
+                Ok(Some(has_boot_kernel)) => has_boot_kernel,
+                Ok(None) => {
                     continue;
                 }
-            }
-
-            let mut has_boot_kernel = false;
-
-            let mut entries = fs::read_dir(mount_path).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                let name = entry.file_name();
-                if name.to_string_lossy().starts_with("vmlinuz") {
-                    has_boot_kernel = true;
-                    break;
+                Err(error) => {
+                    tracing::debug!(?error, dev, "Failed to check for boot kernel on device");
+                    continue;
                 }
-            }
-
-            // Unmount after check
-            let _ = Command::new("umount").arg(mount_path).run().await;
+            };
 
             if has_boot_kernel {
                 return Ok(PathBuf::from(dev));
@@ -740,35 +738,33 @@ impl OnExternalFdeDisk {
             .map(PathBuf::from);
 
         for part in partitions {
-            // Create a temporary mount point
-            let mount_dir = tempdir().context("Failed to create temp mount dir")?;
-            let mount_path = mount_dir.path();
+            let is_efi_part = async {
+                // Create a temporary mount point
+                let tmp_mount = TmpMountPoint::mount(&part).await?;
+                let mount_point = tmp_mount.mount_point();
 
-            // Try to mount the partition in read-only mode
-            let mount_result = Command::new("mount")
-                .args(["-o", "ro"])
-                .arg(&part)
-                .arg(mount_path)
-                .run()
-                .await;
+                // Check whether the EFI directory exists
+                let efi_dir = mount_point.join("EFI");
+                let vmlinuz_files = mount_point.join("vmlinuz-*");
 
-            if mount_result.is_err() {
-                continue;
+                let has_efi = fs::metadata(&efi_dir).await.is_ok();
+                let has_vmlinuz = glob::glob(vmlinuz_files.to_str().unwrap())?
+                    .next()
+                    .is_some();
+
+                Ok::<_, anyhow::Error>(has_efi && !has_vmlinuz)
             }
+            .await;
 
-            // Check whether the EFI directory exists
-            let efi_dir = mount_path.join("EFI");
-            let vmlinuz_files = mount_path.join("vmlinuz-*");
+            let is_efi_part = match is_efi_part {
+                Ok(is_efi_part) => is_efi_part,
+                Err(error) => {
+                    tracing::debug!(?error, ?part, "Failed to check efi part on device");
+                    continue;
+                }
+            };
 
-            let has_efi = fs::metadata(&efi_dir).await.is_ok();
-            let has_vmlinuz = glob::glob(vmlinuz_files.to_str().unwrap())?
-                .next()
-                .is_some();
-
-            // Uninstall partition
-            let _ = Command::new("umount").arg(mount_path).run().await;
-
-            if has_efi && !has_vmlinuz {
+            if is_efi_part {
                 return Ok(part);
             }
         }
