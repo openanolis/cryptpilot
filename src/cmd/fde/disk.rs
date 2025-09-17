@@ -652,11 +652,18 @@ impl OnExternalFdeDisk {
             gpt_cmd.arg(hint_device);
         }
 
-        let gpt_stdout = gpt_cmd.run().await?;
-        let gpt_device = String::from_utf8_lossy(&gpt_stdout).trim().to_string();
+        match gpt_cmd.run().await {
+            Ok(gpt_stdout) => {
+                let gpt_device = String::from_utf8_lossy(&gpt_stdout).trim().to_string();
 
-        if !gpt_device.is_empty() {
-            return Ok(PathBuf::from(gpt_device));
+                if !gpt_device.is_empty() {
+                    return Ok(PathBuf::from(gpt_device));
+                }
+            }
+            Err(error) => tracing::debug!(
+                ?error,
+                "Failed to detect boot partition with PARTLABEL=boot"
+            ),
         }
 
         // 3. Try MBR-style fallback: search all ext4 partitions and check contents
