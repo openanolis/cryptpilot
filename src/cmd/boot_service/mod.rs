@@ -210,7 +210,8 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
                         "-l",
                         "100%FREE",
                         "system",
-                        "--nolocking",
+                        "--config",
+                        "global {locking_type = 0}",
                     ])
                     .run()
                     .await?;
