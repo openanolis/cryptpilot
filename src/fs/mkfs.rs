@@ -62,6 +62,8 @@ impl MakeFs for IntegrityNoWipeMakeFs {
                     let is_empty_disk =
                         if stdout.contains("Input/output error") || stdout.trim() == "data" {
                             true
+                        } else if stdout.contains("cannot open") {
+                            bail!("Cannot open")
                         } else if code != 0 {
                             bail!("Bad exit code")
                         } else {
