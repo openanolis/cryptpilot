@@ -393,7 +393,7 @@ step::extract_boot_part_from_rootfs() {
         # Use sort -V for version comparison
         if printf '%s\n' "1.47.0" "$VERSION" | sort -V | head -n1 | grep -q '1.47.0'; then
             echo "e2fsprogs version $VERSION >= 1.47.0, proceeding..."
-            yes | mkfs.ext4 -F -O  ^orphan_file,^metadata_csum_seed "$boot_file_path"
+            yes | mkfs.ext4 -F -O ^orphan_file,^metadata_csum_seed "$boot_file_path"
         else
             echo "e2fsprogs version $VERSION < 1.47.0, skipping advanced features."
             # Fallback to a standard format command
@@ -459,13 +459,13 @@ disk::install_rpm_on_rootfs() {
 
     # Install all packages using yum inside the chroot
     chroot "${rootfs_mount_point}" rpmdb --rebuilddb --dbpath /var/lib/rpm
-    chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy}    \
-                                                ${https_proxy:+https_proxy=$https_proxy} \
-                                                ${ftp_proxy:+ftp_proxy=$ftp_proxy}       \
-                                                ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
-                                                ${all_proxy:+all_proxy=$all_proxy}       \
-                                                ${no_proxy:+no_proxy=$no_proxy}          \
-                                                yum install -y "${all_packages[@]}"
+    chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+        ${https_proxy:+https_proxy=$https_proxy} \
+        ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+        ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+        ${all_proxy:+all_proxy=$all_proxy} \
+        ${no_proxy:+no_proxy=$no_proxy} \
+        yum install -y "${all_packages[@]}"
     chroot "${rootfs_mount_point}" yum clean all
 
     # Remove the copied .rpm files from the chroot after installation
@@ -687,7 +687,7 @@ step::shrink_and_extract_rootfs_part() {
     rootfs_file_path="${workdir}/rootfs.img"
     log::info "Extract rootfs to file on disk ${rootfs_file_path}"
     dd status=progress if="${rootfs_orig_part}" of="${rootfs_file_path}" "count=${after_shrink_size_in_bytes}" iflag=count_bytes bs=256M
-    if [ "${clean_freed_space}" = true ]; then
+    if [ "${wipe_freed_space}" = true ]; then
         log::info "Wipe rootfs partition on device ${before_shrink_size_in_bytes} bytes"
         dd status=progress if=/dev/zero of="${rootfs_orig_part}" count="${before_shrink_size_in_bytes}" iflag=count_bytes bs=64M # Clean the freed space with zero, so that the qemu-img convert would generate smaller image
     fi
@@ -833,7 +833,7 @@ main() {
     local rootfs_orig_part
     local rootfs_orig_part_num
     local rootfs_orig_part_exist=false
-    local clean_freed_space=false
+    local wipe_freed_space=false
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -873,8 +873,8 @@ main() {
             BOOT_PART_SIZE=("$2")
             shift 2
             ;;
-        --clean-freed-space)
-            clean_freed_space=true
+        --wipe-freed-space)
+            wipe_freed_space=true
             shift 1
             ;;
         -h | --help)
