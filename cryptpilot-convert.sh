@@ -546,13 +546,6 @@ step:update_rootfs_and_initrd() {
         sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
     fi
 
-    ## replace the root mount device with /dev/mapper/rootfs
-    local root_mount_line_content
-    root_mount_line_content=$(grep -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1)
-    local root_mount_device
-    root_mount_device=$(echo "${root_mount_line_content}" | awk '{print $1}')
-    sed -i "s|^${root_mount_device}\([[:space:]]\+\)/\([[:space:]]\+\)|/dev/mapper/rootfs\1/\2|" "${rootfs_mount_point}/etc/fstab"
-
     # Ensure GRUB always uses /dev/mapper/rootfs as root device
     log::info "Configuring GRUB to always use /dev/mapper/rootfs as root device"
     local grub_config_file="${rootfs_mount_point}/etc/default/grub"
