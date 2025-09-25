@@ -437,8 +437,8 @@ async fn setup_mounts_required_by_fde() -> Result<()> {
                 if copy_source.exists() {
                     if let Err(e) = Command::new("cp")
                         .arg("-a")
-                        .arg(format!("{copy_source:?}/."))
-                        .arg(format!("{origin:?}/"))
+                        .arg(copy_source.join("."))
+                        .arg(&origin)
                         .run()
                         .await
                         .with_context(|| {
