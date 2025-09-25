@@ -436,9 +436,16 @@ disk::install_rpm_on_rootfs() {
     shift
     local packages=("$@")
 
-    packages+=("cryptpilot")
-    packages+=("attestation-agent")
-    packages+=("confidential-data-hub")
+    # Define the essential packages
+    local essential_packages=(
+        "yum-plugin-versionlock"
+        "cryptpilot"
+        "attestation-agent"
+        "confidential-data-hub"
+    )
+
+    # Add the essential packages to the installation list
+    packages+=("${essential_packages[@]}")
 
     local copied_rpms=()  # Will store the local paths inside chroot to the copied .rpm files
     local all_packages=() # Will be used as arguments to yum install
@@ -466,13 +473,16 @@ disk::install_rpm_on_rootfs() {
         ${all_proxy:+all_proxy=$all_proxy} \
         ${no_proxy:+no_proxy=$no_proxy} \
         yum install -y "${all_packages[@]}"
+
+    # Lock all version of the essential packages
+    chroot "${rootfs_mount_point}" yum --cacheonly versionlock "${essential_packages[@]}"
+
     chroot "${rootfs_mount_point}" yum clean all
 
     # Remove the copied .rpm files from the chroot after installation
     for rpm in "${copied_rpms[@]}"; do
         rm -f "${rootfs_mount_point}${rpm}"
     done
-
 }
 
 step:update_rootfs_and_initrd() {
