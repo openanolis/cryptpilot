@@ -19,6 +19,7 @@ install() {
         inst_multiple vgchange lvcreate
         inst_multiple blkid lsblk findmnt
         inst_multiple dd tail grep sort
+        inst_multiple awk sed pvs growpart sfdisk partprobe pvresize lvextend
         # required by 'file' command
         inst_multiple file
         inst_multiple modprobe

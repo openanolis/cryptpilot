@@ -112,6 +112,12 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
 
     // 4. Open the data logical volume with dm-crypt and dm-integrity on it
     tracing::info!("[ 4/4 ] Setting up data volume");
+
+    tracing::info!("Expanding system PV partition");
+    if let Err(error) = expand_system_pv_partition().await {
+        tracing::warn!(?error, "Failed to expend the system PV partition");
+    }
+
     {
         // Check if the data logical volume exists
         let create_data_lv = !Path::new(DATA_LOGICAL_VOLUME).exists();
@@ -147,6 +153,11 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
             }
             .await
             .context("Failed to create data logical volume")?;
+        } else {
+            tracing::info!("Expanding data logical volume");
+            if let Err(error) = expand_system_data_lv().await {
+                tracing::warn!(?error, "Failed to expend data logical volume");
+            }
         }
 
         tracing::info!("Fetching passphrase for data volume");
@@ -170,6 +181,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
             crate::fs::luks2::format(DATA_LOGICAL_VOLUME, &passphrase, integrity).await?;
         }
 
+        // TODO: support change size of the LUKS2 volume and inner ext4 file system
         crate::fs::luks2::open_with_check_passphrase(
             DATA_LAYER_NAME,
             DATA_LOGICAL_VOLUME,
@@ -219,4 +231,89 @@ async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Resul
     }
     .await
     .context("Failed to setup rootfs_verity")
+}
+
+async fn expand_system_pv_partition() -> Result<()> {
+    Command::new("bash")
+        .arg("-c")
+        .arg(
+            r#"
+set -euo pipefail
+
+VG_NAME="system"
+
+# Find any PV belonging to the volume group
+PV_DEV=$(pvs --noheadings -o pv_name,vg_name | awk "\$2==\"$VG_NAME\" {print \$1; exit}")
+
+if [[ -z "$PV_DEV" ]]; then
+    echo "Error: No physical volume found for volume group '$VG_NAME'" >&2
+    exit 1
+fi
+
+# Get the parent disk (e.g. nvme0n1)
+DISK_DEV=$(lsblk -dno PKNAME "$PV_DEV")
+DISK_PATH="/dev/$DISK_DEV"
+
+if [[ ! -b "$DISK_PATH" ]]; then
+    echo "Error: Disk device not found: $DISK_PATH" >&2
+    exit 1
+fi
+
+echo "Volume group '$VG_NAME' uses PV: $PV_DEV"
+echo "Located on disk: $DISK_PATH"
+
+# Get the last partition number
+LAST_PART_NUM=$(lsblk -nro NAME "$DISK_PATH" |
+    grep -E "^${DISK_DEV}[p]*[0-9]+$" |
+    tail -1 |
+    sed -E "s/^${DISK_DEV}[p]*//")
+
+if [[ -z "$LAST_PART_NUM" ]]; then
+    echo "Error: Failed to detect last partition on $DISK_PATH" >&2
+    exit 1
+fi
+
+echo "Last partition number: $LAST_PART_NUM"
+
+echo "Expanding partition $LAST_PART_NUM..."
+if growpart "$DISK_PATH" "$LAST_PART_NUM"; then
+
+    partprobe
+
+    echo "Partition $LAST_PART_NUM expanded successfully."
+
+    pvresize "/dev/${DISK_DEV}p${LAST_PART_NUM}" ||
+        pvresize "/dev/${DISK_DEV}${LAST_PART_NUM}"
+
+    echo "Physical volume resized successfully"
+
+elif [[ $? -eq 1 ]]; then
+    # return 1 means no more space available
+    echo "No action: partition $LAST_PART_NUM is already at maximum size."
+else
+    echo "ERROR: growpart failed unexpectedly." >&2
+    exit 1
+fi
+            "#,
+        )
+        .run()
+        .await?;
+
+    Ok::<_, anyhow::Error>(())
+}
+
+async fn expand_system_data_lv() -> Result<()> {
+    Command::new("lvextend")
+        .arg("-l")
+        .arg("+100%FREE")
+        .arg(DATA_LOGICAL_VOLUME)
+        .run_with_status_checker(|code, _, _| match code {
+            0 | 5 => Ok(()),
+            _ => {
+                bail!("Bad exit code")
+            }
+        })
+        .await?;
+
+    Ok::<_, anyhow::Error>(())
 }

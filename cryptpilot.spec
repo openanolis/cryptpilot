@@ -25,7 +25,6 @@ Requires: dosfstools
 Requires: xfsprogs
 # mkfs.ext4
 Requires: e2fsprogs
-# swapon
 Requires: util-linux
 # qemu-nbd
 Requires: qemu-img
