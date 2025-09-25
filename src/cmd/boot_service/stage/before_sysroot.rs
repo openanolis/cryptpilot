@@ -1,0 +1,222 @@
+use std::path::Path;
+
+use anyhow::{bail, Context, Result};
+use tokio::{fs::File, io::AsyncWriteExt, process::Command};
+
+use crate::{
+    cmd::{
+        boot_service::{
+            metadata::Metadata,
+            stage::{
+                DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, ROOTFS_DECRYPTED_LAYER_DEVICE,
+                ROOTFS_DECRYPTED_LAYER_NAME, ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LAYER_NAME,
+                ROOTFS_LOGICAL_VOLUME,
+            },
+        },
+        fde::disk::{FdeDisk, OnExternalFdeDisk},
+    },
+    config::volume::MakeFsType,
+    fs::cmd::CheckCommandOutput,
+    measure::{AutoDetectMeasure, Measure as _, OPERATION_NAME_FDE_ROOTFS_HASH},
+    provider::{IntoProvider as _, KeyProvider as _, VolumeType},
+    types::IntegrityType,
+};
+
+pub async fn setup_volumes_required_by_fde() -> Result<()> {
+    let fde_config = crate::config::source::get_config_source()
+        .await
+        .get_fde_config()
+        .await?;
+    let Some(fde_config) = fde_config else {
+        tracing::info!("The system is not configured for FDE, skip setting up now");
+        return Ok(());
+    };
+
+    tracing::info!("Setting up volumes required by FDE");
+
+    // 1. Checking and activating LVM volume group 'system'
+    tracing::info!("[ 1/4 ] Checking and activating LVM volume group 'system'");
+    Command::new("vgchange")
+        .args(["-a", "y", "system"])
+        .run()
+        .await
+        .context("Failed to activate LVM volume group 'system'")?;
+
+    // 2. Load the root-hash and add it to the AAEL
+    tracing::info!("[ 2/4 ] Loading root-hash");
+    let metadata = load_metadata().await.context("Failed to load metadata")?;
+    tracing::info!(
+        "Got metadata type: {}, root-hash: {}",
+        metadata.r#type,
+        metadata.root_hash
+    );
+    if metadata.r#type != 1 {
+        bail!("Unsupported cryptpilot metadata type: {}", metadata.r#type);
+    }
+    // Extend rootfs hash to runtime measurement
+    let measure = AutoDetectMeasure::new().await;
+    if let Err(e) = measure
+        .extend_measurement(
+            OPERATION_NAME_FDE_ROOTFS_HASH.into(),
+            metadata.root_hash.clone(),
+        )
+        .await
+        .context("Failed to extend rootfs hash to runtime measurement")
+    {
+        tracing::warn!("{e:?}")
+    }
+
+    // 3. Setup rootfs dm-crypt for rootfs volume
+    tracing::info!("[ 3/4 ] Setting up rootfs volume");
+    if let Some(encrypt) = &fde_config.rootfs.encrypt {
+        // Setup dm-crypt for rootfs lv if required (optional)
+        tracing::info!("Fetching passphrase for rootfs volume");
+        let provider = encrypt.key_provider.clone().into_provider();
+
+        if matches!(provider.volume_type(), VolumeType::Temporary) {
+            bail!(
+                "Key provider {:?} is not supported for rootfs volume",
+                provider.debug_name()
+            )
+        }
+
+        let passphrase = provider
+            .get_key()
+            .await
+            .context("Failed to get passphrase")?;
+
+        tracing::info!("Setting up dm-crypt for rootfs volume");
+        crate::fs::luks2::open_with_check_passphrase(
+            ROOTFS_DECRYPTED_LAYER_NAME,
+            ROOTFS_LOGICAL_VOLUME,
+            &passphrase,
+            IntegrityType::None,
+        )
+        .await?;
+    } else {
+        tracing::info!("Encryption is disabled for rootfs volume, skip setting up dm-crypt")
+    }
+
+    tracing::info!("Setting up dm-verity for rootfs volume");
+    setup_rootfs_dm_verity(
+        &metadata.root_hash,
+        if fde_config.rootfs.encrypt.is_some() {
+            ROOTFS_DECRYPTED_LAYER_DEVICE
+        } else {
+            ROOTFS_LOGICAL_VOLUME
+        },
+    )
+    .await?;
+
+    // Now we have the rootfs ro part
+
+    // 4. Open the data logical volume with dm-crypt and dm-integrity on it
+    tracing::info!("[ 4/4 ] Setting up data volume");
+    {
+        // Check if the data logical volume exists
+        let create_data_lv = !Path::new(DATA_LOGICAL_VOLUME).exists();
+        if create_data_lv {
+            tracing::info!(
+                "Data logical volume does not exist, assume it is first time boot and create it."
+            );
+
+            // Due to there is no udev in initrd, the lvcreate will complain that /dev/system/data not exist. A workaround is to set '--zero n' and zeroing the first 4k of logical volume manually.
+            // See https://serverfault.com/a/1059400
+            async {
+                Command::new("lvcreate")
+                    .args([
+                        "-n",
+                        "data",
+                        "--zero",
+                        "n",
+                        "-l",
+                        "100%FREE",
+                        "system",
+                        "--config",
+                        "global {locking_type = 0}",
+                    ])
+                    .run()
+                    .await?;
+                File::options()
+                    .write(true)
+                    .open("/dev/mapper/system-data")
+                    .await?
+                    .write_all(&[0u8; 4096])
+                    .await?;
+                Ok::<_, anyhow::Error>(())
+            }
+            .await
+            .context("Failed to create data logical volume")?;
+        }
+
+        tracing::info!("Fetching passphrase for data volume");
+        let provider = fde_config.data.encrypt.key_provider.into_provider();
+        let passphrase = provider
+            .get_key()
+            .await
+            .context("Failed to get passphrase")?;
+
+        let integrity = if fde_config.data.integrity {
+            IntegrityType::Journal // Select Journal mode since it is persistent storage
+        } else {
+            IntegrityType::None
+        };
+
+        let recreate_data_lv_content =
+            create_data_lv || matches!(provider.volume_type(), VolumeType::Temporary);
+        if recreate_data_lv_content {
+            // Create a LUKS volume on it
+            tracing::info!("Creating LUKS2 on data volume");
+            crate::fs::luks2::format(DATA_LOGICAL_VOLUME, &passphrase, integrity).await?;
+        }
+
+        crate::fs::luks2::open_with_check_passphrase(
+            DATA_LAYER_NAME,
+            DATA_LOGICAL_VOLUME,
+            &passphrase,
+            integrity,
+        )
+        .await?;
+
+        if recreate_data_lv_content {
+            // Create a Ext4 fs on it
+            tracing::info!("Creating ext4 fs on data volume");
+            crate::fs::luks2::makefs_if_empty(DATA_LAYER_NAME, &MakeFsType::Ext4, integrity)
+                .await?;
+        }
+    }
+
+    tracing::info!("Both rootfs volume and data volume are ready");
+
+    Ok(())
+}
+
+async fn load_metadata() -> Result<Metadata> {
+    OnExternalFdeDisk::new_by_probing()
+        .await?
+        .load_metadata()
+        .await
+}
+
+async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Result<()> {
+    async {
+        Command::new("modprobe")
+            .arg("dm-verity")
+            .run()
+            .await
+            .context("Failed to load kernel module 'dm-verity'")?;
+
+        Command::new("veritysetup")
+            .arg("open")
+            .arg(lower_dm_device)
+            .arg(ROOTFS_LAYER_NAME)
+            .arg(ROOTFS_HASH_LOGICAL_VOLUME)
+            .arg(root_hash)
+            .run()
+            .await?;
+
+        Ok::<_, anyhow::Error>(())
+    }
+    .await
+    .context("Failed to setup rootfs_verity")
+}
