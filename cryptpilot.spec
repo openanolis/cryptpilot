@@ -92,11 +92,21 @@ install -p -m 600 dist/etc/volumes/oidc.toml.template %{buildroot}/etc/cryptpilo
 install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
 install -d -p %{buildroot}/usr/share/cryptpilot
 install -p -m 644 dist/usr/share/cryptpilot/policy.rego %{buildroot}/usr/share/cryptpilot/policy.rego
+install -d -p %{buildroot}/usr/lib/udev/rules.d
+install -p -m 644 dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules %{buildroot}/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
 popd
 
 
 %post
-systemctl daemon-reload
+# Reload systemd manager configuration to pick up new/updated service files
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || :
+fi
+
+# Reload udev rules to apply new device filtering rules
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || :
+fi
 
 
 %clean
@@ -126,6 +136,7 @@ rm -rf %{buildroot}
 %{dracut_dst}initrd-wait-network-online.service
 %dir /usr/share/cryptpilot
 /usr/share/cryptpilot/policy.rego
+/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
 
 
 %preun

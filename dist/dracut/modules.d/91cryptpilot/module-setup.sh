@@ -51,6 +51,9 @@ install() {
         systemctl --root "$initdir" enable cryptpilot-fde-after-sysroot.service
         systemctl --root "$initdir" enable cryptpilot-fde-before-sysroot.service
 
+        # Install essential udev rules
+        inst_simple "${dracutsysrootdir:-}"/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+
         set +u
         set +e
 }

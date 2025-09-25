@@ -1,0 +1,13 @@
+# Rules for intermediate devices created by cryptpilot
+#
+# This rule should be placed after /usr/lib/udev/rules.d/10-dm.rules, /usr/lib/udev/rules.d/11-dm-lvm.rules and before /usr/lib/udev/rules.d/13-dm-disk.rules
+
+# Prevent /dev/system/rootfs from creating /dev/disk/by-uuid/... symlinks
+ENV{DM_VG_NAME}=="system", ENV{DM_LV_NAME}=="rootfs", \
+    ENV{UDISKS_IGNORE}="1", \
+    ENV{DM_UDEV_DISABLE_DISK_RULES_FLAG}="1"
+
+# Prevent /dev/mapper/rootfs_decrypted from creating /dev/disk/by-uuid/... symlinks
+ENV{DM_NAME}=="rootfs_decrypted", \
+    ENV{UDISKS_IGNORE}="1", \
+    ENV{DM_UDEV_DISABLE_DISK_RULES_FLAG}="1"
