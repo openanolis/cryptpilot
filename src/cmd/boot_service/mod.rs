@@ -23,7 +23,7 @@ use crate::{
         AutoDetectMeasure, Measure as _, OPERATION_NAME_FDE_ROOTFS_HASH,
         OPERATION_NAME_INITRD_SWITCH_ROOT,
     },
-    provider::{IntoProvider as _, KeyProvider as _},
+    provider::{IntoProvider as _, KeyProvider as _, VolumeType},
     types::IntegrityType,
 };
 
@@ -158,6 +158,14 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
         // Setup dm-crypt for rootfs lv if required (optional)
         tracing::info!("Fetching passphrase for rootfs volume");
         let provider = encrypt.key_provider.clone().into_provider();
+
+        if matches!(provider.volume_type(), VolumeType::Temporary) {
+            bail!(
+                "Key provider {:?} is not supported for rootfs volume",
+                provider.debug_name()
+            )
+        }
+
         let passphrase = provider
             .get_key()
             .await
@@ -240,7 +248,9 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
             IntegrityType::None
         };
 
-        if create_data_lv {
+        let recreate_data_lv_content =
+            create_data_lv || matches!(provider.volume_type(), VolumeType::Temporary);
+        if recreate_data_lv_content {
             // Create a LUKS volume on it
             tracing::info!("Creating LUKS2 on data volume");
             crate::fs::luks2::format(DATA_LOGICAL_VOLUME, &passphrase, integrity).await?;
@@ -254,7 +264,7 @@ async fn setup_volumes_required_by_fde() -> Result<()> {
         )
         .await?;
 
-        if create_data_lv {
+        if recreate_data_lv_content {
             // Create a Ext4 fs on it
             tracing::info!("Creating ext4 fs on data volume");
             crate::fs::luks2::makefs_if_empty(DATA_LAYER_NAME, &MakeFsType::Ext4, integrity)
