@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.2.6
+Version: 0.2.7
 Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -25,6 +25,7 @@ Requires: dosfstools
 Requires: xfsprogs
 # mkfs.ext4
 Requires: e2fsprogs
+# swapon, sfdisk
 Requires: util-linux
 # qemu-nbd
 Requires: qemu-img
@@ -154,6 +155,28 @@ fi
 
 
 %changelog
+* Fri Sep 26 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.7-1
+- fde: auto-expand system PV and data LV on boot
+- boot_service: split stage logic into separate modules
+- fde: fix path handling in fde mount setup by using path operations
+- boot_service: handle OTP-backed data volumes correctly across reboots
+- cryptpilot-convert.sh: lock essential packages after install
+- fde: hide intermediate device-mapper devices from udev and udisks
+- Revert "cryptpilot: add force override root=/dev/mapper/rootfs to cmdline"
+- Revert "cryptpilot-convert: force override the mount source for / in /etc/fstab"
+- cryptpilot-convert: rename --clean-freed-space to --wipe-freed-space
+- dracut: fix in case initrd-root-device.target are missing on some distros e.g. centos 7
+- Rewrite file -E to stdout string matching in mkfs.rs
+- Rewrite lvcreate --nolocking in mod.rs
+- fde: make GPT device detection resilient to command failure
+- fde: improve disk mount handling with better error reporting
+- dracut: fix network-manager may not exist in centos7
+- cryptpilot-convert: suppress ext4 signature warning by forcing LVM creation
+- dracut: remove dependency on /usr/lib/systemd/systemd-makefs
+- cryptpilot-convert: Add support for network proxy environment variables
+- cryptpilot-convert: Be compatible with different e2fsprogs versions
+
+
 * Mon Sep 15 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.6-1
 - cryptpilot & FDE Enhancements:
   * Redirect all logs to stderr for consistent logging behavior
