@@ -282,8 +282,8 @@ if growpart "$DISK_PATH" "$LAST_PART_NUM"; then
 
     echo "Partition $LAST_PART_NUM expanded successfully."
 
-    pvresize "/dev/${DISK_DEV}p${LAST_PART_NUM}" ||
-        pvresize "/dev/${DISK_DEV}${LAST_PART_NUM}"
+    pvresize "/dev/${DISK_DEV}p${LAST_PART_NUM}" --config 'global {locking_type = 0}' ||
+        pvresize "/dev/${DISK_DEV}${LAST_PART_NUM}" --config 'global {locking_type = 0}'
 
     echo "Physical volume resized successfully"
 
@@ -307,6 +307,8 @@ async fn expand_system_data_lv() -> Result<()> {
         .arg("-l")
         .arg("+100%FREE")
         .arg(DATA_LOGICAL_VOLUME)
+        .arg("--config")
+        .arg("global {locking_type = 0}")
         .run_with_status_checker(|code, _, _| match code {
             0 | 5 => Ok(()),
             _ => {
