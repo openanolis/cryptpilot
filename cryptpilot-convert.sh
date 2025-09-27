@@ -1031,12 +1031,12 @@ main() {
     #
     # 5. Create a boot partition
     #
-    echo "[ 5 ] Creating boot partition"
+    log::step "[ 5 ] Creating boot partition"
     if [ "$boot_part_exist" = "false" ]; then
         local boot_part_end_sector
         step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
     else
-        log::step "Skipped since boot partition already exist"
+        log::info "Skipped since boot partition already exist"
     fi
 
     #
