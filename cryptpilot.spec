@@ -79,6 +79,7 @@ install -p -m 755 dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service %{buildroot}%{dracut_dst}
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service %{buildroot}%{dracut_dst}
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service %{buildroot}%{dracut_dst}
+install -p -m 644 dist/dracut/modules.d/91cryptpilot/lvm.conf %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{_prefix}/lib/systemd/system
 install -p -m 644 dist/systemd/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/system/cryptpilot.service
 install -d -p %{buildroot}/etc/cryptpilot
@@ -134,6 +135,7 @@ rm -rf %{buildroot}
 %{dracut_dst}cryptpilot-fde-before-sysroot.service
 %{dracut_dst}cryptpilot-fde-after-sysroot.service
 %{dracut_dst}initrd-wait-network-online.service
+%{dracut_dst}lvm.conf
 %dir /usr/share/cryptpilot
 /usr/share/cryptpilot/policy.rego
 /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules

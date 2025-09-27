@@ -19,7 +19,7 @@ install() {
         inst_multiple vgchange lvcreate
         inst_multiple blkid lsblk findmnt
         inst_multiple dd tail grep sort
-        inst_multiple awk sed pvs growpart sfdisk partprobe pvresize lvextend
+        inst_multiple awk sed pvs growpart sfdisk lvm lvextend
         # required by 'file' command
         inst_multiple file
         inst_multiple modprobe
@@ -54,6 +54,9 @@ install() {
 
         # Install essential udev rules
         inst_simple "${dracutsysrootdir:-}"/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+
+        # Install lvm config required by cryptpilot
+        inst_simple "$moddir"/lvm.conf /usr/lib/cryptpilot/lvm/lvm.conf
 
         set +u
         set +e
