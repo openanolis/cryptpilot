@@ -53,7 +53,7 @@ impl MakeFs for IntegrityNoWipeMakeFs {
         let device_path = device_path.as_ref();
         let is_empty_disk = {
             Command::new("file")
-                .args(["-E", "--brief", "--dereference", "--special-files"])
+                .args(["--brief", "--dereference", "--special-files"])
                 .arg(device_path)
                 .env("LC_ALL", "C")
                 .run_with_status_checker(|code, stdout, _| {
