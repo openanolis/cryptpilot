@@ -54,14 +54,19 @@ impl super::super::Command for ShowReferenceValueCommand {
 
         tracing::debug!("Getting boot related measurement");
 
-        let boot_measurement = fde_disk.get_boot_measurement().await?;
+        let boot_components = fde_disk.get_boot_components().await?;
+        tracing::debug!("Starting to calculate reference values for boot components");
 
-        inseart_with_hash::<sha2::Sha384>(&boot_measurement, &mut map, "SHA384")?;
-        inseart_with_hash::<sm3::Sm3>(&boot_measurement, &mut map, "SM3")?;
+        inseart_with_hash::<sha2::Sha384>(&boot_components, &mut map, "SHA384")?;
+        inseart_with_hash::<sm3::Sm3>(&boot_components, &mut map, "SM3")?;
 
         map.insert(
             "kernel_cmdline".to_string(),
-            vec![boot_measurement.kernel_cmdline],
+            boot_components
+                .0
+                .into_iter()
+                .map(|(_, kernel_artifacts)| kernel_artifacts.kernel_cmdline)
+                .collect::<Vec<_>>(),
         );
 
         let json = serde_json::to_string_pretty(&map)?;
@@ -84,17 +89,17 @@ where
 
     map.insert(
         format!("measurement.kernel_cmdline.{hash_key}"),
-        vec![hash_value.kernel_cmdline_hash],
+        hash_value.kernel_cmdline_hashs,
     );
 
     map.insert(
         format!("measurement.kernel.{hash_key}"),
-        vec![hash_value.kernel_hash],
+        hash_value.kernel_hashs,
     );
 
     map.insert(
         format!("measurement.initrd.{hash_key}"),
-        vec![hash_value.initrd_hash],
+        hash_value.initrd_hashs,
     );
 
     map.insert(

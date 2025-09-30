@@ -1,10 +1,11 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
+use async_walkdir::WalkDir;
 use authenticode::PeTrait;
 use block_devs::BlckExt;
 use futures_lite::stream::StreamExt;
@@ -29,56 +30,60 @@ pub enum PartitionTableType {
     Gpt,
 }
 
-#[derive(Debug, Clone)]
-pub struct MeasurementedBootComponents {
-    pub kernel_cmdline: String,
-    pub kernel: Vec<u8>,
-    pub initrd: Vec<u8>,
-    pub grub: HashSet<Vec<u8>>,
-    pub shim: HashSet<Vec<u8>>,
-}
+#[derive(Debug)]
+pub struct MeasurementedBootComponents(pub Vec<(GrubArtifacts, KernelArtifacts)>);
 
 impl MeasurementedBootComponents {
-    pub fn cal_hash<T>(&self) -> Result<BootComponentsHashValue>
+    pub fn cal_hash<T>(&self) -> Result<BootComponentsHashValues>
     where
         T: digest::Digest + digest::Update,
     {
-        let kernel_cmdline_hash = {
-            let mut hasher = T::new();
-            Digest::update(&mut hasher, &self.kernel_cmdline);
-            hex::encode(hasher.finalize())
-        };
-
-        // Calculate SHA384 hashes
-        let kernel_hash = {
-            let mut hasher = T::new();
-            Digest::update(&mut hasher, &self.kernel);
-            hex::encode(hasher.finalize())
-        };
-
-        let initrd_hash = {
-            let mut hasher = T::new();
-            Digest::update(&mut hasher, &self.initrd);
-            hex::encode(hasher.finalize())
-        };
-
-        // Try to read GRUB and SHIM for measurement
-        let grub_authenticode_hashes = self
-            .grub
+        let kernel_cmdline_hashs = self
+            .0
             .iter()
-            .map(|bytes| calculate_authenticode_hash::<T>(bytes))
+            .map(|(_, kernel_artifacts)| {
+                let mut hasher = T::new();
+                Digest::update(&mut hasher, &kernel_artifacts.kernel_cmdline);
+                hex::encode(hasher.finalize())
+            })
+            .collect::<Vec<_>>();
+
+        let kernel_hashs = self
+            .0
+            .iter()
+            .map(|(_, kernel_artifacts)| {
+                let mut hasher = T::new();
+                Digest::update(&mut hasher, &kernel_artifacts.kernel);
+                hex::encode(hasher.finalize())
+            })
+            .collect::<Vec<_>>();
+
+        let initrd_hashs = self
+            .0
+            .iter()
+            .map(|(_, kernel_artifacts)| {
+                let mut hasher = T::new();
+                Digest::update(&mut hasher, &kernel_artifacts.initrd);
+                hex::encode(hasher.finalize())
+            })
+            .collect::<Vec<_>>();
+
+        let grub_authenticode_hashes = self
+            .0
+            .iter()
+            .map(|(grub_artifacts, _)| calculate_authenticode_hash::<T>(&grub_artifacts.grub_data))
             .collect::<Result<Vec<_>>>()?;
 
         let shim_authenticode_hashes = self
-            .shim
+            .0
             .iter()
-            .map(|bytes| calculate_authenticode_hash::<T>(bytes))
+            .map(|(grub_artifacts, _)| calculate_authenticode_hash::<T>(&grub_artifacts.shim_data))
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(BootComponentsHashValue {
-            kernel_cmdline_hash,
-            kernel_hash,
-            initrd_hash,
+        Ok(BootComponentsHashValues {
+            kernel_cmdline_hashs,
+            kernel_hashs,
+            initrd_hashs,
             grub_authenticode_hashes,
             shim_authenticode_hashes,
         })
@@ -87,10 +92,10 @@ impl MeasurementedBootComponents {
 
 /// Structure to hold kernel and initrd information
 #[derive(Debug, Clone)]
-pub struct BootComponentsHashValue {
-    pub kernel_cmdline_hash: String,
-    pub kernel_hash: String,
-    pub initrd_hash: String,
+pub struct BootComponentsHashValues {
+    pub kernel_cmdline_hashs: Vec<String>,
+    pub kernel_hashs: Vec<String>,
+    pub initrd_hashs: Vec<String>,
     pub grub_authenticode_hashes: Vec<String>,
     pub shim_authenticode_hashes: Vec<String>,
 }
@@ -101,12 +106,80 @@ pub trait FdeDisk: Send + Sync {
 
     async fn load_metadata(&self) -> Result<Metadata>;
 
-    async fn get_boot_measurement(&self) -> Result<MeasurementedBootComponents> {
-        // Get the saved entry from GRUB environment
-        let grub_env = self.get_grub_env().await?;
+    async fn get_boot_components(&self) -> Result<MeasurementedBootComponents> {
+        let mut components = vec![];
 
+        tracing::debug!("Try to load grub.cfg file from BOOT partition");
+        let global_grub_env = match self.load_global_grub_env_file().await {
+            Ok(v) => Some(v),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "No grub.cfg file found in BOOT partition, fallback to search grub.cfg file from EFI partition"
+                );
+                None
+            }
+        };
+
+        tracing::debug!("Try to load grubenv file from BOOT partition");
+        let global_grub_cfg = match self.load_global_grub_cfg_file().await {
+            Ok(v) => Some(v),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "No grubenv file found in BOOT partition, fallback to search grubenv file from EFI partition"
+                );
+                None
+            }
+        };
+
+        let grub_artifacts = self.load_grub_artifacts().await?;
+
+        for grub_artifact in grub_artifacts {
+            let Some(grub_env) = global_grub_env
+                .as_deref()
+                .or(grub_artifact.grub_env.as_deref())
+            else {
+                tracing::warn!(
+                    dir = ?grub_artifact.efi_grub_dir,
+                    "No grubenv file found, skip this grub directory"
+                );
+                continue;
+            };
+
+            let Some(grub_cfg) = global_grub_cfg
+                .as_deref()
+                .or(grub_artifact.grub_cfg.as_deref())
+            else {
+                tracing::warn!(
+                    dir = ?grub_artifact.efi_grub_dir,
+                    "No grub.cfg file found, skip this grub directory"
+                );
+                continue;
+            };
+
+            let grub_vars = self.parse_grub_env_vars(grub_env, grub_cfg).await?;
+
+            let kernel_artifacts = self.load_kernel_artifacts(&grub_vars, grub_cfg).await?;
+            components.push((grub_artifact, kernel_artifacts))
+        }
+
+        if components.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Failed to calculate reference value for any GRUB components"
+            ));
+        }
+
+        Ok(MeasurementedBootComponents(components))
+    }
+
+    async fn parse_grub_env_vars(
+        &self,
+        grub_env: &str,
+        grub_cfg: &str,
+    ) -> Result<HashMap<String, String>> {
         // Parse GRUB environment variables
-        let mut grub_vars = std::collections::HashMap::new();
+        let mut grub_vars = HashMap::new();
         for line in grub_env.lines() {
             if let Some(eq_pos) = line.find('=') {
                 let key = &line[..eq_pos];
@@ -125,9 +198,8 @@ pub trait FdeDisk: Send + Sync {
 
         // Get the GRUB config content to find kernelopts if not in grubenv
         if !grub_vars.contains_key("kernelopts") {
-            let grub_cfg_content = self.get_grub_config().await?;
             // Look for kernelopts definition in the GRUB config
-            for line in grub_cfg_content.lines() {
+            for line in grub_cfg.lines() {
                 if line.contains("set kernelopts=") {
                     if let Some(opts) = line.strip_prefix("set kernelopts=") {
                         let opts_value = opts.trim().trim_matches('"').to_string();
@@ -138,7 +210,7 @@ pub trait FdeDisk: Send + Sync {
             }
 
             // If still not found, look for fallback kernelopts definition
-            let lines: Vec<&str> = grub_cfg_content.lines().collect();
+            let lines: Vec<&str> = grub_cfg.lines().collect();
             for i in 0..lines.len() {
                 if lines[i].contains("if [ -z \\\"${kernelopts}\\\" ]; then") {
                     // Look for the next line with set kernelopts
@@ -156,51 +228,14 @@ pub trait FdeDisk: Send + Sync {
             }
         }
 
-        self.process_boot_measurement(&grub_vars).await
+        Ok(grub_vars)
     }
 
-    /// Get GRUB environment variables
-    async fn get_grub_env(&self) -> Result<String>;
-
-    /// Get GRUB configuration file content
-    async fn get_grub_config(&self) -> Result<String> {
-        match self
-            .read_file_on_disk_to_string(Path::new("/boot/grub2/grub.cfg"))
-            .await
-        {
-            Ok(content) => Ok(content),
-            Err(e) => {
-                tracing::warn!(
-                    error=?e,
-                    "Failed to read GRUB config file at /boot/grub2/grub.cfg"
-                );
-
-                // Try alternative path
-                match self
-                    .read_file_on_disk_to_string(Path::new("/boot/efi/EFI/alinux/grub.cfg"))
-                    .await
-                {
-                    Ok(content) => Ok(content),
-                    Err(e) => {
-                        tracing::warn!(
-                            error=?e,
-                            "Failed to read GRUB config file at /boot/efi/EFI/alinux/grub.cfg"
-                        );
-                        Err(e).context("Failed to read GRUB config file")
-                    }
-                }
-            }
-        }
-    }
-
-    async fn process_boot_measurement(
+    async fn load_from_loader_entry_file(
         &self,
-        grub_vars: &std::collections::HashMap<String, String>,
-    ) -> Result<MeasurementedBootComponents> {
-        let saved_entry = grub_vars
-            .get("saved_entry")
-            .ok_or_else(|| anyhow::anyhow!("saved_entry not found in GRUB environment"))?;
-
+        saved_entry: &str,
+        grub_vars: &HashMap<String, String>,
+    ) -> Result<(PathBuf, PathBuf, String)> {
         // Read the corresponding loader entry file
         let entry_content = {
             let entry_path = format!("/boot/loader/entries/{}.conf", saved_entry);
@@ -257,22 +292,131 @@ pub trait FdeDisk: Send + Sync {
             initrd_path = initrd_path[..space_pos].to_string();
         }
 
-        // Make kernel path absolute if needed
-        if !kernel_path.is_empty() {
-            if kernel_path.starts_with('/') {
-                // Already absolute
-            } else {
-                kernel_path = format!("/boot/{}", kernel_path);
+        Ok((
+            PathBuf::from(kernel_path),
+            PathBuf::from(initrd_path),
+            cmdline,
+        ))
+    }
+
+    async fn load_from_grub_cfg(
+        &self,
+        saved_entry: &str,
+        grub_cfg: &str,
+    ) -> Result<(PathBuf, PathBuf, String)> {
+        // Find the menuentry that matches the saved_entry
+        let mut in_target_entry = false;
+        let mut kernel_line = None;
+        let mut initrd_line = None;
+
+        for line in grub_cfg.lines() {
+            let line = line.trim();
+
+            // Check if we're entering the target menuentry
+            if line.starts_with("menuentry") && line.contains(saved_entry) {
+                in_target_entry = true;
+                continue;
+            }
+
+            // Check if we're leaving the current menuentry
+            if in_target_entry && line == "}" {
+                break;
+            }
+
+            // Process lines within the target menuentry
+            if in_target_entry {
+                if line.starts_with("linuxefi") {
+                    kernel_line = Some(line.to_string());
+                } else if line.starts_with("initrdefi") {
+                    initrd_line = Some(line.to_string());
+                }
             }
         }
 
-        // Make initrd path absolute if needed
-        if !initrd_path.is_empty() {
-            if initrd_path.starts_with('/') {
-                // Already absolute
-            } else {
-                initrd_path = format!("/boot/{}", initrd_path);
+        // Extract kernel path and additional parameters
+        let mut kernel_path = String::new();
+        let mut cmdline = String::new();
+
+        if let Some(kernel_line) = kernel_line {
+            let parts: Vec<&str> = kernel_line.splitn(2, ' ').collect();
+            if parts.len() >= 2 {
+                kernel_path = parts[1].to_string();
+
+                // Extract command line parameters if present
+                if let Some(space_pos) = kernel_path.find(' ') {
+                    cmdline = kernel_path[space_pos + 1..].to_string();
+                    kernel_path = kernel_path[..space_pos].to_string();
+                }
             }
+        }
+
+        if let Some(path) = kernel_path.strip_prefix('/') {
+            if !kernel_path.starts_with("/boot") {
+                kernel_path = format!("/boot/{path}");
+            }
+        }
+
+        // Extract initrd path
+        let mut initrd_path = String::new();
+        if let Some(initrd_line) = initrd_line {
+            let parts: Vec<&str> = initrd_line.splitn(2, ' ').collect();
+            if parts.len() >= 2 {
+                initrd_path = parts[1].to_string();
+                // Clean up if there's extra content
+                if let Some(space_pos) = initrd_path.find(' ') {
+                    initrd_path = initrd_path[..space_pos].to_string();
+                }
+            }
+        }
+
+        if let Some(path) = initrd_path.strip_prefix('/') {
+            if !initrd_path.starts_with("/boot") {
+                initrd_path = format!("/boot/{path}");
+            }
+        }
+
+        cmdline = cmdline.replace("  ", " ");
+        cmdline = cmdline.trim().to_string();
+
+        Ok((
+            PathBuf::from(kernel_path),
+            PathBuf::from(initrd_path),
+            cmdline,
+        ))
+    }
+
+    async fn load_kernel_artifacts(
+        &self,
+        grub_vars: &HashMap<String, String>,
+        grub_cfg: &str,
+    ) -> Result<KernelArtifacts> {
+        let saved_entry = grub_vars
+            .get("saved_entry")
+            .ok_or_else(|| anyhow::anyhow!("saved_entry not found in GRUB environment"))?;
+
+        let (mut kernel_path, mut initrd_path, cmdline) = match self
+            .load_from_loader_entry_file(saved_entry, grub_vars)
+            .await
+        {
+            Ok(v) => v,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "Failed to parse kernel artifacts info from loader entry file, fallback to parse from grub.cfg"
+                );
+
+                self.load_from_grub_cfg(saved_entry, grub_cfg).await?
+            }
+        };
+
+        // Make kernel path absolute if needed
+        if kernel_path.is_relative() {
+            kernel_path = Path::new("/boot").join(kernel_path);
+        }
+
+        // Make initrd path absolute if needed
+        if initrd_path.is_relative() {
+            initrd_path = Path::new("/boot").join(initrd_path);
         }
 
         let kernel_path = Path::new(&kernel_path);
@@ -286,7 +430,7 @@ pub trait FdeDisk: Send + Sync {
         let initrd = self
             .read_file_on_disk(Path::new(&initrd_path))
             .await
-            .with_context(|| format!("Failed to read initrd file at {}", initrd_path))?;
+            .with_context(|| format!("Failed to read initrd file at {:?}", initrd_path))?;
 
         // Construct full kernel command line with inferred device identifier prefix
         let full_kernel_cmdline = {
@@ -330,18 +474,10 @@ pub trait FdeDisk: Send + Sync {
             )
         };
 
-        // Try to read GRUB and SHIM for measurement
-        let (grub, shim) = self
-            .read_grub_and_shim()
-            .await
-            .context("Failed to read GRUB and SHIM binaries")?;
-
-        Ok(MeasurementedBootComponents {
+        Ok(KernelArtifacts {
             kernel_cmdline: full_kernel_cmdline,
             kernel,
             initrd,
-            grub,
-            shim,
         })
     }
 
@@ -409,46 +545,146 @@ pub trait FdeDisk: Send + Sync {
             .and_then(|v| anyhow::Ok(String::from_utf8(v)?))
     }
 
+    fn check_file_exist_on_disk(&self, path: &Path) -> Result<bool>;
+
     async fn read_file_on_disk(&self, path: &Path) -> Result<Vec<u8>>;
 
-    /// Read GRUB and SHIM EFI binaries
-    async fn read_grub_and_shim(&self) -> Result<(HashSet<Vec<u8>>, HashSet<Vec<u8>>)> {
-        // Walk and search for grubx64.efi and shimx64.efi from /boot/efi
+    /// Read grub related artifacts
+    ///
+    /// Find directories containing grubx64.efi, then read all required files from that same directory.
+    async fn load_grub_artifacts(&self) -> Result<Vec<GrubArtifacts>> {
         let efi_part_root_dir = self.get_efi_part_root_dir();
+        let mut artifacts_list = vec![];
 
-        let mut grub_data = HashSet::new();
-        let mut shim_data = HashSet::new();
+        let mut entries = WalkDir::new(efi_part_root_dir);
+        let mut grub_dirs = HashSet::new();
 
-        let mut entries = async_walkdir::WalkDir::new(efi_part_root_dir);
-
+        // Step 1: Collect all directories containing 'grubx64.efi'
         while let Some(Ok(entry)) = entries.next().await {
-            if matches!(entry.file_type().await.map(|e| e.is_file()), Ok(true)) {
+            if entry.file_type().await.map_or(false, |ft| ft.is_file()) {
                 let file_name = entry.file_name().to_string_lossy().to_lowercase();
-
                 if file_name == "grubx64.efi" {
-                    tracing::debug!(file=?entry.path(), "Found grubx64.efi");
-                    let mut buf = vec![];
-                    let mut file = File::open(entry.path()).await?;
-                    file.read_to_end(&mut buf).await?;
-                    let _ = grub_data.insert(buf);
-                } else if file_name == "shimx64.efi" {
-                    tracing::debug!(file=?entry.path(), "Found shimx64.efi");
-                    let mut buf = vec![];
-                    let mut file = File::open(entry.path()).await?;
-                    file.read_to_end(&mut buf).await?;
-                    let _ = shim_data.insert(buf);
+                    let parent_dir = entry.path().parent().map(|p| p.to_path_buf());
+                    if let Some(dir) = parent_dir {
+                        tracing::debug!(dir = ?dir, "Found grubx64.efi, will scan this directory");
+                        grub_dirs.insert(dir);
+                    }
                 }
             }
         }
 
-        match (grub_data.is_empty(), shim_data.is_empty()) {
-            (false, false) => Ok((grub_data, shim_data)),
-            (true, _) => bail!("GRUB EFI binary (grubx64.efi) not found in /boot/efi"),
-            (_, true) => bail!("SHIM EFI binary (shimx64.efi) not found in /boot/efi"),
+        if grub_dirs.is_empty() {
+            bail!("No grubx64.efi found under {}", efi_part_root_dir.display());
         }
+
+        // Step 2: For each such directory, try to read all required artifacts
+        for dir in grub_dirs {
+            let mut grub_data = None;
+            let mut shim_data = None;
+            let mut grub_env = None;
+            let mut grub_cfg = None;
+
+            // List all files in this GRUB directory
+            let mut dir_entries = WalkDir::new(&dir);
+            while let Some(Ok(inner_entry)) = dir_entries.next().await {
+                if !inner_entry
+                    .file_type()
+                    .await
+                    .map_or(false, |ft| ft.is_file())
+                {
+                    continue;
+                }
+
+                let file_path = inner_entry.path();
+                let file_name = match file_path.file_name() {
+                    Some(file_name) => file_name.to_string_lossy().to_lowercase(),
+                    None => continue,
+                };
+
+                match file_name.as_str() {
+                    "grubx64.efi" => {
+                        tracing::debug!(file = ?file_path, "Reading grubx64.efi");
+                        let mut buf = Vec::new();
+                        File::open(file_path).await?.read_to_end(&mut buf).await?;
+                        grub_data = Some(buf);
+                    }
+                    "shimx64.efi" | "shim.efi" => {
+                        tracing::debug!(file = ?file_path, "Reading grub shim");
+                        let mut buf = Vec::new();
+                        File::open(file_path).await?.read_to_end(&mut buf).await?;
+                        shim_data = Some(buf);
+                    }
+                    "grubenv" => {
+                        tracing::debug!(file = ?file_path, "Reading grubenv");
+                        grub_env = Some(tokio::fs::read_to_string(file_path).await?);
+                    }
+                    "grub.cfg" => {
+                        tracing::debug!(file = ?file_path, "Reading grub.cfg");
+                        grub_cfg = Some(tokio::fs::read_to_string(file_path).await?);
+                    }
+                    _ => {}
+                }
+            }
+
+            // Validate required binaries are present
+            let Some(grub_data) = grub_data else {
+                tracing::warn!(dir = ?dir, "Missing grubx64.efi in directory, skipping");
+                continue;
+            };
+
+            let Some(shim_data) = shim_data else {
+                tracing::warn!(dir = ?dir, "Missing shimx64.efi in directory, skipping");
+                continue;
+            };
+
+            artifacts_list.push(GrubArtifacts {
+                efi_grub_dir: dir,
+                grub_data,
+                shim_data,
+                grub_env,
+                grub_cfg,
+            });
+        }
+
+        if artifacts_list.is_empty() {
+            bail!("Found grubx64.efi directories but failed to load complete artifacts from any");
+        }
+
+        Ok(artifacts_list)
     }
 
     fn get_efi_part_root_dir(&self) -> &Path;
+
+    async fn load_global_grub_env_file(&self) -> Result<String>;
+
+    async fn load_global_grub_cfg_file(&self) -> Result<String> {
+        let grub_cfg_path = Path::new("/boot/grub2/grub.cfg");
+
+        // Read GRUB environment
+        let grub_cfg_content = self
+            .read_file_on_disk(grub_cfg_path)
+            .await
+            .with_context(|| format!("Failed to read GRUB config file at {:?}", grub_cfg_path))?;
+
+        Ok(String::from_utf8(grub_cfg_content)?)
+    }
+}
+
+/// Represents all GRUB-related artifacts found in the same directory as grubx64.efi.
+#[derive(Debug)]
+pub struct GrubArtifacts {
+    pub efi_grub_dir: PathBuf,
+    pub grub_data: Vec<u8>,
+    pub shim_data: Vec<u8>,
+    pub grub_env: Option<String>,
+    pub grub_cfg: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct KernelArtifacts {
+    pub kernel_cmdline: String,
+    pub kernel: Vec<u8>,
+    pub initrd: Vec<u8>,
 }
 
 const CRYPTPILOT_CONFIG_DIR_UNTRUSTED_IN_BOOT: &str = "cryptpilot/config";
@@ -524,13 +760,17 @@ impl FdeDisk for OnCurrentSystemFdeDisk {
         load_metadata_from_file(&Path::new("/boot").join(METADATA_PATH_IN_BOOT)).await
     }
 
-    async fn get_grub_env(&self) -> Result<String> {
+    async fn load_global_grub_env_file(&self) -> Result<String> {
         // Get the saved entry from GRUB environment
         let stdout = Command::new("grub2-editenv").arg("list").run().await?;
 
         let grub_env = String::from_utf8(stdout)?;
 
         Ok(grub_env)
+    }
+
+    fn check_file_exist_on_disk(&self, path: &Path) -> Result<bool> {
+        Ok(path.exists())
     }
 
     async fn read_file_on_disk(&self, path: &Path) -> Result<Vec<u8>> {
@@ -758,9 +998,13 @@ impl OnExternalFdeDisk {
                 let vmlinuz_files = mount_point.join("vmlinuz-*");
 
                 let has_efi = fs::metadata(&efi_dir).await.is_ok();
-                let has_vmlinuz = glob::glob(vmlinuz_files.to_str().unwrap())?
-                    .next()
-                    .is_some();
+                let has_vmlinuz = glob::glob(
+                    vmlinuz_files
+                        .to_str()
+                        .with_context(|| format!("not a valid string: {vmlinuz_files:?}"))?,
+                )?
+                .next()
+                .is_some();
 
                 Ok::<_, anyhow::Error>(has_efi && !has_vmlinuz)
             }
@@ -809,22 +1053,22 @@ impl FdeDisk for OnExternalFdeDisk {
         load_metadata_from_file(&metadata_file).await
     }
 
-    async fn get_grub_env(&self) -> Result<String> {
+    async fn load_global_grub_env_file(&self) -> Result<String> {
         // Try to find the GRUB environment file
-        let mount_point = self.boot_dev_tmp_mount.mount_point();
-        let mut grub_env_path = mount_point.join("grubenv");
+        let mut grub_env_path = Path::new("/boot/grubenv");
 
         // If grubenv doesn't exist, try grub/grubenv
-        if !grub_env_path.exists() {
-            grub_env_path = mount_point.join("grub/grubenv");
+        if !matches!(self.check_file_exist_on_disk(grub_env_path), Ok(true)) {
+            grub_env_path = Path::new("/boot/grub/grubenv");
         }
 
-        if !grub_env_path.exists() {
-            grub_env_path = mount_point.join("grub2/grubenv");
+        if !matches!(self.check_file_exist_on_disk(grub_env_path), Ok(true)) {
+            grub_env_path = Path::new("/boot/grub2/grubenv");
         }
 
         // Read GRUB environment
-        let grub_env_content = tokio::fs::read_to_string(&grub_env_path)
+        let grub_env_content = self
+            .read_file_on_disk(grub_env_path)
             .await
             .with_context(|| {
                 format!(
@@ -833,19 +1077,55 @@ impl FdeDisk for OnExternalFdeDisk {
                 )
             })?;
 
-        Ok(grub_env_content)
+        Ok(String::from_utf8(grub_env_content)?)
     }
 
-    async fn read_file_on_disk(&self, path: &Path) -> Result<Vec<u8>> {
+    fn check_file_exist_on_disk(&self, path: &Path) -> Result<bool> {
         if !path.starts_with("/boot") {
             bail!("The path must be start with /boot")
         }
-        let path = self
-            .boot_dev_tmp_mount
-            .mount_point()
-            .join(path.strip_prefix("/boot")?);
+        let real_path = if path.starts_with("/boot/efi") {
+            self.efi_dev_tmp_mount
+                .mount_point()
+                .join(path.strip_prefix("/boot/efi")?)
+        } else {
+            self.boot_dev_tmp_mount
+                .mount_point()
+                .join(path.strip_prefix("/boot")?)
+        };
 
-        let mut file = File::open(path).await?;
+        Ok(real_path.exists())
+    }
+
+    async fn read_file_on_disk(&self, path: &Path) -> Result<Vec<u8>> {
+        let real_path = {
+            let mut path = path.to_path_buf();
+            loop {
+                if !path.starts_with("/boot") {
+                    bail!("The path must be start with /boot but got {path:?}")
+                }
+
+                let real_path = if path.starts_with("/boot/efi") {
+                    self.efi_dev_tmp_mount
+                        .mount_point()
+                        .join(path.strip_prefix("/boot/efi")?)
+                } else {
+                    self.boot_dev_tmp_mount
+                        .mount_point()
+                        .join(path.strip_prefix("/boot")?)
+                };
+
+                if real_path.is_symlink() {
+                    let link = real_path.read_link()?;
+                    path = path.join(link);
+                    continue;
+                }
+
+                break real_path;
+            }
+        };
+
+        let mut file = File::open(real_path).await?;
         let mut buf = vec![];
         file.read_to_end(&mut buf).await?;
         Ok(buf)
