@@ -19,6 +19,7 @@ install() {
         inst_multiple vgchange lvcreate
         inst_multiple blkid lsblk findmnt
         inst_multiple dd tail grep sort
+        inst_multiple awk sed pvs growpart sfdisk lvm lvextend mountpoint
         # required by 'file' command
         inst_multiple file
         inst_multiple modprobe
@@ -50,6 +51,12 @@ install() {
         inst_simple "$moddir"/cryptpilot-fde-after-sysroot.service /usr/lib/systemd/system/cryptpilot-fde-after-sysroot.service
         systemctl --root "$initdir" enable cryptpilot-fde-after-sysroot.service
         systemctl --root "$initdir" enable cryptpilot-fde-before-sysroot.service
+
+        # Install essential udev rules
+        inst_simple "${dracutsysrootdir:-}"/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+
+        # Install lvm config required by cryptpilot
+        inst_simple "$moddir"/lvm.conf /usr/lib/cryptpilot/lvm/lvm.conf
 
         set +u
         set +e

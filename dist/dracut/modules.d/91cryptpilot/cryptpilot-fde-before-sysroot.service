@@ -17,3 +17,4 @@ StandardError=journal+console
 
 [Install]
 RequiredBy=initrd-root-device.target
+RequiredBy=initrd-root-fs.target

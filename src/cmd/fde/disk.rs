@@ -618,7 +618,7 @@ impl OnExternalFdeDisk {
     }
 
     pub async fn detect_boot_part(hint_device: Option<&Path>) -> Result<PathBuf> {
-        if hint_device.is_none() {
+        if hint_device.is_none() && Command::new("mountpoint").arg("/boot").run().await.is_ok() {
             // 1. Execute 'findmnt-n-o SOURCE /boot' to return the device path where '/boot' is mounted
             let mut command = Command::new("findmnt");
             command.args(["-n", "-o", "SOURCE", "/boot"]);
@@ -630,8 +630,11 @@ impl OnExternalFdeDisk {
                         return Ok(PathBuf::from(stdout_str));
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("findmnt failed: {}", e);
+                Err(error) => {
+                    tracing::warn!(
+                        ?error,
+                        "Failed to find boot partition from /boot mount point"
+                    );
                 }
             }
         }

@@ -393,7 +393,7 @@ step::extract_boot_part_from_rootfs() {
         # Use sort -V for version comparison
         if printf '%s\n' "1.47.0" "$VERSION" | sort -V | head -n1 | grep -q '1.47.0'; then
             echo "e2fsprogs version $VERSION >= 1.47.0, proceeding..."
-            yes | mkfs.ext4 -F -O  ^orphan_file,^metadata_csum_seed "$boot_file_path"
+            yes | mkfs.ext4 -F -O ^orphan_file,^metadata_csum_seed "$boot_file_path"
         else
             echo "e2fsprogs version $VERSION < 1.47.0, skipping advanced features."
             # Fallback to a standard format command
@@ -436,9 +436,16 @@ disk::install_rpm_on_rootfs() {
     shift
     local packages=("$@")
 
-    packages+=("cryptpilot")
-    packages+=("attestation-agent")
-    packages+=("confidential-data-hub")
+    # Define the essential packages
+    local essential_packages=(
+        "yum-plugin-versionlock"
+        "cryptpilot"
+        "attestation-agent"
+        "confidential-data-hub"
+    )
+
+    # Add the essential packages to the installation list
+    packages+=("${essential_packages[@]}")
 
     local copied_rpms=()  # Will store the local paths inside chroot to the copied .rpm files
     local all_packages=() # Will be used as arguments to yum install
@@ -459,20 +466,23 @@ disk::install_rpm_on_rootfs() {
 
     # Install all packages using yum inside the chroot
     chroot "${rootfs_mount_point}" rpmdb --rebuilddb --dbpath /var/lib/rpm
-    chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy}    \
-                                                ${https_proxy:+https_proxy=$https_proxy} \
-                                                ${ftp_proxy:+ftp_proxy=$ftp_proxy}       \
-                                                ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
-                                                ${all_proxy:+all_proxy=$all_proxy}       \
-                                                ${no_proxy:+no_proxy=$no_proxy}          \
-                                                yum install -y "${all_packages[@]}"
+    chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+        ${https_proxy:+https_proxy=$https_proxy} \
+        ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+        ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+        ${all_proxy:+all_proxy=$all_proxy} \
+        ${no_proxy:+no_proxy=$no_proxy} \
+        yum install -y "${all_packages[@]}"
+
+    # Lock all version of the essential packages
+    chroot "${rootfs_mount_point}" yum --cacheonly versionlock "${essential_packages[@]}"
+
     chroot "${rootfs_mount_point}" yum clean all
 
     # Remove the copied .rpm files from the chroot after installation
     for rpm in "${copied_rpms[@]}"; do
         rm -f "${rootfs_mount_point}${rpm}"
     done
-
 }
 
 step:update_rootfs_and_initrd() {
@@ -544,29 +554,6 @@ step:update_rootfs_and_initrd() {
         local boot_mount_insert_line_number
         boot_mount_insert_line_number=$((root_mount_line_number + 1))
         sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
-    fi
-
-    ## replace the root mount device with /dev/mapper/rootfs
-    local root_mount_line_content
-    root_mount_line_content=$(grep -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1)
-    local root_mount_device
-    root_mount_device=$(echo "${root_mount_line_content}" | awk '{print $1}')
-    sed -i "s|^${root_mount_device}\([[:space:]]\+\)/\([[:space:]]\+\)|/dev/mapper/rootfs\1/\2|" "${rootfs_mount_point}/etc/fstab"
-
-    # Ensure GRUB always uses /dev/mapper/rootfs as root device
-    log::info "Configuring GRUB to always use /dev/mapper/rootfs as root device"
-    local grub_config_file="${rootfs_mount_point}/etc/default/grub"
-    if [ -f "$grub_config_file" ]; then
-        # Remove any existing root= parameter from GRUB_CMDLINE_LINUX
-        sed -i 's/root=[^[:space:]]*//g' "$grub_config_file"
-
-        # Force to use /dev/mapper/rootfs
-        # https://wiki.gentoo.org/wiki/GRUB/Configuration_variables
-        echo 'GRUB_DEVICE="/dev/mapper/rootfs"' >>"$grub_config_file"
-        echo 'GRUB_DISABLE_LINUX_UUID=true' >>"$grub_config_file"
-    else
-        log::error "Grub config file ${grub_config_file} not exist"
-        return 1
     fi
 
     # update initrd
@@ -687,7 +674,7 @@ step::shrink_and_extract_rootfs_part() {
     rootfs_file_path="${workdir}/rootfs.img"
     log::info "Extract rootfs to file on disk ${rootfs_file_path}"
     dd status=progress if="${rootfs_orig_part}" of="${rootfs_file_path}" "count=${after_shrink_size_in_bytes}" iflag=count_bytes bs=256M
-    if [ "${clean_freed_space}" = true ]; then
+    if [ "${wipe_freed_space}" = true ]; then
         log::info "Wipe rootfs partition on device ${before_shrink_size_in_bytes} bytes"
         dd status=progress if=/dev/zero of="${rootfs_orig_part}" count="${before_shrink_size_in_bytes}" iflag=count_bytes bs=64M # Clean the freed space with zero, so that the qemu-img convert would generate smaller image
     fi
@@ -833,7 +820,7 @@ main() {
     local rootfs_orig_part
     local rootfs_orig_part_num
     local rootfs_orig_part_exist=false
-    local clean_freed_space=false
+    local wipe_freed_space=false
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -873,8 +860,8 @@ main() {
             BOOT_PART_SIZE=("$2")
             shift 2
             ;;
-        --clean-freed-space)
-            clean_freed_space=true
+        --wipe-freed-space)
+            wipe_freed_space=true
             shift 1
             ;;
         -h | --help)
@@ -1044,12 +1031,12 @@ main() {
     #
     # 5. Create a boot partition
     #
-    echo "[ 5 ] Creating boot partition"
+    log::step "[ 5 ] Creating boot partition"
     if [ "$boot_part_exist" = "false" ]; then
         local boot_part_end_sector
         step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
     else
-        log::step "Skipped since boot partition already exist"
+        log::info "Skipped since boot partition already exist"
     fi
 
     #
