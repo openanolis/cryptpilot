@@ -64,8 +64,13 @@ impl super::super::Command for ShowReferenceValueCommand {
             "kernel_cmdline".to_string(),
             boot_components
                 .0
-                .into_iter()
-                .map(|(_, kernel_artifacts)| kernel_artifacts.kernel_cmdline)
+                .iter()
+                .flat_map(|(_, kernel_artifacts)| {
+                    kernel_artifacts
+                        .kernel_cmdlines
+                        .iter()
+                        .map(|cmdline| format!("grub_kernel_cmdline {}", cmdline))
+                })
                 .collect::<Vec<_>>(),
         );
 

@@ -41,10 +41,12 @@ impl MeasurementedBootComponents {
         let kernel_cmdline_hashs = self
             .0
             .iter()
-            .map(|(_, kernel_artifacts)| {
-                let mut hasher = T::new();
-                Digest::update(&mut hasher, &kernel_artifacts.kernel_cmdline);
-                hex::encode(hasher.finalize())
+            .flat_map(|(_, kernel_artifacts)| {
+                kernel_artifacts.kernel_cmdlines.iter().map(|cmdline| {
+                    let mut hasher = T::new();
+                    Digest::update(&mut hasher, cmdline);
+                    hex::encode(hasher.finalize())
+                })
             })
             .collect::<Vec<_>>();
 
@@ -432,8 +434,19 @@ pub trait FdeDisk: Send + Sync {
             .await
             .with_context(|| format!("Failed to read initrd file at {:?}", initrd_path))?;
 
-        // Construct full kernel command line with inferred device identifier prefix
-        let full_kernel_cmdline = {
+        // Generate a kernel command line that omits the device identifier prefix (e.g., "/vmlinuz-5.10.134-19.1.al8.x86_64 root=UUID=2576d86b-4895-4922-b9d9-7c89dec6caa9 ro crashkernel=auto console=ttyS0,115200 nokaslr").
+        // This format is typically used when GRUB sets the root device via `--set=root`, allowing the kernel path to be relative to the boot partition.
+        let full_kernel_cmdline_shorter = {
+            let kernel_path_string = kernel_path.to_string_lossy();
+            let kernel_path_in_boot_dir = kernel_path_string
+                .strip_prefix("/boot")
+                .unwrap_or(&kernel_path_string);
+            format!("{} {}", kernel_path_in_boot_dir, cmdline)
+        };
+
+        // Construct a full kernel command line that includes an inferred device identifier prefix (e.g., "(hd0,gpt2)/vmlinuz-... root=...").
+        // This format is used when GRUB does not rely on `--set=root` and instead embeds the full device path to locate the kernel.
+        let full_kernel_cmdline_with_device_identifier = {
             // Infer device identifier from current boot partition device path
             let device_identifier = {
                 // Detect partition table type
@@ -475,7 +488,10 @@ pub trait FdeDisk: Send + Sync {
         };
 
         Ok(KernelArtifacts {
-            kernel_cmdline: full_kernel_cmdline,
+            kernel_cmdlines: vec![
+                full_kernel_cmdline_shorter,
+                full_kernel_cmdline_with_device_identifier,
+            ],
             kernel,
             initrd,
         })
@@ -671,19 +687,40 @@ pub trait FdeDisk: Send + Sync {
 }
 
 /// Represents all GRUB-related artifacts found in the same directory as grubx64.efi.
+/// This includes the GRUB binary, configuration files, associated shim binary, and environment data.
+/// These artifacts are typically used during the UEFI boot process to load the operating system kernel.
 #[derive(Debug)]
 pub struct GrubArtifacts {
+    /// The directory path containing the GRUB EFI binary (e.g., containing grubx64.efi).
     pub efi_grub_dir: PathBuf,
+
+    /// Raw byte content of the GRUB binary (usually grubx64.efi).
     pub grub_data: Vec<u8>,
+
+    /// Raw byte content of the Shim binary (usually shimx64.efi), used for secure boot.
     pub shim_data: Vec<u8>,
+
+    /// Optional contents of the GRUB environment block file (e.g., grubenv).
+    /// This file may store persistent boot variables such as the current boot entry.
     pub grub_env: Option<String>,
+
+    /// Optional contents of the main GRUB configuration file (grub.cfg).
+    /// This file defines menu entries and kernel boot parameters.
     pub grub_cfg: Option<String>,
 }
 
+/// Represents kernel and initrd images along with command line arguments needed to boot the OS.
 #[derive(Debug)]
 pub struct KernelArtifacts {
-    pub kernel_cmdline: String,
+    /// A list of kernel command line arguments passed to the kernel during boot (e.g., root=/dev/sda1 quiet splash).
+    ///
+    /// Each string represents a multiple possible full command line string.
+    pub kernel_cmdlines: Vec<String>,
+
+    /// Raw byte content of the kernel image (e.g., vmlinuz).
     pub kernel: Vec<u8>,
+
+    /// Raw byte content of the initial ramdisk (initrd or initramfs), used during early boot.
     pub initrd: Vec<u8>,
 }
 
