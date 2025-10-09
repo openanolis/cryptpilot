@@ -47,7 +47,7 @@ pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType
         }
     };
 
-    cmd.arg(&dev).arg("-");
+    cmd.arg(&dev).arg("--key-file=-");
 
     cmd.run_with_input(Some(passphrase.as_bytes()))
         .await
