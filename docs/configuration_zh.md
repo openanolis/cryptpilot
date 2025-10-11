@@ -95,12 +95,18 @@ CryptPilot使用远程证明（Remote Attestation）技术来实现对根文件�
 
 在进入系统后，可以通过`/run/attestation-agent/eventlog`检查CryptPilot记录的EventLog：
 
+> [!NOTE]
+> Eventlog的格式为二进制文件，请勿随意修改防止完整性校验不一致。我们可以从二进制文件中查看到包含Cryptpilot记录项的部分。
+
 ```txt
 # cat /run/attestation-agent/eventlog
-INIT sha384/000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+...
 cryptpilot.alibabacloud.com load_config b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877
+...
 cryptpilot.alibabacloud.com fde_rootfs_hash a3f73f5b995e7d8915c998d9f1e56b0e063a6e20c2bbb512e88e8fbc4e8f2965
+...
 cryptpilot.alibabacloud.com initrd_switch_root {}
+...
 ```
 
 如上所示，在CryptPilot启动过程中，共会记录三个EventLog：
