@@ -57,7 +57,7 @@ impl super::super::Command for ShowReferenceValueCommand {
         let boot_components = fde_disk.get_boot_components().await?;
         tracing::debug!("Starting to calculate reference values for boot components");
 
-        inseart_with_hash::<sha2::Sha384>(&boot_components, &mut map, "SHA384")?;
+        inseart_with_hash::<sha2::Sha384>(&boot_components, &mut map, "SHA-384")?;
         inseart_with_hash::<sm3::Sm3>(&boot_components, &mut map, "SM3")?;
 
         map.insert(
