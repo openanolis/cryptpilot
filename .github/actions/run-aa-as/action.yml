@@ -1,0 +1,34 @@
+name: 'Run Attestation Agent and Attestation Service'
+runs:
+  using: "composite"
+  steps:
+    - name: Prepare attestation-agent
+      shell: bash
+      run: |
+        set -e
+        set -x
+
+        yum install -y attestation-agent
+        RUST_LOG=debug attestation-agent --attestation_sock unix:///run/confidential-containers/attestation-agent/attestation-agent.sock &
+
+    - name: Prepare attestation-service
+      shell: bash
+      run: |
+        set -e
+        set -x
+
+        yum install -y trustee
+
+        # Launch trustee
+        (/usr/bin/rvps --config /etc/trustee/rvps.json --address 127.0.0.1:50003 &) && sleep 1
+        (/usr/bin/grpc-as --socket 0.0.0.0:50004 --config-file /etc/trustee/as-config.json &) && sleep 1
+        (/usr/bin/kbs --config-file /etc/trustee/kbs-config.toml &) && sleep 1
+        (/usr/bin/trustee-gateway --config /etc/trustee/gateway.yml > /tmp/trustee-gateway.log 2>&1 &) && sleep 1
+
+        # Register passphrases
+        mkdir -p /opt/trustee/kbs/repository/default/local-resources/
+        echo -n "AAAaaawewe111" > /opt/trustee/kbs/repository/default/local-resources/volume
+        echo -n "AAAaaawewe222" > /opt/trustee/kbs/repository/default/local-resources/rootfs
+        echo -n "AAAaaawewe333" > /opt/trustee/kbs/repository/default/local-resources/data
+
+
