@@ -1,4 +1,4 @@
-// Taken from https://code.alibaba-inc.com/Trustiflux/guest-components/blob/d7a75398dadea932ceb19c55cfb0f76ae6528d50/attestation-agent/protos/attestation-agent.proto
+// Taken from https://github.com/inclavare-containers/guest-components/blob/d7a75398dadea932ceb19c55cfb0f76ae6528d50/attestation-agent/protos/attestation-agent.proto
 
 syntax = "proto3";
 
