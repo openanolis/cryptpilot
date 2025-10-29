@@ -43,7 +43,9 @@ create-tarball:
 	rm -fr /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/vendor/winapi*/lib/*.lib
 	rm -fr /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/vendor/windows*/lib/*.lib
 
-	rsync -a --exclude target --exclude .git/modules/deps/cryptpilot-envoy ./ /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/src
+	# copy source code to src/
+	git clone --no-hardlinks . /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/src/
+	cd /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/src && git clean -xdf
 
 	tar -czf /tmp/cryptpilot-${VERSION}.tar.gz -C /tmp/cryptpilot-tarball/ cryptpilot-${VERSION}
 
