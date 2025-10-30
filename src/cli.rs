@@ -119,8 +119,8 @@ pub enum FdeSubcommand {
     /// Show claims related to FDE.
     #[command(name = "show-reference-value")]
     ShowReferenceValue {
-        #[clap(long, required = true)]
-        stage: ShowReferenceValueStage,
+        #[clap(long)]
+        stage: Option<ShowReferenceValueStage>,
     },
 
     /// Dump fde config and global config as toml, which can be used in cloud-init user data.

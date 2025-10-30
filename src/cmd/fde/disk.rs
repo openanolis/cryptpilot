@@ -454,8 +454,8 @@ pub trait FdeDisk: Send + Sync {
 
                 // Extract partition number from device path
                 // For example, /dev/sda3 -> (hd0,gpt3) or (hd0,msdos3), /dev/nvme0n1p3 -> (hd0,gpt3) or (hd0,msdos3)
-                let boot_dev = self.get_boot_dev();
-                if let Ok(partition_num) = boot_dev
+                let boot_dir_dev = self.get_boot_dir_dev();
+                if let Ok(partition_num) = boot_dir_dev
                     .to_string_lossy()
                     .chars()
                     .rev()
@@ -472,8 +472,8 @@ pub trait FdeDisk: Send + Sync {
                     }
                 } else {
                     bail!(
-                        "Unable to extract partition number from boot device path: {:?}",
-                        boot_dev
+                        "Unable to extract partition number from device path: {:?}",
+                        boot_dir_dev
                     );
                 }
             };
@@ -500,27 +500,27 @@ pub trait FdeDisk: Send + Sync {
     /// Detect the partition table type of the disk containing /boot
     async fn detect_disk_type(&self) -> Result<PartitionTableType> {
         // Get the disk device (remove partition number)
-        let disk_device = self.get_disk_device(self.get_boot_dev())?;
+        let disk_device = self.get_disk_root_device(self.get_boot_dir_dev())?;
 
         // Read the first sector of the disk to determine partition table type
         self.detect_partition_table_type(&disk_device).await
     }
 
     /// Get the disk device path from a partition device path
-    fn get_disk_device(&self, boot_dev: &Path) -> Result<PathBuf> {
-        let boot_dev_str = boot_dev.to_string_lossy();
+    fn get_disk_root_device(&self, part_dev: &Path) -> Result<PathBuf> {
+        let part_dev_str = part_dev.to_string_lossy();
 
         // Get the disk device (remove partition number)
-        if let Some(pos) = boot_dev_str.rfind(|c: char| c.is_ascii_digit()) {
+        if let Some(pos) = part_dev_str.rfind(|c: char| c.is_ascii_digit()) {
             // Find the last digit and remove everything from there
-            let mut disk = boot_dev_str[..pos].to_string();
+            let mut disk = part_dev_str[..pos].to_string();
             // Handle special case for nvme devices (e.g., /dev/nvme0n1p3 -> /dev/nvme0n1)
             if disk.ends_with('p') {
                 disk.pop(); // Remove the 'p'
             }
             Ok(PathBuf::from(disk))
         } else {
-            Ok(boot_dev.to_path_buf())
+            Ok(part_dev.to_path_buf())
         }
     }
 
@@ -553,7 +553,8 @@ pub trait FdeDisk: Send + Sync {
         Ok(PartitionTableType::Gpt)
     }
 
-    fn get_boot_dev(&self) -> &Path;
+    /// Get the path of block device where /boot is located
+    fn get_boot_dir_dev(&self) -> &Path;
 
     async fn read_file_on_disk_to_string(&self, path: &Path) -> Result<String> {
         self.read_file_on_disk(path)
@@ -817,7 +818,7 @@ impl FdeDisk for OnCurrentSystemFdeDisk {
         Ok(buf)
     }
 
-    fn get_boot_dev(&self) -> &Path {
+    fn get_boot_dir_dev(&self) -> &Path {
         &self.boot_dev
     }
 
@@ -830,11 +831,34 @@ impl FdeDisk for OnCurrentSystemFdeDisk {
 pub struct OnExternalFdeDisk {
     #[allow(unused)]
     nbd_device: Option<NbdDevice>,
-    boot_dev: PathBuf,
-    boot_dev_tmp_mount: TmpMountPoint,
-    #[allow(unused)]
-    efi_dev: PathBuf,
-    efi_dev_tmp_mount: TmpMountPoint,
+    disk_type: ExternalDiskType,
+}
+
+enum ExternalDiskType {
+    /// A normal disk which is not protected by cryptpilot
+    /// The disk mounts:
+    ///     /boot/efi -> efi partition
+    ///     / -> root partition
+    Normal {
+        #[allow(unused)]
+        efi_dev: PathBuf,
+        efi_dev_tmp_mount: TmpMountPoint,
+        root_dev: PathBuf,
+        #[allow(unused)]
+        root_dev_tmp_mount: TmpMountPoint,
+    },
+    /// A disk which is protected by cryptpilot
+    /// The disk mounts:
+    ///     /boot/efi -> efi partition
+    ///     /boot -> boot partition
+    ///     / -> root partition
+    Fde {
+        boot_dev: PathBuf,
+        boot_dev_tmp_mount: TmpMountPoint,
+        #[allow(unused)]
+        efi_dev: PathBuf,
+        efi_dev_tmp_mount: TmpMountPoint,
+    },
 }
 
 impl OnExternalFdeDisk {
@@ -857,46 +881,137 @@ impl OnExternalFdeDisk {
             (Some(nbd_device), disk_device)
         };
 
-        // Find the boot partition and mount it to a tmp mount point
-        let boot_dev = Self::detect_boot_part(Some(&disk_device)).await.context(
-            "Cannot found boot partition on the disk. The disk may not be a encrypted disk.",
-        )?;
-        let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev, false).await?;
-
         // Find the EFI partition and mount it to a tmp mount point
-        let efi_dev = Self::detect_efi_part(Some(&disk_device)).await.context(
-            "Cannot found EFI partition on the disk. The disk may not be a encrypted disk.",
-        )?;
+        let efi_dev = Self::detect_efi_part(Some(&disk_device))
+            .await
+            .context("Cannot found EFI partition on the disk.")?;
         let efi_dev_tmp_mount = TmpMountPoint::mount(&efi_dev, false).await?;
+
+        // Find the boot partition and mount it to a tmp mount point
+        let disk_type = match Self::detect_boot_part(Some(&disk_device)).await {
+            Ok(boot_dev) => {
+                let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev, false).await?;
+
+                ExternalDiskType::Fde {
+                    boot_dev,
+                    boot_dev_tmp_mount,
+                    efi_dev,
+                    efi_dev_tmp_mount,
+                }
+            }
+            Err(error) => {
+                tracing::warn!(?error, "Cannot found boot partition on the disk. The disk may not be a cryptpilot encrypted disk.");
+                let root_dev = Self::detect_root_part(Some(&disk_device))
+                    .await
+                    .context("Failed to detect root partition on the disk")?;
+                let root_dev_tmp_mount = TmpMountPoint::mount(&root_dev, false).await?;
+
+                ExternalDiskType::Normal {
+                    efi_dev,
+                    efi_dev_tmp_mount,
+                    root_dev,
+                    root_dev_tmp_mount,
+                }
+            }
+        };
 
         Ok(Self {
             nbd_device,
-            boot_dev,
-            boot_dev_tmp_mount,
-            efi_dev,
-            efi_dev_tmp_mount,
+            disk_type,
         })
     }
 
     /// New by probing the boot partition on current environment. This is used in initrd stage.
     pub async fn new_by_probing() -> Result<Self> {
-        let boot_dev = Self::detect_boot_part(None).await?;
-        let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev, false).await?;
         let efi_dev = Self::detect_efi_part(None).await?;
         let efi_dev_tmp_mount = TmpMountPoint::mount(&efi_dev, false).await?;
 
+        let disk_type = match Self::detect_boot_part(None).await {
+            Ok(boot_dev) => {
+                let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev, false).await?;
+                ExternalDiskType::Fde {
+                    boot_dev,
+                    boot_dev_tmp_mount,
+                    efi_dev,
+                    efi_dev_tmp_mount,
+                }
+            }
+            Err(error) => {
+                tracing::warn!(?error, "Cannot found boot partition on the disk. The disk may not be a cryptpilot encrypted disk.");
+                let root_dev = Self::detect_root_part(None)
+                    .await
+                    .context("Failed to detect root partition on the disk")?;
+                let root_dev_tmp_mount = TmpMountPoint::mount(&root_dev, false).await?;
+
+                ExternalDiskType::Normal {
+                    efi_dev,
+                    efi_dev_tmp_mount,
+                    root_dev,
+                    root_dev_tmp_mount,
+                }
+            }
+        };
         Ok(Self {
             nbd_device: None,
-            boot_dev,
-            boot_dev_tmp_mount,
-            efi_dev,
-            efi_dev_tmp_mount,
+            disk_type,
         })
+    }
+
+    pub async fn detect_root_part(hint_device: Option<&Path>) -> Result<PathBuf> {
+        if hint_device.is_none() && Command::new("mountpoint").arg("/").run().await.is_ok() {
+            // 1. Execute 'findmnt -n -o SOURCE /' to return the device path where '/' is mounted
+            let mut command = Command::new("findmnt");
+            command.args(["-n", "-o", "SOURCE", "/"]);
+            match command.run().await {
+                Ok(stdout) => {
+                    let stdout_str = String::from_utf8_lossy(&stdout).trim().to_string();
+                    if !stdout_str.is_empty() {
+                        // Return the device path, such as /dev/sda1
+                        return Ok(PathBuf::from(stdout_str));
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(?error, "Failed to find root partition from / mount point");
+                }
+            }
+        }
+
+        // 2. Try GPT-style LABEL match
+        let mut gpt_cmd = Command::new("blkid");
+        gpt_cmd.args([
+            "--match-types",
+            "ext4",
+            "--match-token",
+            r#"LABEL="root""#,
+            "--list-one",
+            "--output",
+            "device",
+        ]);
+
+        if let Some(hint_device) = hint_device {
+            gpt_cmd.arg(hint_device);
+        }
+
+        match gpt_cmd.run().await {
+            Ok(gpt_stdout) => {
+                let gpt_device = String::from_utf8_lossy(&gpt_stdout).trim().to_string();
+
+                if !gpt_device.is_empty() {
+                    return Ok(PathBuf::from(gpt_device));
+                }
+            }
+            Err(error) => tracing::debug!(
+                ?error,
+                "Failed to detect boot partition with PARTLABEL=boot"
+            ),
+        }
+
+        bail!("No boot partition found (GPT and MBR methods both failed)");
     }
 
     pub async fn detect_boot_part(hint_device: Option<&Path>) -> Result<PathBuf> {
         if hint_device.is_none() && Command::new("mountpoint").arg("/boot").run().await.is_ok() {
-            // 1. Execute 'findmnt-n-o SOURCE /boot' to return the device path where '/boot' is mounted
+            // 1. Execute 'findmnt -n -o SOURCE /boot' to return the device path where '/boot' is mounted
             let mut command = Command::new("findmnt");
             command.args(["-n", "-o", "SOURCE", "/boot"]);
             match command.run().await {
@@ -1019,12 +1134,13 @@ impl OnExternalFdeDisk {
         };
 
         let lsblk_str = String::from_utf8(lsblk_stdout)?;
-        let partitions = lsblk_str
+        let candidate_partitions = lsblk_str
             .lines()
             .filter(|line| line.chars().last().map(|c| c.is_numeric()).unwrap_or(false))
-            .map(PathBuf::from);
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
 
-        for part in partitions {
+        for part in candidate_partitions {
             let is_efi_part = async {
                 // Create a temporary mount point
                 let tmp_mount = TmpMountPoint::mount(&part, false).await?;
@@ -1047,17 +1163,16 @@ impl OnExternalFdeDisk {
             }
             .await;
 
-            let is_efi_part = match is_efi_part {
-                Ok(is_efi_part) => is_efi_part,
+            match is_efi_part {
+                Ok(is_efi_part) => {
+                    if is_efi_part {
+                        return Ok(part);
+                    }
+                }
                 Err(error) => {
                     tracing::debug!(?error, ?part, "Failed to check efi part on device");
-                    continue;
                 }
             };
-
-            if is_efi_part {
-                return Ok(part);
-            }
         }
 
         bail!("No valid EFI partition found");
@@ -1067,27 +1182,37 @@ impl OnExternalFdeDisk {
 #[async_trait]
 impl FdeDisk for OnExternalFdeDisk {
     async fn load_fde_config_bundle(&self) -> Result<FdeConfigBundle> {
-        let config_dir = self
-            .boot_dev_tmp_mount
-            .mount_point()
-            .join(CRYPTPILOT_CONFIG_DIR_UNTRUSTED_IN_BOOT);
-        if !config_dir.exists() {
-            bail!("No config dir found in boot partition. The disk may not be a encrypted disk.")
+        match &self.disk_type {
+            ExternalDiskType::Normal { .. } => {
+                bail!("Not a encrypted disk, cannot load config bundle")
+            }
+            ExternalDiskType::Fde {
+                boot_dev_tmp_mount, ..
+            } => {
+                let config_dir = boot_dev_tmp_mount
+                    .mount_point()
+                    .join(CRYPTPILOT_CONFIG_DIR_UNTRUSTED_IN_BOOT);
+                if !config_dir.exists() {
+                    bail!("No config dir found in boot partition. The disk may not be a cryptpilot encrypted disk.")
+                }
+                load_fde_config_bundle_from_dir(&config_dir).await
+            }
         }
-        load_fde_config_bundle_from_dir(&config_dir).await
     }
 
     async fn load_metadata(&self) -> Result<Metadata> {
-        let metadata_file = self
-            .boot_dev_tmp_mount
-            .mount_point()
-            .join(METADATA_PATH_IN_BOOT);
-
-        if !metadata_file.exists() {
-            bail!("No metadata file found in boot partition. The disk may not be a encrypted disk.")
+        match &self.disk_type {
+            ExternalDiskType::Normal { .. } => bail!("Not a encrypted disk, cannot load metadata"),
+            ExternalDiskType::Fde {
+                boot_dev_tmp_mount, ..
+            } => {
+                let metadata_file = boot_dev_tmp_mount.mount_point().join(METADATA_PATH_IN_BOOT);
+                if !metadata_file.exists() {
+                    bail!("No metadata file found in boot partition. The disk may not be a cryptpilot encrypted disk.")
+                }
+                load_metadata_from_file(&metadata_file).await
+            }
         }
-
-        load_metadata_from_file(&metadata_file).await
     }
 
     async fn load_global_grub_env_file(&self) -> Result<String> {
@@ -1118,39 +1243,14 @@ impl FdeDisk for OnExternalFdeDisk {
     }
 
     fn check_file_exist_on_disk(&self, path: &Path) -> Result<bool> {
-        if !path.starts_with("/boot") {
-            bail!("The path must be start with /boot")
-        }
-        let real_path = if path.starts_with("/boot/efi") {
-            self.efi_dev_tmp_mount
-                .mount_point()
-                .join(path.strip_prefix("/boot/efi")?)
-        } else {
-            self.boot_dev_tmp_mount
-                .mount_point()
-                .join(path.strip_prefix("/boot")?)
-        };
-
-        Ok(real_path.exists())
+        Ok(self.resolve_path_on_real_disk(path)?.exists())
     }
 
     async fn read_file_on_disk(&self, path: &Path) -> Result<Vec<u8>> {
         let real_path = {
             let mut path = path.to_path_buf();
             loop {
-                if !path.starts_with("/boot") {
-                    bail!("The path must be start with /boot but got {path:?}")
-                }
-
-                let real_path = if path.starts_with("/boot/efi") {
-                    self.efi_dev_tmp_mount
-                        .mount_point()
-                        .join(path.strip_prefix("/boot/efi")?)
-                } else {
-                    self.boot_dev_tmp_mount
-                        .mount_point()
-                        .join(path.strip_prefix("/boot")?)
-                };
+                let real_path = self.resolve_path_on_real_disk(&path)?;
 
                 if real_path.is_symlink() {
                     let link = real_path.read_link()?;
@@ -1168,12 +1268,67 @@ impl FdeDisk for OnExternalFdeDisk {
         Ok(buf)
     }
 
-    fn get_boot_dev(&self) -> &Path {
-        &self.boot_dev
+    fn get_boot_dir_dev(&self) -> &Path {
+        match &self.disk_type {
+            ExternalDiskType::Normal { root_dev, .. } => root_dev,
+            ExternalDiskType::Fde { boot_dev, .. } => boot_dev,
+        }
     }
 
     fn get_efi_part_root_dir(&self) -> &Path {
-        self.efi_dev_tmp_mount.mount_point()
+        match &self.disk_type {
+            ExternalDiskType::Normal {
+                efi_dev_tmp_mount, ..
+            }
+            | ExternalDiskType::Fde {
+                efi_dev_tmp_mount, ..
+            } => efi_dev_tmp_mount.mount_point(),
+        }
+    }
+}
+
+impl OnExternalFdeDisk {
+    fn resolve_path_on_real_disk(&self, path: &Path) -> Result<PathBuf> {
+        if !path.starts_with("/boot") {
+            bail!("The path must be start with /boot, but got {path:?}")
+        }
+
+        let real_path = match &self.disk_type {
+            ExternalDiskType::Normal {
+                efi_dev_tmp_mount,
+                root_dev_tmp_mount,
+                ..
+            } => {
+                if path.starts_with("/boot/efi") {
+                    efi_dev_tmp_mount
+                        .mount_point()
+                        .join(path.strip_prefix("/boot/efi")?)
+                } else if path.starts_with("/") {
+                    root_dev_tmp_mount
+                        .mount_point()
+                        .join(path.strip_prefix("/")?)
+                } else {
+                    bail!("The path must be start with /, but got {path:?}")
+                }
+            }
+            ExternalDiskType::Fde {
+                boot_dev_tmp_mount,
+                efi_dev_tmp_mount,
+                ..
+            } => {
+                if path.starts_with("/boot/efi") {
+                    efi_dev_tmp_mount
+                        .mount_point()
+                        .join(path.strip_prefix("/boot/efi")?)
+                } else {
+                    boot_dev_tmp_mount
+                        .mount_point()
+                        .join(path.strip_prefix("/boot")?)
+                }
+            }
+        };
+
+        Ok(real_path)
     }
 }
 
