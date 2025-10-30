@@ -112,7 +112,7 @@ pub mod tests {
         T: Future<Output = Result<()>>,
     {
         open_then(volume_config, |volume_config| async move {
-            let tmp_mount = TmpMountPoint::mount(volume_config.volume_path()).await?;
+            let tmp_mount = TmpMountPoint::mount(volume_config.volume_path(), true).await?;
 
             task(volume_config, tmp_mount.mount_point().to_path_buf()).await
         })

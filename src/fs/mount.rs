@@ -14,7 +14,7 @@ pub struct TmpMountPoint {
 }
 
 impl TmpMountPoint {
-    pub async fn mount(dev: impl AsRef<Path>) -> Result<Self> {
+    pub async fn mount(dev: impl AsRef<Path>, writable: bool) -> Result<Self> {
         let dev = dev.as_ref();
 
         let mount_dir = tempfile::Builder::new()
@@ -22,8 +22,11 @@ impl TmpMountPoint {
             .tempdir()?;
         let mount_point = mount_dir.path();
 
-        Command::new("mount")
-            .arg(dev)
+        let mut cmd = Command::new("mount");
+        if !writable {
+            cmd.arg("-o").arg("ro");
+        }
+        cmd.arg(dev)
             .arg(mount_point)
             .run()
             .await

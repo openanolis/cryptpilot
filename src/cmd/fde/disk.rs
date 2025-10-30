@@ -861,13 +861,13 @@ impl OnExternalFdeDisk {
         let boot_dev = Self::detect_boot_part(Some(&disk_device)).await.context(
             "Cannot found boot partition on the disk. The disk may not be a encrypted disk.",
         )?;
-        let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev).await?;
+        let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev, false).await?;
 
         // Find the EFI partition and mount it to a tmp mount point
         let efi_dev = Self::detect_efi_part(Some(&disk_device)).await.context(
             "Cannot found EFI partition on the disk. The disk may not be a encrypted disk.",
         )?;
-        let efi_dev_tmp_mount = TmpMountPoint::mount(&efi_dev).await?;
+        let efi_dev_tmp_mount = TmpMountPoint::mount(&efi_dev, false).await?;
 
         Ok(Self {
             nbd_device,
@@ -881,9 +881,9 @@ impl OnExternalFdeDisk {
     /// New by probing the boot partition on current environment. This is used in initrd stage.
     pub async fn new_by_probing() -> Result<Self> {
         let boot_dev = Self::detect_boot_part(None).await?;
-        let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev).await?;
+        let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev, false).await?;
         let efi_dev = Self::detect_efi_part(None).await?;
-        let efi_dev_tmp_mount = TmpMountPoint::mount(&efi_dev).await?;
+        let efi_dev_tmp_mount = TmpMountPoint::mount(&efi_dev, false).await?;
 
         Ok(Self {
             nbd_device: None,
@@ -971,7 +971,7 @@ impl OnExternalFdeDisk {
                 if already_mounted {
                     return Ok(None);
                 }
-                let tmp_mount = TmpMountPoint::mount(&dev).await?;
+                let tmp_mount = TmpMountPoint::mount(&dev, false).await?;
 
                 let mut has_boot_kernel = false;
 
@@ -1027,7 +1027,7 @@ impl OnExternalFdeDisk {
         for part in partitions {
             let is_efi_part = async {
                 // Create a temporary mount point
-                let tmp_mount = TmpMountPoint::mount(&part).await?;
+                let tmp_mount = TmpMountPoint::mount(&part, false).await?;
                 let mount_point = tmp_mount.mount_point();
 
                 // Check whether the EFI directory exists
