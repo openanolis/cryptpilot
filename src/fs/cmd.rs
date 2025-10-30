@@ -54,6 +54,9 @@ impl CheckCommandOutput for Command {
         input_bytes: Option<&[u8]>,
         f: impl Fn(i32, Vec<u8>, Vec<u8>) -> Result<R> + Send + Sync,
     ) -> Result<R> {
+        // reset all locale settings for this command
+        self.env("LC_ALL", "C");
+
         tracing::trace!(cmd=?self.as_std(), "run external cmd");
 
         async {
