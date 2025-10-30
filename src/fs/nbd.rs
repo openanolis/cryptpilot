@@ -92,6 +92,9 @@ impl NbdDevice {
                 format!("Failed to connect disk image {disk_img:?} to NBD device {nbd_dev_path:?}")
             })?;
 
+        tracing::debug!("Waiting 1 second for the nbd device to be ready");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
         Ok(Self {
             nbd_dev_num,
             udev_rule,
