@@ -10,10 +10,11 @@ impl IntoCommand for crate::cli::FdeOptions {
             crate::cli::FdeSubcommand::DumpConfig => {
                 Box::new(dump_config::ConfigDumpCommand { disk: self.disk })
             }
-            crate::cli::FdeSubcommand::ShowReferenceValue { stage } => {
+            crate::cli::FdeSubcommand::ShowReferenceValue { stage, hash_algos } => {
                 Box::new(show_reference_value::ShowReferenceValueCommand {
                     disk: self.disk,
                     stage,
+                    hash_algos,
                 })
             }
         }

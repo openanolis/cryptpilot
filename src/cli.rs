@@ -116,9 +116,33 @@ pub struct FdeOptions {
 
 #[derive(Subcommand, Debug)]
 pub enum FdeSubcommand {
-    /// Show claims related to FDE.
+    /// Display cryptographic reference values (e.g., hashes) of boot-related components for attestation.
+    ///
+    /// This includes artifacts such as:
+    /// - GRUB configuration and binaries
+    /// - Shim and bootloader
+    /// - Initrd and kernel images
+    /// - Kernel command line
+    ///
+    /// For encrypted (FDE) disks, additional values are included:
+    /// - Root filesystem hash (integrity measurement)
+    /// - Cryptpilot configuration bundle hash
+    ///
+    /// Supports both encrypted (FDE) and plain disks. Optionally filtered by stage.
     #[command(name = "show-reference-value")]
     ShowReferenceValue {
+        /// Specify one or more hash algorithms to use.
+        /// Multiple algorithms can be provided (e.g., --hash-algo sha384 --hash-algo sm3).
+        #[clap(long = "hash-algo", default_value = "sha384,sm3")]
+        hash_algos: Vec<ShowReferenceValueHashAlgo>,
+        /// Optional stage filter (e.g., initrd, system). If not provided, all stages are included.
+        ///
+        /// Used to inject additional reference values for specific boot stages. For example:
+        /// - When `--stage system` is specified, an extra claim is added:
+        ///   `cryptpilot.alibabacloud.com initrd_switch_root {}`
+        ///   indicating that the system has switched to the new root filesystem (sysroot).
+        ///
+        /// If omitted, no additional stage-specific claims are generated.
         #[clap(long)]
         stage: Option<ShowReferenceValueStage>,
     },
@@ -126,6 +150,21 @@ pub enum FdeSubcommand {
     /// Dump fde config and global config as toml, which can be used in cloud-init user data.
     #[command(name = "dump-config")]
     DumpConfig,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum ShowReferenceValueHashAlgo {
+    #[clap(name = "sha1")]
+    Sha1,
+
+    #[clap(name = "sha256")]
+    Sha256,
+
+    #[clap(name = "sha384")]
+    Sha384,
+
+    #[clap(name = "sm3")]
+    Sm3,
 }
 
 #[derive(ValueEnum, Clone, Debug)]

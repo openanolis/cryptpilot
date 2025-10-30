@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 
 use crate::{
-    cli::ShowReferenceValueStage,
+    cli::{ShowReferenceValueHashAlgo, ShowReferenceValueStage},
     cmd::fde::disk::MeasurementedBootComponents,
     measure::{
         attestation_agent::AAEL_DOMAIN, OPERATION_NAME_FDE_ROOTFS_HASH,
@@ -18,11 +18,16 @@ use super::disk::{FdeDisk, OnCurrentSystemFdeDisk, OnExternalFdeDisk};
 pub struct ShowReferenceValueCommand {
     pub disk: Option<PathBuf>,
     pub stage: Option<ShowReferenceValueStage>,
+    pub hash_algos: Vec<ShowReferenceValueHashAlgo>,
 }
 
 #[async_trait]
 impl super::super::Command for ShowReferenceValueCommand {
     async fn run(&self) -> Result<()> {
+        if self.hash_algos.is_empty() {
+            bail!("No hash algorithm specified");
+        }
+
         tracing::debug!("Get rootfs reference value");
         let mut map = IndexMap::new();
 
@@ -39,7 +44,10 @@ impl super::super::Command for ShowReferenceValueCommand {
                     map.insert(aael_key, vec![hash_hex]);
                 }
                 Err(error) => {
-                    tracing::warn!(?error, "Failed to load fde config bundle, skip \"{aael_key}\"");
+                    tracing::warn!(
+                        ?error,
+                        "Failed to load fde config bundle, skip \"{aael_key}\""
+                    );
                 }
             };
         }
@@ -69,8 +77,22 @@ impl super::super::Command for ShowReferenceValueCommand {
         let boot_components = fde_disk.get_boot_components().await?;
         tracing::debug!("Starting to calculate reference values for boot components");
 
-        inseart_with_hash::<sha2::Sha384>(&boot_components, &mut map, "SHA-384")?;
-        inseart_with_hash::<sm3::Sm3>(&boot_components, &mut map, "SM3")?;
+        for hash_algo in &self.hash_algos {
+            match hash_algo {
+                ShowReferenceValueHashAlgo::Sha1 => {
+                    inseart_with_hash::<sha1::Sha1>(&boot_components, &mut map, "SHA-1")?
+                }
+                ShowReferenceValueHashAlgo::Sha256 => {
+                    inseart_with_hash::<sha2::Sha256>(&boot_components, &mut map, "SHA-256")?
+                }
+                ShowReferenceValueHashAlgo::Sha384 => {
+                    inseart_with_hash::<sha2::Sha384>(&boot_components, &mut map, "SHA-384")?
+                }
+                ShowReferenceValueHashAlgo::Sm3 => {
+                    inseart_with_hash::<sm3::Sm3>(&boot_components, &mut map, "SM3")?
+                }
+            }
+        }
 
         map.insert(
             "kernel_cmdline".to_string(),
