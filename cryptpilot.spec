@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.2.7
+Version: 0.2.8
 Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -157,6 +157,27 @@ fi
 
 
 %changelog
+* Fri Oct 31 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.8-1
+- feat(fde): support multiple hash algorithms in show-reference-value (sha1, sha256, sha384, sm3)
+- feat(fde): allow show-reference-value to work on non-encrypted disks
+- feat(fs): make TmpMountPoint::mount support read-only mode by default
+- fix(nbd): wait 1 second after connecting NBD device to ensure partition detection
+- fix: set LC_ALL=C before running external commands for consistent output
+- build: switch to git clone for source copy in tarball creation
+- build: generate ttrpc protocol files in OUT_DIR and clean up attributes
+- refactor: fix wrong URL in .proto file
+- docs: update AAEL documentation for new tcg2 log format
+- reference value: use IETF 4634 compliant hash algorithm names (e.g., SHA-384)
+- fde: use --key-file=- consistently to avoid newline issues in LUKS operations
+- fde: include both GRUB kernel cmdline variants in reference values
+- fde: add CentOS 7 compatibility for boot measurement
+- fde: add DM_UDEV_DISABLE_OTHER_RULES_FLAG to hide intermediate cryptpilot devices
+- Remove -E option for `file` command in mkfs.rs
+- cryptpilot-convert: improve logging for boot partition creation
+- boot_service: remove spurious findmnt failure warning during boot
+- boot_service: fix LVM resize failures in initramfs with custom lvm.conf
+- fde: disable LVM locking in pvresize and lvextend during early boot
+
 * Fri Sep 26 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.7-1
 - fde: auto-expand system PV and data LV on boot
 - boot_service: split stage logic into separate modules
