@@ -2,13 +2,13 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.2.8
+Version: 0.2.9
 Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
 License: Apache-2.0
 URL: https://www.alibaba.com
-Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}-%{release_num}/cryptpilot-%{version}.tar.gz
+Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}.tar.gz
 
 Requires: dracut
 Requires: lvm2
@@ -157,6 +157,10 @@ fi
 
 
 %changelog
+* Tue Nov 11 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.9-1
+- fix(fde): fix panic due to wrong default hash algo
+
+
 * Fri Oct 31 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.8-1
 - feat(fde): support multiple hash algorithms in show-reference-value (sha1, sha256, sha384, sm3)
 - feat(fde): allow show-reference-value to work on non-encrypted disks
