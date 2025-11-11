@@ -133,7 +133,7 @@ pub enum FdeSubcommand {
     ShowReferenceValue {
         /// Specify one or more hash algorithms to use.
         /// Multiple algorithms can be provided (e.g., --hash-algo sha384 --hash-algo sm3).
-        #[clap(long = "hash-algo", default_value = "sha384,sm3")]
+        #[clap(long = "hash-algo", default_value = "sha384")]
         hash_algos: Vec<ShowReferenceValueHashAlgo>,
         /// Optional stage filter (e.g., initrd, system). If not provided, all stages are included.
         ///
