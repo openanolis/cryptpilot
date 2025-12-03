@@ -43,7 +43,7 @@ pub enum VolumeType {
 #[cfg(test)]
 pub mod tests {
 
-    use std::{future::Future, io::Error, path::PathBuf};
+    use std::{future::Future, path::PathBuf};
 
     use crate::{
         async_defer,
@@ -211,25 +211,21 @@ pub mod tests {
                         }
 
                         // Run stress-ng to consume swap memory
-                        unsafe {
-                            Command::new("stress-ng")
-                                .arg("--timeout")
-                                .arg("10")
-                                .arg("--vm")
-                                .arg("1")
-                                .arg("--vm-hang")
-                                .arg("0")
-                                .arg("--vm-method")
-                                .arg("zero-one")
-                                .arg("--vm-bytes")
-                                .arg(swap_device_size.to_string())
-                                .pre_exec(move || {
-                                    cg.add_task(CgroupPid::from(std::process::id() as u64))
-                                        .map_err(Error::other)
-                                })
-                                .run()
-                        }
-                        .await?;
+                        Command::new("stress-ng")
+                            .arg("--timeout")
+                            .arg("10")
+                            .arg("--vm")
+                            .arg("1")
+                            .arg("--vm-hang")
+                            .arg("0")
+                            .arg("--vm-method")
+                            .arg("zero-one")
+                            .arg("--vm-bytes")
+                            .arg(swap_device_size.to_string())
+                            .run_with_child_callback(move |pid| {
+                                Ok(cg.add_task(CgroupPid::from(pid))?)
+                            })
+                            .await?;
                     }
 
                     Ok(())

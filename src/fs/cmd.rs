@@ -13,6 +13,11 @@ pub trait CheckCommandOutput {
 
     async fn run_with_input(&mut self, input_bytes: Option<&[u8]>) -> Result<Vec<u8>>;
 
+    async fn run_with_child_callback(
+        &mut self,
+        child_callback: impl Fn(u64) -> Result<()> + Send + Sync,
+    ) -> Result<()>;
+
     async fn run_with_status_checker<R>(
         &mut self,
         f: impl Fn(i32, Vec<u8>, Vec<u8>) -> Result<R> + Send + Sync,
@@ -21,6 +26,7 @@ pub trait CheckCommandOutput {
     async fn run_with_input_and_status_checker<R>(
         &mut self,
         input_bytes: Option<&[u8]>,
+        child_callback: impl Fn(u64) -> Result<()> + Send + Sync,
         f: impl Fn(i32, Vec<u8>, Vec<u8>) -> Result<R> + Send + Sync,
     ) -> Result<R>;
 }
@@ -31,14 +37,32 @@ impl CheckCommandOutput for Command {
         self.run_with_input(None).await
     }
 
-    async fn run_with_input(&mut self, input_bytes: Option<&[u8]>) -> Result<Vec<u8>> {
-        self.run_with_input_and_status_checker(input_bytes, |code, stdout, _| {
+    async fn run_with_child_callback(
+        &mut self,
+        child_callback: impl Fn(u64) -> Result<()> + Send + Sync,
+    ) -> Result<()> {
+        self.run_with_input_and_status_checker(None, child_callback, |code, _, _| {
             if code != 0 {
                 bail!("Bad exit code")
             } else {
-                Ok(stdout)
+                Ok(())
             }
         })
+        .await
+    }
+
+    async fn run_with_input(&mut self, input_bytes: Option<&[u8]>) -> Result<Vec<u8>> {
+        self.run_with_input_and_status_checker(
+            input_bytes,
+            |_| Ok(()),
+            |code, stdout, _| {
+                if code != 0 {
+                    bail!("Bad exit code")
+                } else {
+                    Ok(stdout)
+                }
+            },
+        )
         .await
     }
 
@@ -46,12 +70,14 @@ impl CheckCommandOutput for Command {
         &mut self,
         f: impl Fn(i32, Vec<u8>, Vec<u8>) -> Result<R> + Send + Sync,
     ) -> Result<R> {
-        self.run_with_input_and_status_checker(None, f).await
+        self.run_with_input_and_status_checker(None, |_| Ok(()), f)
+            .await
     }
 
     async fn run_with_input_and_status_checker<R>(
         &mut self,
         input_bytes: Option<&[u8]>,
+        child_callback: impl Fn(u64) -> Result<()> + Send + Sync,
         f: impl Fn(i32, Vec<u8>, Vec<u8>) -> Result<R> + Send + Sync,
     ) -> Result<R> {
         // reset all locale settings for this command
@@ -76,6 +102,10 @@ impl CheckCommandOutput for Command {
                     let mut stdin = child.stdin.take().context("No stdin")?;
                     stdin.write_all(input_bytes).await?;
                     stdin.shutdown().await?;
+                }
+
+                if let Some(id) = child.id() {
+                    child_callback(id as u64)?;
                 }
 
                 child.wait_with_output().await.map_err(anyhow::Error::from)
