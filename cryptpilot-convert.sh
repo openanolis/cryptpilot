@@ -222,6 +222,7 @@ proc::print_help_and_exit() {
     echo "  -b, --boot_part_size <size>                             Instead of using the default partition size(512MB), specify the size of the boot partition"
     echo "                                                          converting. This can be specified multiple times."
     echo "      --wipe-freed-space                                  Wipe the freed space with zero, so that the qemu-img convert would generate smaller image"
+    echo "      --uki                                               Generate a Unified Kernel Image image and boot from it instead of boot with GRUB"
     echo "  -h, --help                                              Show this help message and exit."
     exit "$1"
 }
@@ -488,6 +489,7 @@ disk::install_rpm_on_rootfs() {
 step:update_rootfs_and_initrd() {
     local efi_part=$1
     local boot_file_path=$2
+    local uki=$3
 
     log::info "Prepare chroot environment"
     local rootfs_mount_point=${workdir}/rootfs
@@ -558,9 +560,7 @@ step:update_rootfs_and_initrd() {
 
     # update initrd
     log::info "Updating initrd and grub config"
-    chroot "${rootfs_mount_point}" bash -c "$(
-        cat <<'EOF'
-#!/bin/bash
+    chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; $(cat <<'EOF'
 set -e
 set -u
 
@@ -583,25 +583,61 @@ KERNELVER=${REAL_KERNELIMG#/boot/vmlinuz-}
 echo "Kernel version: $KERNELVER"
 
 echo "Generating initrd with dracut"
-dracut -N --kver "$KERNELVER" --fstab --add-fstab /etc/fstab --force -v
+if [ "${uki:-false}" = true ]; then    
+    # Generate UKI with dracut
+    echo "Generating UKI image"
+    cmdline=$(dracut --kver "$KERNELVER" --hostonly --fstab --add-fstab /etc/fstab --uefi --hostonly-cmdline --force -v --print-cmdline)
+    cmdline=$(echo "${cmdline} console=ttyS0,115200n8" | xargs) # trim spaces
+    dracut --kver "$KERNELVER" --hostonly --fstab --add-fstab /etc/fstab --uefi --hostonly-cmdline --force -v --kernel-cmdline "${cmdline}"
 
-grub2_cfg=""
-if [ -e /etc/grub2.cfg ] ; then
-    # alinux3 iso with lagecy BIOS support. The real grub2.cfg is in /boot/grub2/grub.cfg
-    grub2_cfg=/etc/grub2.cfg
-elif [ -e /etc/grub2-efi.cfg ] ; then
-    # alinux3 iso for UEFI only. The real grub2.cfg is in /boot/efi/EFI/alinux/grub.cfg
-    grub2_cfg=/etc/grub2-efi.cfg
-elif [ -e /boot/grub2/grub.cfg ] ; then
-    # fallback for other distros
-    grub2_cfg=/boot/grub2/grub.cfg
+    # Determine the output file path. See https://github.com/dracut-ng/dracut-ng/blob/5c57209ba5ef36f8856b4ea1694de8e1da508b71/dracut.sh#L749-L776
+    MACHINE_ID=""
+    [[ -f /etc/machine-id ]] && read MACHINE_ID < /etc/machine-id
+    BUILD_ID=$(while read -r line || [[ $line ]]; do
+            if [[ $line =~ BUILD_ID\=* ]] ; then
+                    eval "$line" && echo "$BUILD_ID" && break;
+            fi
+            done < <(
+                    [ -f /etc/os-release ] && cat /etc/os-release
+                    [ -f /usr/lib/os-release ] && cat /usr/lib/os-release
+            )
+        )
+    UKI_FILE="/boot/efi/EFI/Linux/linux-${KERNELVER}${MACHINE_ID:+-${MACHINE_ID}}${BUILD_ID:+-${BUILD_ID}}.efi"
+    if [ ! -f "$UKI_FILE" ]; then
+        echo "Error: Expected UKI file not found at $UKI_FILE" >&2
+        exit 1
+    fi
+    echo "UKI successfully created at $UKI_FILE"
+
+    # Override the default boot entry
+    echo "Overwriting default boot entry with UKI image"
+    cp -f "$UKI_FILE" /boot/efi/EFI/BOOT/BOOTX64.EFI
+
+    # Remove all other EFI entries
+    find /boot/efi/EFI -mindepth 1 -maxdepth 1 ! -name BOOT -exec rm -rf {} +
+    find /boot/efi/EFI/BOOT -mindepth 1 -maxdepth 1 ! -name BOOTX64.EFI -exec rm -rf {} +
 else
-    echo "Cannot find grub2 config file"
-    exit 1
-fi
+    echo "Generating new initrd image"
+    dracut --kver "$KERNELVER" --hostonly --fstab --add-fstab /etc/fstab --force -v
+    grub2_cfg=""
+    if [ -e /etc/grub2.cfg ] ; then
+        # alinux3 iso with lagecy BIOS support. The real grub2.cfg is in /boot/grub2/grub.cfg
+        grub2_cfg=/etc/grub2.cfg
+    elif [ -e /etc/grub2-efi.cfg ] ; then
+        # alinux3 iso for UEFI only. The real grub2.cfg is in /boot/efi/EFI/alinux/grub.cfg
+        grub2_cfg=/etc/grub2-efi.cfg
+    elif [ -e /boot/grub2/grub.cfg ] ; then
+        # fallback for other distros
+        grub2_cfg=/boot/grub2/grub.cfg
+    else
+        echo "Cannot find grub2 config file"
+        exit 1
+    fi
 
-echo "Detected grub2.cfg, re-generate it now: $grub2_cfg"
-grub2-mkconfig -o "$grub2_cfg"
+    echo "Detected grub2.cfg, re-generate it now: $grub2_cfg"
+    grub2-mkconfig -o "$grub2_cfg"
+
+fi
 
 echo "Cleaning up..."
 yum clean all
@@ -821,6 +857,7 @@ main() {
     local rootfs_orig_part_num
     local rootfs_orig_part_exist=false
     local wipe_freed_space=false
+    local uki=false
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -862,6 +899,10 @@ main() {
             ;;
         --wipe-freed-space)
             wipe_freed_space=true
+            shift 1
+            ;;
+        --uki)
+            uki=true
             shift 1
             ;;
         -h | --help)
@@ -1019,7 +1060,7 @@ main() {
     # 3. Update rootfs and initrd
     #
     log::step "[ 3 ] Update rootfs and initrd"
-    step:update_rootfs_and_initrd "${efi_part}" "${boot_file_path}"
+    step:update_rootfs_and_initrd "${efi_part}" "${boot_file_path}" "${uki}"
 
     #
     # 4. Shrinking rootfs and extract
