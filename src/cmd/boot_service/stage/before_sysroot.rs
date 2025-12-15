@@ -4,16 +4,13 @@ use anyhow::{bail, Context, Result};
 use tokio::{fs::File, io::AsyncWriteExt, process::Command};
 
 use crate::{
-    cmd::{
-        boot_service::{
-            metadata::Metadata,
-            stage::{
-                DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, ROOTFS_DECRYPTED_LAYER_DEVICE,
-                ROOTFS_DECRYPTED_LAYER_NAME, ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LAYER_NAME,
-                ROOTFS_LOGICAL_VOLUME,
-            },
+    cmd::boot_service::{
+        metadata::{load_metadata_from_file, Metadata},
+        stage::{
+            DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, ROOTFS_DECRYPTED_LAYER_DEVICE,
+            ROOTFS_DECRYPTED_LAYER_NAME, ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LAYER_NAME,
+            ROOTFS_LOGICAL_VOLUME,
         },
-        fde::disk::{FdeDisk, OnExternalFdeDisk},
     },
     config::volume::MakeFsType,
     fs::cmd::CheckCommandOutput,
@@ -23,6 +20,7 @@ use crate::{
 };
 
 const CRYPTPILOT_LVM_SYSTEM_DIR: &str = "/usr/lib/cryptpilot/lvm/";
+pub const METADATA_PATH_IN_INITRD: &str = "/etc/cryptpilot/metadata.toml";
 
 pub async fn setup_volumes_required_by_fde() -> Result<()> {
     let fde_config = crate::config::source::get_config_source()
@@ -197,10 +195,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
 }
 
 async fn load_metadata() -> Result<Metadata> {
-    OnExternalFdeDisk::new_by_probing()
-        .await?
-        .load_metadata()
-        .await
+    load_metadata_from_file(Path::new(METADATA_PATH_IN_INITRD)).await
 }
 
 async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Result<()> {

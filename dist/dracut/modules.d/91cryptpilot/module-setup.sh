@@ -1,14 +1,9 @@
 #!/bin/bash
 
 check() {
-        if [ -f "${dracutsysrootdir:-}"/etc/cryptpilot/fde.toml ]; then
-                # If full-disk encryption is enabled, we need to install the cryptpilot module
-                return 0
-        else
-                # Or else don't install
-                # https://man7.org/linux/man-pages/man7/dracut.modules.7.html
-                return 255
-        fi
+        # By default we don't install
+        # https://man7.org/linux/man-pages/man7/dracut.modules.7.html
+        return 255
 }
 
 install() {
@@ -28,11 +23,6 @@ install() {
         # For debug only
         # inst_multiple curl nc ip find systemctl journalctl ifconfig lsblk df
         inst_multiple cryptpilot
-        # clean old config
-        rm -rf "${dracutsysrootdir:-}"/boot/cryptpilot/config
-        mkdir -p "${dracutsysrootdir:-}"/boot/cryptpilot/config
-        [ -f "${dracutsysrootdir:-}"/etc/cryptpilot/fde.toml ] && cp "${dracutsysrootdir:-}"/etc/cryptpilot/fde.toml "${dracutsysrootdir:-}"/boot/cryptpilot/config/fde.toml
-        [ -f "${dracutsysrootdir:-}"/etc/cryptpilot/global.toml ] && cp "${dracutsysrootdir:-}"/etc/cryptpilot/global.toml "${dracutsysrootdir:-}"/boot/cryptpilot/config/global.toml
 
         # TODO: It would be better compatible to use the same network service in initrd as in system. So here we enable NetworkManager in initrd since the Alinux3 OS is using NetworkManager in system. But it would be better to have a more general way to select network service to be enabled.
         # Enable NetworkManager

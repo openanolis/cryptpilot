@@ -1,12 +1,10 @@
 use anyhow::{bail, Context, Result};
 
 use crate::{
-    cmd::{
-        boot_service::initrd_state::InitrdState,
-        fde::disk::{FdeDisk, OnExternalFdeDisk},
-    },
+    cmd::boot_service::initrd_state::InitrdState,
     config::source::{
         cloud_init::{CloudInitConfigSource, FdeConfigBundle},
+        fs::FileSystemConfigSource,
         initrd_state::InitrdStateConfigSource,
         ConfigSource,
     },
@@ -49,8 +47,8 @@ async fn load_fde_config_bundle() -> Result<FdeConfigBundle> {
         }
     };
 
-    tracing::info!("Trying to load config from from partition");
-    match load_config_from_boot_dir().await {
+    tracing::info!("Trying to load config from current initrd environment");
+    match load_config_from_current_initrd_environment().await {
         Ok(config) => return Ok(config),
         Err(e) => {
             tracing::info!("Failed to load config from partition: {e:?}");
@@ -60,13 +58,11 @@ async fn load_fde_config_bundle() -> Result<FdeConfigBundle> {
     bail!("Failed to load config from any source");
 }
 
-async fn load_config_from_boot_dir() -> Result<FdeConfigBundle> {
-    let fde_disk = OnExternalFdeDisk::new_by_probing().await?;
-
-    fde_disk
-        .load_fde_config_bundle()
-        .await
-        .context("Failed to load config from boot partition")
+async fn load_config_from_current_initrd_environment() -> Result<FdeConfigBundle> {
+    Ok(FileSystemConfigSource::new_with_default_config_dir()
+        .get_config()
+        .await?
+        .strip_as_fde_config_bundle())
 }
 
 async fn load_config_from_cloud_init() -> Result<FdeConfigBundle> {

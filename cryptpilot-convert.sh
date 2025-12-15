@@ -1,12 +1,13 @@
 #!/bin/bash
 
-set -e # exit on error
-set -u # exit when variable not set
+set -e # Exit on error
+set -u # Exit on undefined variable
 shopt -s nullglob
 
-# To avoid locale issues.
+# Ensure consistent locale for parsing.
 export LC_ALL=C
-# Color definitions
+
+# ANSI color codes
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
@@ -14,11 +15,13 @@ readonly PURPLE='\033[0;35m'
 readonly CYAN='\033[0;36m'
 readonly NC='\033[0m' # No Color
 
-# the size is currently fixed with 512MB,it can be adjusted by passing in the parameter -b size
+# Default boot partition size (can be overridden via --boot_part_size)
 BOOT_PART_SIZE="512M"
-# alignment to 2048 sectors creating a new partition
+# Partition alignment in sectors (aligned to 1 MiB boundary)
 readonly PARTITION_SECTOR_ALIGNMENT=2048
 
+# Set up logging: redirect stdout/stderr to both terminal and log file,
+# and enable shell tracing into the same log.
 log::setup_log_file() {
     # https://stackoverflow.com/a/40939603/15011229
     #
@@ -41,27 +44,27 @@ log::info() {
     #
     # note: printf is used instead of echo to avoid backslash
     # processing and to properly handle values that begin with a '-'.
-    printf "${CYAN}%s${NC}\n" "$*" >&2
+    printf "${CYAN}ℹ️  %s${NC}\n" "$*" >&2
 }
 
 log::success() {
-    printf "${GREEN}%s${NC}\n" "$*" >&2
+    printf "${GREEN}✅ %s${NC}\n" "$*" >&2
 }
 
 log::warn() {
-    printf "${YELLOW}%s${NC}\n" "$*" >&2
+    printf "${YELLOW}⚠️  %s${NC}\n" "$*" >&2
 }
 
 log::error() {
-    printf "${RED}ERROR: %s${NC}\n" "$*" >&2
+    printf "${RED}❌ ERROR: %s${NC}\n" "$*" >&2
 }
 
 log::step() {
-    printf "${GREEN}%s${NC}\n" "$*" >&2
+    printf "${GREEN}▶️  %s${NC}\n" "$*" >&2
 }
 
 log::highlight() {
-    printf "${PURPLE}%s${NC}\n" "$*" >&2
+    printf "${PURPLE}📌 %s${NC}\n" "$*" >&2
 }
 
 proc::fatal() {
@@ -69,30 +72,28 @@ proc::fatal() {
     exit 1
 }
 
+# Internal: run before exiting due to error
 proc::_trap_cmd_pre() {
     local exit_status=$?
     set +e
     if [[ ${exit_status} -ne 0 ]]; then
         echo
-        log::error "Bad exit status ${exit_status}. Collecting error info now ..."
+        log::error "Command failed with exit status ${exit_status}. Collecting diagnostic info..."
         (
-            echo "===== Collecting error info begin ====="
+            echo "===== Diagnostic Info (begin) ====="
             lsblk
             mount
-            lsof
-            echo "===== Collecting error info end   ====="
+            lsof /dev/nbd* /dev/mapper/* 2>/dev/null || true
+            echo "===== Diagnostic Info (end)   ====="
         ) >&3
-        log::warn "Please check the error info details in ${log_file}"
+        log::warn "Full logs saved to: ${log_file}"
     fi
 }
 
-# appends a command to a trap
-#
-# - 1st arg:  code to add
-# - remaining args:  names of traps to modify
-#
+# Append a command to one or more traps (e.g., EXIT, INT)
+# Usage: proc::_trap_add "command" TRAP_NAME...
 proc::_trap_add() {
-    trap_add_cmd=$1
+    local trap_add_cmd=$1
     shift || proc::fatal "${FUNCNAME[0]} usage error"
 
     # get the num of args
@@ -110,24 +111,21 @@ proc::_trap_add() {
             proc::_extract_trap_cmd() { printf '%s\n' "${3:-:;}" | sed '/proc::_trap_cmd_pre/d'; }
             # print existing trap command with newline
             eval "proc::_extract_trap_cmd $(trap -p "${trap_add_name}") "
-        )" "${trap_add_name}" ||
-            proc::fatal "unable to add to trap ${trap_add_name}"
+        )" "${trap_add_name}" || proc::fatal "Failed to add command to trap: ${trap_add_name}"
     done
 }
-# set the trace attribute for the above function.  this is
-# required to modify DEBUG or RETURN traps because functions don't
-# inherit them unless the trace attribute is set
-declare -f -t proc::_trap_add
+declare -f -t proc::_trap_add # Required for modifying DEBUG/RETURN traps
 
+# Register cleanup commands on script exit
+# Usage: proc::hook_exit "cleanup_command"
 proc::hook_exit() {
     set +x
     if [[ $BASH_SUBSHELL -ne 0 ]]; then
-        proc::fatal "proc::hook_exit should not be called from a subshell"
+        proc::fatal "proc::hook_exit must not be called from subshell"
     fi
     proc::_trap_add "$1" EXIT INT QUIT TERM
     set -x
 }
-
 declare -f -t proc::hook_exit
 
 disk::assert_disk_not_busy() {
@@ -202,6 +200,7 @@ disk::dm_remove_wait_busy() {
     done
 }
 
+# Print usage help and exit
 proc::print_help_and_exit() {
     echo "Usage:"
     echo "    $0 --in <input_file> --out <output_file> --config-dir <cryptpilot_config_dir> --rootfs-passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
@@ -227,6 +226,7 @@ proc::print_help_and_exit() {
     exit "$1"
 }
 
+# Execute command in subshell with all file descriptors closed except std*
 proc::exec_subshell_flose_fds() {
     (
         set +x
@@ -235,7 +235,7 @@ proc::exec_subshell_flose_fds() {
     )
 }
 
-# Determine the right partition number by checking the partition table with partition label
+# Detect rootfs partition by label 'root', or fallback to largest ext*/xfs partition
 disk::find_rootfs_partition() {
     local device=$1
     local specified_part_num=$2 # optional specified partition number
@@ -486,81 +486,220 @@ disk::install_rpm_on_rootfs() {
     done
 }
 
-step:update_rootfs_and_initrd() {
+# Sets up a chroot environment by mounting essential filesystems and configurations.
+# This includes virtual filesystems (dev, proc, sys, run, pts), boot/efi partitions if applicable,
+# and bind-mounts host's resolv.conf and hosts for network access inside chroot.
+#
+# Note: This function assumes the following global variables are set:
+#   - boot_part_exist: "true" if /boot is on a separate partition; "false" otherwise
+#   - boot_part: device path of /boot partition (used when boot_part_exist="true")
+#   - efi_part_exist: "true" if EFI system partition exists
+#
+# Arguments:
+#   $1 - Root filesystem mount point (e.g., /mnt/rootfs or ${workdir}/rootfs)
+#   $2 - Root filesystem device or image file to mount (e.g., /dev/sda2 or ./root.img)
+#   $3 - EFI partition device path (optional; e.g., /dev/sda1) — only used if efi_part_exist=true
+#   $4 - Boot file/device path (e.g., /dev/sda2 or ./boot.img) — used when boot_part_exist=false
+#
+setup_chroot_mounts() {
+    local rootfs="$1"
+    local rootfs_file_or_part="$2"
+    local efi_part="$3"
+    local boot_file_path="$4"
+
+    log::info "Preparing chroot environment at $rootfs"
+
+    # Ensure the rootfs directory exists
+    mkdir -p "$rootfs"
+
+    # Register cleanup hook to safely unmount rootfs on script exit
+    proc::hook_exit "mountpoint -q '$rootfs' && disk::umount_wait_busy '$rootfs'"
+
+    # Mount the root filesystem (could be block device or loop-mounted image)
+    mount "$rootfs_file_or_part" "$rootfs"
+
+    # Mount required pseudo-filesystems: dev, proc, sys, run, tmp, and devpts
+    for dir in dev dev/pts proc run sys tmp; do
+        local target="$rootfs/$dir"
+        mkdir -p "$target"
+        # Register unmount hook for each mount point
+        proc::hook_exit "mountpoint -q '$target' && disk::umount_wait_busy '$target'"
+        case "$dir" in
+        dev) mount -t devtmpfs devtmpfs "$target" ;;
+        dev/pts) mount -t devpts devpts "$target" ;;
+        proc) mount -t proc proc "$target" ;;
+        run) mount -t tmpfs tmpfs "$target" ;;
+        sys) mount -t sysfs sysfs "$target" ;;
+        tmp) mount -t tmpfs tmpfs "$target" ;;
+        esac
+    done
+
+    # Mount /boot — either from dedicated partition or file/image
+    local boot_target="$rootfs/boot"
+    mkdir -p "$boot_target"
+    proc::hook_exit "mountpoint -q '$boot_target' && disk::umount_wait_busy '$boot_target'"
+
+    if [ "$boot_part_exist" = "false" ]; then
+        # /boot is part of root or stored as a file (e.g., in embedded systems)
+        mount "$boot_file_path" "$boot_target"
+    else
+        # /boot has its own partition
+        mount "$boot_part" "$boot_target"
+    fi
+
+    # Conditionally mount EFI system partition under /boot/efi
+    if [ "$efi_part_exist" = "true" ] && [ -n "$efi_part" ]; then
+        local efi_target="$rootfs/boot/efi"
+        mkdir -p "$efi_target"
+        proc::hook_exit "mountpoint -q '$efi_target' && disk::umount_wait_busy '$efi_target'"
+        mount "$efi_part" "$efi_target"
+    fi
+
+    # Bind-mount critical network config files from host into chroot (read-only)
+    for file in resolv.conf hosts; do
+        local src="/etc/$file"
+        local dst="$rootfs/etc/$file"
+        local backup="$dst.cryptpilot" # Backup original file before bind-mounting
+
+        # Backup existing file in chroot (if any)
+        mv "$dst" "$backup" 2>/dev/null || true
+        touch "$dst" # Ensure destination exists before bind-mounting
+
+        # Bind-mount host's version as read-only
+        proc::hook_exit "mountpoint -q '$dst' && disk::umount_wait_busy '$dst'"
+        mount -o bind,ro "$(realpath "$src")" "$dst"
+    done
+}
+
+# Cleans up all mounted filesystems and restores original configuration files
+# after chroot operations are complete. Ensures no mounts remain active.
+#
+# Arguments:
+#   $1 - Root filesystem mount point (same as passed to setup_chroot_mounts)
+#
+cleanup_chroot_mounts() {
+    local rootfs="$1"
+
+    log::info "Cleaning up chroot environment: unmounting all filesystems"
+
+    # Unmount in reverse order (from innermost to outermost)
+    for dir in etc/hosts etc/resolv.conf boot/efi boot sys run proc dev/pts dev; do
+        disk::umount_wait_busy "$rootfs/$dir" 2>/dev/null || true
+    done
+
+    # Restore original resolv.conf and hosts files from backup
+    for file in resolv.conf hosts; do
+        local dst="$rootfs/etc/$file"
+        local backup="$dst.cryptpilot"
+        if [ -f "$backup" ]; then
+            rm -f "$dst"        # Remove bind-mounted or empty file
+            mv "$backup" "$dst" # Restore original content
+        fi
+    done
+
+    # Finally, unmount the main root filesystem
+    disk::umount_wait_busy "$rootfs"
+}
+
+# Executes a user-defined function within a fully prepared chroot mount environment.
+# Automatically sets up mounts, runs the specified function, then cleans up.
+#
+# The target function must be defined in the current scope and accept:
+#   $1 - Root filesystem mount point
+#   $2+ - Any additional arguments passed after the function name
+#
+# Arguments:
+#   $1 - Device or file for root filesystem (e.g., /dev/sda2 or root.img)
+#   $2 - EFI partition (e.g., /dev/sda1), optional; pass "" if not used
+#   $3 - Boot file/device path (used when boot_part_exist=false)
+#   $4 - Name of the function to execute inside the environment
+#   $5+ - Optional arguments to pass to the target function
+#
+# Note:
+#   - The root mount point is automatically set to ${workdir}/rootfs
+#   - Example usage:
+#       run_in_chroot_mounts "/dev/sda2" "/dev/sda1" "./boot.img" "install_grub" "--force"
+#
+run_in_chroot_mounts() {
+    local rootfs_file_or_part="$1" # Root device/file
+    local efi_part="$2"            # EFI partition
+    local boot_file_path="$3"      # Boot file or device
+    local func_name="$4"           # Function to call
+    shift 4                        # Shift out first four args; rest go to target function
+
+    local rootfs_mount_point="${workdir}/rootfs"
+
+    # Setup full chroot mount environment
+    setup_chroot_mounts "$rootfs_mount_point" "$rootfs_file_or_part" "$efi_part" "$boot_file_path"
+
+    # Execute the provided function with mount point + extra args
+    log::info "Executing function '$func_name' inside mounted chroot environment"
+    "$func_name" "$rootfs_mount_point" "$@"
+
+    # Clean up all mounts regardless of success/failure
+    cleanup_chroot_mounts "$rootfs_mount_point"
+}
+
+step:update_rootfs() {
+    local efi_part=$1
+    local boot_file_path=$2
+
+    update_rootfs_inner() {
+        local rootfs_mount_point=$1
+
+        log::info "Installing rpm packages"
+        disk::install_rpm_on_rootfs "$rootfs_mount_point" "${packages[@]}"
+
+        log::info "Updating /etc/fstab"
+        # Prevent duplicate mounting of efi partitions
+        sed -i '/[[:space:]]\/boot\/efi[[:space:]]/ s/defaults,/defaults,auto,nofail,/' "${rootfs_mount_point}/etc/fstab"
+
+        if [ "$boot_part_exist" = "false" ]; then
+            # update /etc/fstab
+            local root_mount_line_number
+            root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
+            if [ -z "${root_mount_line_number}" ]; then
+                proc::fatal "Cannot find mount for / in /etc/fstab"
+            fi
+
+            ## insert boot mount line
+            local boot_uuid
+            boot_uuid=$(blkid -o value -s UUID "$boot_file_path") # get uuid of the boot image
+            local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults,auto,nofail 0 2"
+            local boot_mount_insert_line_number
+            boot_mount_insert_line_number=$((root_mount_line_number + 1))
+            sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
+        fi
+
+        echo "Cleaning up package manager cache..."
+        yum clean all
+        rm -rf "${rootfs_mount_point}"/var/lib/dnf/history.*
+        rm -rf "${rootfs_mount_point}"/var/cache/dnf/*
+
+    }
+
+    run_in_chroot_mounts "$rootfs_orig_part" "$efi_part" "$boot_file_path" update_rootfs_inner
+
+}
+
+step:update_initrd() {
     local efi_part=$1
     local boot_file_path=$2
     local uki=$3
 
-    log::info "Prepare chroot environment"
-    local rootfs_mount_point=${workdir}/rootfs
-    mkdir -p "${rootfs_mount_point}"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point} && disk::umount_wait_busy ${rootfs_mount_point}"
-    mount "${rootfs_orig_part}" "${rootfs_mount_point}"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev && disk::umount_wait_busy ${rootfs_mount_point}/dev"
-    mount -t devtmpfs devtmpfs "${rootfs_mount_point}/dev"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/dev/pts && disk::umount_wait_busy ${rootfs_mount_point}/dev/pts"
-    mount -t devpts devpts "${rootfs_mount_point}/dev/pts"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/proc && disk::umount_wait_busy ${rootfs_mount_point}/proc"
-    mount -t proc proc "${rootfs_mount_point}/proc"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/run && disk::umount_wait_busy ${rootfs_mount_point}/run"
-    mount -t tmpfs tmpfs "${rootfs_mount_point}/run"
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/sys && disk::umount_wait_busy ${rootfs_mount_point}/sys"
-    mount -t sysfs sysfs "${rootfs_mount_point}/sys"
-    # mount bind boot
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot && disk::umount_wait_busy ${rootfs_mount_point}/boot"
-    if [ "$boot_part_exist" = "false" ]; then
-        mount "${boot_file_path}" "${rootfs_mount_point}/boot"
-    else
-        mount "${boot_part}" "${rootfs_mount_point}/boot"
-    fi
-    # also mount the EFI part
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/boot/efi && disk::umount_wait_busy ${rootfs_mount_point}/boot/efi"
-    if [ "$efi_part_exist" = "true" ]; then
-        mount "$efi_part" "${rootfs_mount_point}/boot/efi"
-    fi
-    # mount bind the /etc/resolv.conf
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/etc/resolv.conf && disk::umount_wait_busy ${rootfs_mount_point}/etc/resolv.conf"
-    mv "${rootfs_mount_point}/etc/resolv.conf" "${rootfs_mount_point}/etc/resolv.conf.cryptpilot"
-    touch "${rootfs_mount_point}/etc/resolv.conf"
-    mount -o bind,ro "$(realpath /etc/resolv.conf)" "${rootfs_mount_point}/etc/resolv.conf"
-    # mount bind the /etc/hosts
-    proc::hook_exit "mountpoint -q ${rootfs_mount_point}/etc/hosts && disk::umount_wait_busy ${rootfs_mount_point}/etc/hosts"
+    update_initrd_inner() {
+        local rootfs_mount_point=$1
+        local uki=$2
 
-    mv "${rootfs_mount_point}/etc/hosts" "${rootfs_mount_point}/etc/hosts.cryptpilot"
-    touch "${rootfs_mount_point}/etc/hosts"
-    mount -o bind,ro "$(realpath /etc/hosts)" "${rootfs_mount_point}/etc/hosts"
-    log::info "Installing rpm packages"
-    disk::install_rpm_on_rootfs "$rootfs_mount_point" "${packages[@]}"
+        # Copy files to the chroot environment
+        cp "${workdir}/metadata.toml" "${rootfs_mount_point}/tmp/"
+        mkdir -p "${rootfs_mount_point}/tmp/cryptpilot/"
+        cp -a "${config_dir}/." "${rootfs_mount_point}/tmp/cryptpilot/"
 
-    # copy cryptpilot config
-    log::info "Installing cryptpilot config from ${config_dir} to target rootfs"
-    mkdir -p "${rootfs_mount_point}/etc/cryptpilot/"
-    cp -a "${config_dir}/." "${rootfs_mount_point}/etc/cryptpilot/"
-
-    log::info "Updating /etc/fstab"
-    # Prevent duplicate mounting of efi partitions
-    sed -i '/[[:space:]]\/boot\/efi[[:space:]]/ s/defaults,/defaults,auto,nofail,/' "${rootfs_mount_point}/etc/fstab"
-
-    if [ "$boot_part_exist" = "false" ]; then
-        # update /etc/fstab
-        local root_mount_line_number
-        root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
-        if [ -z "${root_mount_line_number}" ]; then
-            proc::fatal "Cannot find mount for / in /etc/fstab"
-        fi
-
-        ## insert boot mount line
-        local boot_uuid
-        boot_uuid=$(blkid -o value -s UUID "$boot_file_path") # get uuid of the boot image
-        local boot_mount_line="UUID=${boot_uuid} /boot ext4 defaults,auto,nofail 0 2"
-        local boot_mount_insert_line_number
-        boot_mount_insert_line_number=$((root_mount_line_number + 1))
-        sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
-    fi
-
-    # update initrd
-    log::info "Updating initrd and grub config"
-    chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; $(cat <<'EOF'
+        # update initrd
+        log::info "Updating initrd"
+        chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; $(
+            cat <<'EOF'
 set -e
 set -u
 
@@ -583,42 +722,45 @@ KERNELVER=${REAL_KERNELIMG#/boot/vmlinuz-}
 echo "Kernel version: $KERNELVER"
 
 echo "Generating initrd with dracut"
+
+dracut_common_args=(--kver "$KERNELVER" --hostonly --fstab --add-fstab /etc/fstab --force -v)
+dracut_common_args+=(--add cryptpilot)
+dracut_common_args+=(--include /tmp/metadata.toml /etc/cryptpilot/metadata.toml)
+if [[ -f /tmp/cryptpilot/fde.toml ]]; then
+    dracut_common_args+=(--include /tmp/cryptpilot/fde.toml /etc/cryptpilot/fde.toml)
+fi
+if [[ -f /tmp/cryptpilot/global.toml ]]; then
+    dracut_common_args+=(--include /tmp/cryptpilot/global.toml /etc/cryptpilot/global.toml)
+fi
+
 if [ "${uki:-false}" = true ]; then    
     # Generate UKI with dracut
     echo "Generating UKI image"
-    cmdline=$(dracut --kver "$KERNELVER" --hostonly --fstab --add-fstab /etc/fstab --uefi --hostonly-cmdline --force -v --print-cmdline)
-    cmdline=$(echo "${cmdline} console=ttyS0,115200n8" | xargs) # trim spaces
-    dracut --kver "$KERNELVER" --hostonly --fstab --add-fstab /etc/fstab --uefi --hostonly-cmdline --force -v --kernel-cmdline "${cmdline}"
+    dracut_args=("${dracut_common_args[@]}" --uefi --hostonly-cmdline)
+    cmdline=$(dracut "${dracut_args[@]}" --print-cmdline)
+    cmdline=$(echo "${cmdline} console=tty0 console=ttyS0,115200n8" | xargs)
+    dracut_args=("${dracut_args[@]}" --kernel-cmdline "$cmdline")
 
-    # Determine the output file path. See https://github.com/dracut-ng/dracut-ng/blob/5c57209ba5ef36f8856b4ea1694de8e1da508b71/dracut.sh#L749-L776
-    MACHINE_ID=""
-    [[ -f /etc/machine-id ]] && read MACHINE_ID < /etc/machine-id
-    BUILD_ID=$(while read -r line || [[ $line ]]; do
-            if [[ $line =~ BUILD_ID\=* ]] ; then
-                    eval "$line" && echo "$BUILD_ID" && break;
-            fi
-            done < <(
-                    [ -f /etc/os-release ] && cat /etc/os-release
-                    [ -f /usr/lib/os-release ] && cat /usr/lib/os-release
-            )
-        )
-    UKI_FILE="/boot/efi/EFI/Linux/linux-${KERNELVER}${MACHINE_ID:+-${MACHINE_ID}}${BUILD_ID:+-${BUILD_ID}}.efi"
-    if [ ! -f "$UKI_FILE" ]; then
-        echo "Error: Expected UKI file not found at $UKI_FILE" >&2
-        exit 1
-    fi
-    echo "UKI successfully created at $UKI_FILE"
+    UKI_FILE="/boot/efi/EFI/BOOT/BOOTX64.EFI"
+    dracut "${dracut_args[@]}" "$UKI_FILE"
 
-    # Override the default boot entry
-    echo "Overwriting default boot entry with UKI image"
-    cp -f "$UKI_FILE" /boot/efi/EFI/BOOT/BOOTX64.EFI
+    echo "Patching cmdline in UKI"
+    # The generated cmdline will have a leading space, remove it
+    objcopy --dump-section .cmdline="/tmp/cmdline_full.bin" "$UKI_FILE"
+    cat "/tmp/cmdline_full.bin" | xargs echo -n 2>/dev/null >"/tmp/cmdline_stripped.bin"
+    echo -ne "\x00" >>"/tmp/cmdline_stripped.bin"
+    objcopy --update-section .cmdline="/tmp/cmdline_stripped.bin" "$UKI_FILE"
+
+    echo "UKI successfully created at $UKI_FILE, the default boot entry is now overwrited"
 
     # Remove all other EFI entries
     find /boot/efi/EFI -mindepth 1 -maxdepth 1 ! -name BOOT -exec rm -rf {} +
     find /boot/efi/EFI/BOOT -mindepth 1 -maxdepth 1 ! -name BOOTX64.EFI -exec rm -rf {} +
 else
     echo "Generating new initrd image"
-    dracut --kver "$KERNELVER" --hostonly --fstab --add-fstab /etc/fstab --force -v
+    dracut "${dracut_common_args[@]}"
+
+    echo "Updating grub2.cfg"
     grub2_cfg=""
     if [ -e /etc/grub2.cfg ] ; then
         # alinux3 iso with lagecy BIOS support. The real grub2.cfg is in /boot/grub2/grub.cfg
@@ -636,37 +778,15 @@ else
 
     echo "Detected grub2.cfg, re-generate it now: $grub2_cfg"
     grub2-mkconfig -o "$grub2_cfg"
-
 fi
 
-echo "Cleaning up..."
-yum clean all
-rm -rf /var/lib/dnf/history.*
-rm -rf /var/cache/dnf/*
-
 EOF
-    )"
+        )"
 
-    log::info "Cleaning up chroot environment"
+    }
 
-    disk::umount_wait_busy "${rootfs_mount_point}/etc/hosts"
-    rm -f "${rootfs_mount_point}/etc/hosts"
-    mv "${rootfs_mount_point}/etc/hosts.cryptpilot" "${rootfs_mount_point}/etc/hosts"
-
-    disk::umount_wait_busy "${rootfs_mount_point}/etc/resolv.conf"
-    rm -f "${rootfs_mount_point}/etc/resolv.conf"
-    mv "${rootfs_mount_point}/etc/resolv.conf.cryptpilot" "${rootfs_mount_point}/etc/resolv.conf"
-
-    disk::umount_wait_busy "${rootfs_mount_point}/boot/efi"
-    disk::umount_wait_busy "${rootfs_mount_point}/boot"
-    disk::umount_wait_busy "${rootfs_mount_point}/sys"
-    disk::umount_wait_busy "${rootfs_mount_point}/run"
-    disk::umount_wait_busy "${rootfs_mount_point}/proc"
-    disk::umount_wait_busy "${rootfs_mount_point}/dev/pts"
-    disk::umount_wait_busy "${rootfs_mount_point}/dev"
-
-    disk::umount_wait_busy "${rootfs_mount_point}"
-
+    # Note that the rootfs.img will not be used any more so mount it without 'ro' flag will not change the hash of rootfs.
+    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki"
 }
 
 step::shrink_and_extract_rootfs_part() {
@@ -817,20 +937,16 @@ step::setup_rootfs_hash_lv() {
     rm -f "${rootfs_hash_file_path}"
     disk::dm_remove_all "${device}"
 
-    # Recording rootfs hash in boot partition
-    echo "Updating metadata in boot partition"
+    # Recording rootfs hash in metadata file
+    echo "Generate metadata file"
     local roothash
     roothash=$(cat "${workdir}/rootfs_hash.roothash")
-    local boot_mount_point="${workdir}/boot"
-    mkdir -p "${boot_mount_point}"
-    proc::hook_exit "mountpoint -q ${boot_mount_point} && disk::umount_wait_busy ${boot_mount_point}"
-    mount "${boot_part}" "${boot_mount_point}"
-    mkdir -p "${boot_mount_point}/cryptpilot/"
-    cat <<EOF >"${boot_mount_point}/cryptpilot/metadata.toml"
+
+    cat <<EOF >"${workdir}/metadata.toml"
 type = 1
 root_hash = "${roothash}"
 EOF
-    disk::umount_wait_busy "${boot_mount_point}"
+
 }
 
 main() {
@@ -983,7 +1099,11 @@ main() {
     step::setup_workdir
 
     log::step "[ 0 ] Checking for required tools"
-    yum install -y qemu-img cryptsetup veritysetup lvm2 parted grub2-tools e2fsprogs lsof
+    local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof)
+    if [[ "$uki" == "true" ]]; then
+        tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+    fi
+    yum install -y "${tool_packages[@]}"
 
     #
     # 1. Prepare disk
@@ -1057,10 +1177,10 @@ main() {
     fi
 
     #
-    # 3. Update rootfs and initrd
+    # 3. Update rootfs
     #
-    log::step "[ 3 ] Update rootfs and initrd"
-    step:update_rootfs_and_initrd "${efi_part}" "${boot_file_path}" "${uki}"
+    log::step "[ 3 ] Update rootfs"
+    step:update_rootfs "${efi_part}" "${boot_file_path}"
 
     #
     # 4. Shrinking rootfs and extract
@@ -1107,9 +1227,15 @@ main() {
     step::setup_rootfs_hash_lv "${rootfs_file_path}" "${boot_part}"
 
     #
-    # 9. Cleaning up
+    # 9. Update initrd
     #
-    log::step "[ 9 ] Cleaning up"
+    log::step "[ 9 ] Update initrd"
+    step:update_initrd "${efi_part}" "${boot_part}" "${uki}"
+
+    #
+    # 10. Cleaning up
+    #
+    log::step "[ 10 ] Cleaning up"
     disk::dm_remove_all "${device}"
     blockdev --flushbufs "${device}"
 
@@ -1118,10 +1244,12 @@ main() {
         log::success "Everything done, the device is ready to use: ${device}"
     else
         #
-        # 10. Generating new image file
+        # 11. Generating new image file
         #
-        log::step "[ 10 ] Generating new image file"
+        log::step "[ 11 ] Generating new image file"
         qemu-nbd --disconnect "${device}"
+        sleep 2 # wait for the qemu-nbd daemon to release the file lock
+
         # check suffix of the output file
         local output_file_suffix=${output_file##*.}
         if [[ "${output_file_suffix}" == "vhd" ]]; then

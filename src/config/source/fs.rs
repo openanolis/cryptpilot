@@ -11,7 +11,7 @@ use super::super::global::GlobalConfig;
 use super::super::volume::VolumeConfig;
 use super::ConfigSource;
 
-const CRYPTPILOT_CONFIG_DIR_DEFAULT: &str = "/etc/cryptpilot";
+pub const CRYPTPILOT_CONFIG_DIR_DEFAULT: &str = "/etc/cryptpilot";
 
 pub struct FileSystemConfigSource {
     config_dir: PathBuf,

@@ -1,6 +1,6 @@
 use super::{Command, IntoCommand};
 
-pub mod disk;
+mod disk;
 pub mod dump_config;
 pub mod show_reference_value;
 

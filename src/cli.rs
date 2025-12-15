@@ -116,7 +116,7 @@ pub struct FdeOptions {
 
 #[derive(Subcommand, Debug)]
 pub enum FdeSubcommand {
-    /// Display cryptographic reference values (e.g., hashes) of boot-related components for attestation.
+    /// Display cryptographic reference values (e.g., hashes) of boot-related artifacts for attestation.
     ///
     /// This includes artifacts such as:
     /// - GRUB configuration and binaries

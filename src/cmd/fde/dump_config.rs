@@ -2,9 +2,13 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::StreamExt;
 
 use crate::{
-    cmd::fde::disk::{FdeDisk, OnCurrentSystemFdeDisk, OnExternalFdeDisk},
+    cmd::fde::disk::{
+        artifacts::BootArtifacts, current::OnCurrentSystemFdeDisk, external::OnExternalFdeDisk,
+        FdeDisk,
+    },
     config::source::cloud_init::CLOUD_INIT_FDE_CONFIG_BUNDLE_HEADER,
 };
 
@@ -15,12 +19,41 @@ pub struct ConfigDumpCommand {
 #[async_trait]
 impl super::super::Command for ConfigDumpCommand {
     async fn run(&self) -> Result<()> {
-        let fde_disk: Box<dyn FdeDisk + Send> = match &self.disk {
+        tracing::debug!("Collecting boot related artifacts");
+
+        let fde_disk: Box<dyn FdeDisk + Send + Sync> = match &self.disk {
             Some(disk) => Box::new(OnExternalFdeDisk::new_from_disk(disk).await?),
             None => Box::new(OnCurrentSystemFdeDisk::new().await?),
         };
 
-        let fde_config_bundle = fde_disk.load_fde_config_bundle().await?;
+        let boot_artifacts = fde_disk.get_boot_artifacts().await?;
+        tracing::debug!("Starting to extract cryptpilot fde config");
+
+        let config_bundles = futures::stream::iter(boot_artifacts.iter())
+            .filter_map(|BootArtifacts::Grub { grub: _, kernel }| async {
+                kernel
+                    .extract_cryptpilot_files()
+                    .await
+                    .map(|(fde_config_bundle, _)| fde_config_bundle)
+                    .map_err(|error| {
+                        tracing::warn!(
+                            ?error,
+                            "Failed to load fde config bundle or root_hash from initrd, skip now"
+                        );
+                    })
+                    .ok()
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        if config_bundles.len() > 1 {
+            tracing::warn!("More than one fde config bundle found, will print the first one only")
+        }
+
+        let fde_config_bundle = config_bundles
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("No fde config bundle found"))?;
 
         let hash_hex = fde_config_bundle.gen_hash_hex()?;
         let hash_content_pretty = fde_config_bundle.gen_hash_content_pretty()?;
