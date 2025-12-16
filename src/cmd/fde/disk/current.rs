@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
 use tokio::{fs::File, io::AsyncReadExt as _, process::Command};
 
 use crate::{
-    cmd::fde::disk::{findmnt_of_dir, grub::GrubBootFdeDisk, Disk, FdeBootType, FdeDisk},
+    cmd::fde::disk::{
+        findmnt_of_dir, grub::FdeDiskGrubExt, uki::UKI_FILE_PATH, Disk, FdeBootType, FdeDisk,
+        FdeDiskUkiExt,
+    },
     fs::cmd::CheckCommandOutput as _,
 };
 
@@ -18,21 +21,35 @@ pub struct OnCurrentSystemFdeDisk {
 }
 
 enum ExternalDiskType {
-    /// A normal disk which is not protected by cryptpilot
-    /// The disk mounts:
-    ///     /boot/efi -> efi partition
-    ///     / -> root partition
     NoFde { root_dev: PathBuf },
-    /// A disk which is protected by cryptpilot with grub as bootloader
-    /// The disk mounts:
-    ///     /boot/efi -> efi partition
-    ///     /boot -> boot partition
-    ///     / -> root partition
     Grub { boot_dev: PathBuf },
+    Uki,
 }
 
 impl OnCurrentSystemFdeDisk {
     pub async fn new() -> Result<Self> {
+        // Find the BOOTX64.EFI in the EFI partition
+        {
+            let file = Path::new(UKI_FILE_PATH);
+            if file.exists() {
+                tracing::debug!("Found BOOTX64.EFI in the EFI partition, checking...");
+                match tokio::fs::read(&file)
+                    .await
+                    .with_context(|| format!("Failed to read {file:?}"))
+                    .and_then(|bytes| crate::cmd::fde::disk::uki::assume_uki_image(&bytes))
+                {
+                    Ok(()) => {
+                        return Ok(Self {
+                            disk_type: ExternalDiskType::Uki,
+                        });
+                    }
+                    Err(error) => {
+                        tracing::warn!(?error, ?file, "This disk is not a UKI booted disk since BOOTX64.EFI is not a valid UKI image.");
+                    }
+                }
+            }
+        }
+
         // Find the block device that contains /boot mount point
         let boot_dev = findmnt_of_dir(Path::new("/boot"))
             .await
@@ -63,6 +80,7 @@ impl FdeDisk for OnCurrentSystemFdeDisk {
         match self.disk_type {
             ExternalDiskType::NoFde { .. } => FdeBootType::NoFde,
             ExternalDiskType::Grub { .. } => FdeBootType::Grub,
+            ExternalDiskType::Uki { .. } => FdeBootType::Uki,
         }
     }
 }
@@ -80,10 +98,11 @@ impl Disk for OnCurrentSystemFdeDisk {
         Ok(buf)
     }
 
-    fn get_boot_dir_located_dev(&self) -> &Path {
+    fn get_boot_dir_located_dev(&self) -> Result<&Path> {
         match &self.disk_type {
-            ExternalDiskType::NoFde { root_dev } => root_dev,
-            ExternalDiskType::Grub { boot_dev } => boot_dev,
+            ExternalDiskType::NoFde { root_dev } => Ok(root_dev),
+            ExternalDiskType::Grub { boot_dev } => Ok(boot_dev),
+            ExternalDiskType::Uki { .. } => bail!("Not supported for UKI"),
         }
     }
 
@@ -93,7 +112,7 @@ impl Disk for OnCurrentSystemFdeDisk {
 }
 
 #[async_trait]
-impl GrubBootFdeDisk for OnCurrentSystemFdeDisk {
+impl FdeDiskGrubExt for OnCurrentSystemFdeDisk {
     async fn load_global_grub_env_file(&self) -> Result<String> {
         // Get the saved entry from GRUB environment
         let stdout = Command::new("grub2-editenv").arg("list").run().await?;
@@ -103,3 +122,6 @@ impl GrubBootFdeDisk for OnCurrentSystemFdeDisk {
         Ok(grub_env)
     }
 }
+
+#[async_trait]
+impl FdeDiskUkiExt for OnCurrentSystemFdeDisk {}

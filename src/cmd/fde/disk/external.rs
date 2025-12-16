@@ -10,7 +10,10 @@ use tokio::{
 };
 
 use crate::{
-    cmd::fde::disk::{findmnt_of_dir, grub::GrubBootFdeDisk, Disk, FdeBootType, FdeDisk},
+    cmd::fde::disk::{
+        findmnt_of_dir, grub::FdeDiskGrubExt, uki::UKI_FILE_PATH_IN_EFI_PART, Disk, FdeBootType,
+        FdeDisk, FdeDiskUkiExt,
+    },
     fs::{cmd::CheckCommandOutput as _, mount::TmpMountPoint, nbd::NbdDevice},
 };
 
@@ -22,26 +25,21 @@ pub struct OnExternalFdeDisk {
 }
 
 enum ExternalDiskType {
-    /// A normal disk which is not protected by cryptpilot
-    /// The disk mounts:
-    ///     /boot/efi -> efi partition
-    ///     / -> root partition
     NoFde {
         #[allow(unused)]
         efi_dev: PathBuf,
         efi_dev_tmp_mount: TmpMountPoint,
         root_dev: PathBuf,
-        #[allow(unused)]
         root_dev_tmp_mount: TmpMountPoint,
     },
-    /// A disk which is protected by cryptpilot with grub as bootloader
-    /// The disk mounts:
-    ///     /boot/efi -> efi partition
-    ///     /boot -> boot partition
-    ///     / -> root partition
     Grub {
         boot_dev: PathBuf,
         boot_dev_tmp_mount: TmpMountPoint,
+        #[allow(unused)]
+        efi_dev: PathBuf,
+        efi_dev_tmp_mount: TmpMountPoint,
+    },
+    Uki {
         #[allow(unused)]
         efi_dev: PathBuf,
         efi_dev_tmp_mount: TmpMountPoint,
@@ -74,30 +72,57 @@ impl OnExternalFdeDisk {
             .context("Cannot found EFI partition on the disk.")?;
         let efi_dev_tmp_mount = TmpMountPoint::mount(&efi_dev, false).await?;
 
-        // Find the boot partition and mount it to a tmp mount point
-        let disk_type = match Self::detect_boot_part(&disk_device).await {
-            Ok(boot_dev) => {
-                let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev, false).await?;
-
-                ExternalDiskType::Grub {
-                    boot_dev,
-                    boot_dev_tmp_mount,
-                    efi_dev,
-                    efi_dev_tmp_mount,
+        let disk_type = 'label: {
+            // Find the BOOTX64.EFI in the EFI partition
+            {
+                let file = efi_dev_tmp_mount
+                    .mount_point()
+                    .join(UKI_FILE_PATH_IN_EFI_PART);
+                if file.exists() {
+                    tracing::debug!("Found BOOTX64.EFI in the EFI partition, checking...");
+                    match tokio::fs::read(&file)
+                        .await
+                        .with_context(|| format!("Failed to read {file:?}"))
+                        .and_then(|bytes| crate::cmd::fde::disk::uki::assume_uki_image(&bytes))
+                    {
+                        Ok(()) => {
+                            break 'label ExternalDiskType::Uki {
+                                efi_dev,
+                                efi_dev_tmp_mount,
+                            };
+                        }
+                        Err(error) => {
+                            tracing::warn!(?error, ?file, "This disk is not a UKI booted disk since BOOTX64.EFI is not a valid UKI image.");
+                        }
+                    }
                 }
             }
-            Err(error) => {
-                tracing::warn!(?error, "Cannot found boot partition on the disk. The disk may not be a cryptpilot encrypted disk.");
-                let root_dev = Self::detect_root_part(Some(&disk_device))
-                    .await
-                    .context("Failed to detect root partition on the disk")?;
-                let root_dev_tmp_mount = TmpMountPoint::mount(&root_dev, false).await?;
 
-                ExternalDiskType::NoFde {
-                    efi_dev,
-                    efi_dev_tmp_mount,
-                    root_dev,
-                    root_dev_tmp_mount,
+            // Find the boot partition and mount it to a tmp mount point
+            match Self::detect_boot_part(&disk_device).await {
+                Ok(boot_dev) => {
+                    let boot_dev_tmp_mount = TmpMountPoint::mount(&boot_dev, false).await?;
+
+                    ExternalDiskType::Grub {
+                        boot_dev,
+                        boot_dev_tmp_mount,
+                        efi_dev,
+                        efi_dev_tmp_mount,
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(?error, "Cannot found boot partition on the disk. The disk may not be a cryptpilot encrypted disk.");
+                    let root_dev = Self::detect_root_part(Some(&disk_device))
+                        .await
+                        .context("Failed to detect root partition on the disk")?;
+                    let root_dev_tmp_mount = TmpMountPoint::mount(&root_dev, false).await?;
+
+                    ExternalDiskType::NoFde {
+                        efi_dev,
+                        efi_dev_tmp_mount,
+                        root_dev,
+                        root_dev_tmp_mount,
+                    }
                 }
             }
         };
@@ -306,6 +331,7 @@ impl FdeDisk for OnExternalFdeDisk {
         match self.disk_type {
             ExternalDiskType::NoFde { .. } => FdeBootType::NoFde,
             ExternalDiskType::Grub { .. } => FdeBootType::Grub,
+            ExternalDiskType::Uki { .. } => FdeBootType::Uki,
         }
     }
 }
@@ -338,10 +364,11 @@ impl Disk for OnExternalFdeDisk {
         Ok(buf)
     }
 
-    fn get_boot_dir_located_dev(&self) -> &Path {
+    fn get_boot_dir_located_dev(&self) -> Result<&Path> {
         match &self.disk_type {
-            ExternalDiskType::NoFde { root_dev, .. } => root_dev,
-            ExternalDiskType::Grub { boot_dev, .. } => boot_dev,
+            ExternalDiskType::NoFde { root_dev, .. } => Ok(root_dev),
+            ExternalDiskType::Grub { boot_dev, .. } => Ok(boot_dev),
+            ExternalDiskType::Uki { .. } => bail!("Not supported for UKI"),
         }
     }
 
@@ -351,6 +378,9 @@ impl Disk for OnExternalFdeDisk {
                 efi_dev_tmp_mount, ..
             }
             | ExternalDiskType::Grub {
+                efi_dev_tmp_mount, ..
+            }
+            | ExternalDiskType::Uki {
                 efi_dev_tmp_mount, ..
             } => efi_dev_tmp_mount.mount_point(),
         }
@@ -396,6 +426,17 @@ impl OnExternalFdeDisk {
                         .join(path.strip_prefix("/boot")?)
                 }
             }
+            ExternalDiskType::Uki {
+                efi_dev_tmp_mount, ..
+            } => {
+                if path.starts_with("/boot/efi") {
+                    efi_dev_tmp_mount
+                        .mount_point()
+                        .join(path.strip_prefix("/boot/efi")?)
+                } else {
+                    bail!("Access files other than /boot/efi is not supported")
+                }
+            }
         };
 
         Ok(real_path)
@@ -403,7 +444,7 @@ impl OnExternalFdeDisk {
 }
 
 #[async_trait]
-impl GrubBootFdeDisk for OnExternalFdeDisk {
+impl FdeDiskGrubExt for OnExternalFdeDisk {
     async fn load_global_grub_env_file(&self) -> Result<String> {
         // Try to find the GRUB environment file
         let mut grub_env_path = Path::new("/boot/grubenv");
@@ -431,3 +472,6 @@ impl GrubBootFdeDisk for OnExternalFdeDisk {
         Ok(String::from_utf8(grub_env_content)?)
     }
 }
+
+#[async_trait]
+impl FdeDiskUkiExt for OnExternalFdeDisk {}

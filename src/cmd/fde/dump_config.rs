@@ -7,7 +7,7 @@ use futures::StreamExt;
 use crate::{
     cmd::fde::disk::{
         artifacts::BootArtifacts, current::OnCurrentSystemFdeDisk, external::OnExternalFdeDisk,
-        FdeDisk,
+        BootArtifactsType, FdeDisk,
     },
     config::source::cloud_init::CLOUD_INIT_FDE_CONFIG_BUNDLE_HEADER,
 };
@@ -26,11 +26,20 @@ impl super::super::Command for ConfigDumpCommand {
             None => Box::new(OnCurrentSystemFdeDisk::new().await?),
         };
 
-        let boot_artifacts = fde_disk.get_boot_artifacts().await?;
+        let boot_artifacts = fde_disk.extract_boot_artifacts().await?;
         tracing::debug!("Starting to extract cryptpilot fde config");
 
-        let config_bundles = futures::stream::iter(boot_artifacts.iter())
-            .filter_map(|BootArtifacts::Grub { grub: _, kernel }| async {
+        let kernel_artifacts = match boot_artifacts {
+            BootArtifactsType::Grub(grub_boot_artifacts) => {
+                grub_boot_artifacts.extract_kernel_artifacts().await?
+            }
+            BootArtifactsType::Uki(uki_boot_artifacts) => {
+                uki_boot_artifacts.extract_kernel_artifacts().await?
+            }
+        };
+
+        let config_bundles = futures::stream::iter(kernel_artifacts.into_iter())
+            .filter_map(|kernel| async move {
                 kernel
                     .extract_cryptpilot_files()
                     .await

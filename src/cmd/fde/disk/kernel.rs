@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// Represents kernel and initrd images along with command line arguments needed to boot the OS.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KernelArtifacts {
     /// A list of kernel command line arguments passed to the kernel during boot (e.g., root=/dev/sda1 quiet splash).
     ///

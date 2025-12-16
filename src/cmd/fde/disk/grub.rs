@@ -6,7 +6,10 @@ use std::{
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
 use async_walkdir::WalkDir;
-use futures_lite::stream::StreamExt;
+use authenticode::PeTrait;
+use futures::StreamExt;
+use indexmap::IndexMap;
+use object::read::pe::{PeFile32, PeFile64};
 use tokio::{fs::File, io::AsyncReadExt as _};
 
 use crate::cmd::fde::disk::{
@@ -34,6 +37,117 @@ pub struct GrubArtifacts {
     /// Optional contents of the main GRUB configuration file (grub.cfg).
     /// This file defines menu entries and kernel boot parameters.
     pub grub_cfg: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct GrubBootArtifactsItem {
+    grub: GrubArtifacts,
+    kernel: KernelArtifacts,
+}
+
+pub type GrubBootArtifacts = Vec<GrubBootArtifactsItem>;
+
+#[async_trait]
+impl BootArtifacts for GrubBootArtifacts {
+    async fn inseart_reference_value<T>(
+        &self,
+        map: &mut IndexMap<String, Vec<String>>,
+        hash_key: &str,
+    ) -> Result<()>
+    where
+        T: digest::Digest + digest::Update,
+    {
+        map.insert(
+            "kernel_cmdline".to_string(),
+            self.iter()
+                .flat_map(|GrubBootArtifactsItem { grub: _, kernel }| {
+                    kernel
+                        .kernel_cmdlines
+                        .iter()
+                        .map(|cmdline| format!("grub_kernel_cmdline {}", cmdline))
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        map.insert(
+            format!("measurement.kernel_cmdline.{hash_key}"),
+            self.iter()
+                .flat_map(|GrubBootArtifactsItem { grub: _, kernel }| {
+                    kernel.kernel_cmdlines.iter().map(|cmdline| {
+                        let mut hasher = T::new();
+                        digest::Digest::update(&mut hasher, cmdline);
+                        hex::encode(hasher.finalize())
+                    })
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        map.insert(
+            format!("measurement.kernel.{hash_key}"),
+            self.iter()
+                .map(|GrubBootArtifactsItem { grub: _, kernel }| {
+                    let mut hasher = T::new();
+                    digest::Digest::update(&mut hasher, &kernel.kernel);
+                    hex::encode(hasher.finalize())
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        map.insert(
+            format!("measurement.initrd.{hash_key}"),
+            self.iter()
+                .map(|GrubBootArtifactsItem { grub: _, kernel }| {
+                    let mut hasher = T::new();
+                    digest::Digest::update(&mut hasher, &kernel.initrd);
+                    hex::encode(hasher.finalize())
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        map.insert(
+            format!("measurement.grub.{hash_key}"),
+            self.iter()
+                .map(|GrubBootArtifactsItem { grub, kernel: _ }| {
+                    calculate_authenticode_hash::<T>(&grub.grub_data)
+                })
+                .collect::<Result<Vec<_>>>()?,
+        );
+
+        map.insert(
+            format!("measurement.shim.{hash_key}"),
+            self.iter()
+                .map(|GrubBootArtifactsItem { grub, kernel: _ }| {
+                    calculate_authenticode_hash::<T>(&grub.shim_data)
+                })
+                .collect::<Result<Vec<_>>>()?,
+        );
+
+        Ok(())
+    }
+
+    async fn extract_kernel_artifacts(&self) -> Result<Vec<KernelArtifacts>> {
+        Ok(self
+            .iter()
+            .map(|GrubBootArtifactsItem { grub: _, kernel }| kernel.to_owned())
+            .collect())
+    }
+}
+
+fn parse_pe(bytes: &[u8]) -> Result<Box<dyn PeTrait + '_>, object::read::Error> {
+    if let Ok(pe) = PeFile64::parse(bytes) {
+        Ok(Box::new(pe))
+    } else {
+        let pe = PeFile32::parse(bytes)?;
+        Ok(Box::new(pe))
+    }
+}
+
+fn calculate_authenticode_hash<T: digest::Digest + digest::Update>(bytes: &[u8]) -> Result<String> {
+    let pe = parse_pe(bytes)?;
+    let mut hasher = T::new();
+    authenticode::authenticode_digest(&*pe, &mut hasher)
+        .context("calculate_authenticode_hash failed")?;
+    Ok(hex::encode(hasher.finalize()))
 }
 
 pub async fn parse_grub_env_vars(
@@ -94,9 +208,9 @@ pub async fn parse_grub_env_vars(
 }
 
 #[async_trait]
-pub(super) trait GrubBootFdeDisk: Disk {
-    async fn get_boot_artifacts_grub(&self) -> Result<Vec<BootArtifacts>> {
-        let mut artifacts = vec![];
+pub(super) trait FdeDiskGrubExt: Disk {
+    async fn extract_boot_artifacts_grub(&self) -> Result<GrubBootArtifacts> {
+        let mut artifacts: Vec<_> = vec![];
 
         tracing::debug!("Try to load grub.cfg file from BOOT partition");
         let global_grub_env = match self.load_global_grub_env_file().await {
@@ -150,7 +264,7 @@ pub(super) trait GrubBootFdeDisk: Disk {
             let grub_vars = parse_grub_env_vars(grub_env, grub_cfg).await?;
 
             let kernel_artifacts = self.load_kernel_artifacts(&grub_vars, grub_cfg).await?;
-            artifacts.push(BootArtifacts::Grub {
+            artifacts.push(GrubBootArtifactsItem {
                 grub: grub_artifact,
                 kernel: kernel_artifacts,
             })
@@ -336,7 +450,7 @@ pub(super) trait GrubBootFdeDisk: Disk {
 
                 // Extract partition number from device path
                 // For example, /dev/sda3 -> (hd0,gpt3) or (hd0,msdos3), /dev/nvme0n1p3 -> (hd0,gpt3) or (hd0,msdos3)
-                let boot_dir_dev = self.get_boot_dir_located_dev();
+                let boot_dir_dev = self.get_boot_dir_located_dev()?;
                 if let Ok(partition_num) = boot_dir_dev
                     .to_string_lossy()
                     .chars()
