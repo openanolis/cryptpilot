@@ -100,7 +100,7 @@ We will use the Alinux3 disk image file from [here](https://mirrors.aliyun.com/a
 1. Download the Alinux3 disk image file (KVM x86_64 version with Microsoft Virtual PC format):
 
 ```sh
-wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2
+wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2
 ```
 
 2. Encrypt the disk image file:
@@ -110,7 +110,7 @@ Here we will encrypt the disk image file with a provided passphrase (`AAAaaawewe
 And you can start the encryption with:
 
 ```sh
-cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20250117.qcow2 --out ./encrypted.qcow2 -c ./config_dir/ --rootfs-passphrase AAAaaawewe222
+cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 --out ./encrypted.qcow2 -c ./config_dir/ --rootfs-passphrase AAAaaawewe222
 ```
 
 > Note: You can also use the --package parameter to install some packages/rpms to the disk, before the encryption.
