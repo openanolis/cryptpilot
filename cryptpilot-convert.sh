@@ -222,6 +222,9 @@ proc::print_help_and_exit() {
     echo "                                                          converting. This can be specified multiple times."
     echo "      --wipe-freed-space                                  Wipe the freed space with zero, so that the qemu-img convert would generate smaller image"
     echo "      --uki                                               Generate a Unified Kernel Image image and boot from it instead of boot with GRUB"
+    echo "      --uki-append-cmdline <cmdline>                      Append custom command line parameters when generating a UKI image. By default, only essential"
+    echo "                                                          parameters are included. This option allows you to extend the kernel command line. The default"
+    echo "                                                          value is 'console=tty0 console=ttyS0,115200n8'."
     echo "  -h, --help                                              Show this help message and exit."
     exit "$1"
 }
@@ -686,10 +689,12 @@ step:update_initrd() {
     local efi_part=$1
     local boot_file_path=$2
     local uki=$3
+    local uki_append_cmdline=$4
 
     update_initrd_inner() {
         local rootfs_mount_point=$1
         local uki=$2
+        local uki_append_cmdline=$3
 
         # Copy files to the chroot environment
         cp "${workdir}/metadata.toml" "${rootfs_mount_point}/tmp/"
@@ -698,7 +703,7 @@ step:update_initrd() {
 
         # update initrd
         log::info "Updating initrd"
-        chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; $(
+        chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; uki_append_cmdline='${uki_append_cmdline}' ; $(
             cat <<'EOF'
 set -e
 set -u
@@ -738,7 +743,7 @@ if [ "${uki:-false}" = true ]; then
     echo "Generating UKI image"
     dracut_args=("${dracut_common_args[@]}" --uefi --hostonly-cmdline)
     cmdline=$(dracut "${dracut_args[@]}" --print-cmdline)
-    cmdline=$(echo "${cmdline} console=tty0 console=ttyS0,115200n8" | xargs)
+    cmdline=$(echo "${cmdline} ${uki_append_cmdline}" | xargs)
     dracut_args=("${dracut_args[@]}" --kernel-cmdline "$cmdline")
 
     UKI_FILE="/boot/efi/EFI/BOOT/BOOTX64.EFI"
@@ -786,7 +791,7 @@ EOF
     }
 
     # Note that the rootfs.img will not be used any more so mount it without 'ro' flag will not change the hash of rootfs.
-    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki"
+    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline"
 }
 
 step::shrink_and_extract_rootfs_part() {
@@ -974,6 +979,7 @@ main() {
     local rootfs_orig_part_exist=false
     local wipe_freed_space=false
     local uki=false
+    local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -1020,6 +1026,10 @@ main() {
         --uki)
             uki=true
             shift 1
+            ;;
+        --uki-append-cmdline)
+            uki_append_cmdline="$2"
+            shift 2
             ;;
         -h | --help)
             proc::print_help_and_exit 0
@@ -1230,7 +1240,7 @@ main() {
     # 9. Update initrd
     #
     log::step "[ 9 ] Update initrd"
-    step:update_initrd "${efi_part}" "${boot_part}" "${uki}"
+    step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
 
     #
     # 10. Cleaning up
