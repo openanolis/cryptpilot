@@ -91,31 +91,7 @@ rootfs卷包含如下配置项：
 
 ###### 度量原理
 
-CryptPilot使用远程证明（Remote Attestation）技术来实现对根文件系统的度量，该特性依赖于系统中运行的Attestation-Agent服务，通过将根文件系统的度量值记录在不可回滚的EventLog中，配合内核的dm-verity机制，实现根文件系统的完整性保护。
-
-在进入系统后，可以通过`/run/attestation-agent/eventlog`检查CryptPilot记录的EventLog：
-
-> [!NOTE]
-> Eventlog的格式为二进制文件，请勿随意修改防止完整性校验不一致。我们可以从二进制文件中查看到包含Cryptpilot记录项的部分。
-
-```txt
-# cat /run/attestation-agent/eventlog
-...
-cryptpilot.alibabacloud.com load_config b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877
-...
-cryptpilot.alibabacloud.com fde_rootfs_hash a3f73f5b995e7d8915c998d9f1e56b0e063a6e20c2bbb512e88e8fbc4e8f2965
-...
-cryptpilot.alibabacloud.com initrd_switch_root {}
-...
-```
-
-如上所示，在CryptPilot启动过程中，共会记录三个EventLog：
-
-| Domain | Operation | 示例值 | 描述 |
-| --- | --- | --- | --- |
-| cryptpilot.alibabacloud.com | load_config | `b8635580d85cb0a2b5896664eb795cadb99a589783817c81e263f6752f2a735d2705b4638947de3d947231b76b5a1877` | CryptPilot所使用的配置文件的SHA384值 |
-| cryptpilot.alibabacloud.com | fde_rootfs_hash | `a3f73f5b995e7d8915c998d9f1e56b0e063a6e20c2bbb512e88e8fbc4e8f2965` | 解密后启动的rootfs卷的度量值 |
-| cryptpilot.alibabacloud.com | initrd_switch_root | `{}` | 一个事件记录，用于标识系统当前已经从initrd阶段切换到真实的系统中，该项的值始终为`{}` |
+CryptPilot使用远程证明（Remote Attestation）技术来实现对根文件系统的度量。根文件系统的预期值被记录在initrd镜像中，而initrd自身的度量值被记录在不可回滚的EventLog（CCEL）中，配合内核的dm-verity机制，实现根文件系统的完整性保护。
 
 进入系统后，业务可以基于该度量机制产生的EventLog，对系统启动过程进行本地验证，或者通过远程证明的方式提供给可信实体进行验证。
 

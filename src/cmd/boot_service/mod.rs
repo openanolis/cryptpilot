@@ -7,10 +7,7 @@ pub mod time_sync;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 
-use crate::{
-    cli::{BootServiceOptions, BootStage},
-    measure::{AutoDetectMeasure, Measure as _, OPERATION_NAME_INITRD_SWITCH_ROOT},
-};
+use crate::cli::{BootServiceOptions, BootStage};
 
 pub struct BootServiceCommand {
     pub boot_service_options: BootServiceOptions,
@@ -28,15 +25,6 @@ impl super::Command for BootServiceCommand {
                     .context("Failed to setup volumes required by FDE")?;
             }
             BootStage::InitrdFdeAfterSysroot => {
-                let measure = AutoDetectMeasure::new().await;
-                if let Err(e) = measure
-                    .extend_measurement(OPERATION_NAME_INITRD_SWITCH_ROOT.into(), "{}".into()) // empty json object
-                    .await
-                    .context("Failed to record switch root event to runtime measurement")
-                {
-                    tracing::warn!("{e:?}")
-                }
-
                 stage::after_sysroot::setup_mounts_required_by_fde()
                     .await
                     .context("Failed to setup mounts required by FDE")?;

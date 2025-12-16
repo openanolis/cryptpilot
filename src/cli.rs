@@ -135,16 +135,6 @@ pub enum FdeSubcommand {
         /// Multiple algorithms can be provided (e.g., --hash-algo sha384 --hash-algo sm3).
         #[clap(long = "hash-algo", default_value = "sha384")]
         hash_algos: Vec<ShowReferenceValueHashAlgo>,
-        /// Optional stage filter (e.g., initrd, system). If not provided, all stages are included.
-        ///
-        /// Used to inject additional reference values for specific boot stages. For example:
-        /// - When `--stage system` is specified, an extra claim is added:
-        ///   `cryptpilot.alibabacloud.com initrd_switch_root {}`
-        ///   indicating that the system has switched to the new root filesystem (sysroot).
-        ///
-        /// If omitted, no additional stage-specific claims are generated.
-        #[clap(long)]
-        stage: Option<ShowReferenceValueStage>,
     },
 
     /// Dump fde config and global config as toml, which can be used in cloud-init user data.
@@ -165,15 +155,6 @@ pub enum ShowReferenceValueHashAlgo {
 
     #[clap(name = "sm3")]
     Sm3,
-}
-
-#[derive(ValueEnum, Clone, Debug)]
-pub enum ShowReferenceValueStage {
-    #[clap(name = "initrd")]
-    Initrd,
-
-    #[clap(name = "system")]
-    System,
 }
 
 #[derive(Parser, Debug)]

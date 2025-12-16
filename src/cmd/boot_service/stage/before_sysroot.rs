@@ -14,7 +14,6 @@ use crate::{
     },
     config::volume::MakeFsType,
     fs::cmd::CheckCommandOutput,
-    measure::{AutoDetectMeasure, Measure as _, OPERATION_NAME_FDE_ROOTFS_HASH},
     provider::{IntoProvider as _, KeyProvider as _, VolumeType},
     types::IntegrityType,
 };
@@ -52,18 +51,6 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
     );
     if metadata.r#type != 1 {
         bail!("Unsupported cryptpilot metadata type: {}", metadata.r#type);
-    }
-    // Extend rootfs hash to runtime measurement
-    let measure = AutoDetectMeasure::new().await;
-    if let Err(e) = measure
-        .extend_measurement(
-            OPERATION_NAME_FDE_ROOTFS_HASH.into(),
-            metadata.root_hash.clone(),
-        )
-        .await
-        .context("Failed to extend rootfs hash to runtime measurement")
-    {
-        tracing::warn!("{e:?}")
     }
 
     // 3. Setup rootfs dm-crypt for rootfs volume

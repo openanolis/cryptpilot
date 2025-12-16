@@ -4,9 +4,7 @@ pub mod attestation_agent;
 use anyhow::Result;
 use sha2::Digest;
 
-pub const OPERATION_NAME_LOAD_CONFIG: &str = "load_config";
-pub const OPERATION_NAME_FDE_ROOTFS_HASH: &str = "fde_rootfs_hash";
-pub const OPERATION_NAME_INITRD_SWITCH_ROOT: &str = "initrd_switch_root";
+pub const OPERATION_NAME_LOAD_CONFIG_UNTRUSTED: &str = "load_config_untrusted";
 
 pub trait Measure {
     #[allow(async_fn_in_trait)]

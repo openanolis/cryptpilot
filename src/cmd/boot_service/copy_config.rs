@@ -8,40 +8,50 @@ use crate::{
         initrd_state::InitrdStateConfigSource,
         ConfigSource,
     },
-    measure::{AutoDetectMeasure, Measure, OPERATION_NAME_LOAD_CONFIG},
+    measure::{AutoDetectMeasure, Measure, OPERATION_NAME_LOAD_CONFIG_UNTRUSTED},
 };
 
-pub async fn copy_config_to_initrd_state_if_not_exist(extend_measurement: bool) -> Result<()> {
+pub async fn copy_config_to_initrd_state_if_not_exist(
+    measurement_if_from_unsafe_source: bool,
+) -> Result<()> {
     if InitrdStateConfigSource::exist() {
         return Ok(());
     }
 
-    let fde_config_bundle = load_fde_config_bundle().await?;
-    let content_to_hash = fde_config_bundle.gen_hash_content()?;
+    let fde_config_bundle = load_fde_config_bundle(measurement_if_from_unsafe_source).await?;
 
     // Save to initrd state
     let initrd_state = InitrdState { fde_config_bundle };
     initrd_state.save().await?;
 
-    if extend_measurement {
-        // Extend config hash to runtime measurement
-        let measure = AutoDetectMeasure::new().await;
-        if let Err(e) = measure
-            .extend_measurement_hash(OPERATION_NAME_LOAD_CONFIG.into(), content_to_hash)
-            .await
-            .context("Failed to extend cryptpilot config hash to runtime measurement")
-        {
-            tracing::warn!("{e:?}")
-        }
-    }
-
     Ok(())
 }
 
-async fn load_fde_config_bundle() -> Result<FdeConfigBundle> {
+async fn load_fde_config_bundle(
+    measurement_if_from_unsafe_source: bool,
+) -> Result<FdeConfigBundle> {
     tracing::info!("Trying to load config from cloud-init");
     match load_config_from_cloud_init().await {
-        Ok(config) => return Ok(config),
+        Ok(config) => {
+            if measurement_if_from_unsafe_source {
+                // Extend config hash to runtime measurement
+                let content_to_hash = config.gen_hash_content()?;
+
+                let measure = AutoDetectMeasure::new().await;
+                match measure
+                    .extend_measurement_hash(OPERATION_NAME_LOAD_CONFIG_UNTRUSTED.into(), content_to_hash)
+                    .await
+                    .context("Using cryptpilot config from untrusted source (cloud-init), but failed to measure it") {
+                    Ok(()) => {
+                        return Ok(config);
+                    },
+                    // Will not use this config if measurement failed
+                    Err(e) => tracing::warn!("{e:?}"),
+                }
+            } else {
+                return Ok(config);
+            }
+        }
         Err(e) => {
             tracing::info!("Failed to load config from cloud-init: {e:?}");
         }
