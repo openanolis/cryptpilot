@@ -32,7 +32,7 @@ Requires: qemu-img
 Requires: file
 
 # If not installed, the kbs and kms-oidc keyprovider will not work.
-Recommends: confidential-data-hub
+Suggests: confidential-data-hub
 # If not installed, the AAEL will not work.
 Suggests: attestation-agent
 

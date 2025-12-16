@@ -444,8 +444,6 @@ disk::install_rpm_on_rootfs() {
     local essential_packages=(
         "yum-plugin-versionlock"
         "cryptpilot"
-        "attestation-agent"
-        "confidential-data-hub"
     )
 
     # Add the essential packages to the installation list

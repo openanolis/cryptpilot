@@ -64,6 +64,10 @@ depends() {
         echo network
         # We need to install ssl ca certs for HTTPS support
         echo url-lib
-        echo attestation-agent
-        echo confidential-data-hub
+        if require_binaries attestation-agent; then
+                echo attestation-agent
+        fi
+        if require_binaries confidential-data-hub; then
+                echo confidential-data-hub
+        fi
 }
