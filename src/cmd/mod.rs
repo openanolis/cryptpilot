@@ -8,6 +8,7 @@ pub mod fde;
 pub mod init;
 pub mod open;
 pub mod show;
+pub mod verity;
 
 #[async_trait]
 pub trait Command {
@@ -40,6 +41,7 @@ impl IntoCommand for crate::cli::GlobalSubcommand {
                 })
             }
             crate::cli::GlobalSubcommand::Fde(fde_options) => fde_options.into_command(),
+            crate::cli::GlobalSubcommand::Verity(verity_options) => verity_options.into_command(),
         }
     }
 }
