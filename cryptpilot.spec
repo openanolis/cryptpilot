@@ -70,6 +70,7 @@ pushd src/
 install -d -p %{buildroot}%{_prefix}/bin
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot %{buildroot}%{_prefix}/bin/cryptpilot
 install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
+install -p -m 755 cryptpilot-enhance.sh %{buildroot}%{_prefix}/bin/cryptpilot-enhance
 # Install remain stuffs
 rm -rf %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{dracut_dst}
@@ -118,6 +119,7 @@ rm -rf %{buildroot}
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot
 %{_prefix}/bin/cryptpilot-convert
+%{_prefix}/bin/cryptpilot-enhance
 %{_prefix}/lib/systemd/system/cryptpilot.service
 %dir /etc/cryptpilot
 /etc/cryptpilot/global.toml.template
