@@ -535,14 +535,16 @@ setup_chroot_mounts() {
         esac
     done
 
-    # Mount /boot — either from dedicated partition or file/image
+    # Mount /boot — either from dedicated partition, from a file/image, or skip in UKI mode if no boot partition
     local boot_target="$rootfs/boot"
     mkdir -p "$boot_target"
     proc::hook_exit "mountpoint -q '$boot_target' && disk::umount_wait_busy '$boot_target'"
 
     if [ "$boot_part_exist" = "false" ]; then
-        # /boot is part of root or stored as a file (e.g., in embedded systems)
-        mount "$boot_file_path" "$boot_target"
+        if [ -n "$boot_file_path" ]; then
+            # /boot is part of root or stored as a file (e.g., in embedded systems)
+            mount "$boot_file_path" "$boot_target"
+        fi
     else
         # /boot has its own partition
         mount "$boot_part" "$boot_target"
@@ -644,9 +646,11 @@ run_in_chroot_mounts() {
 step:update_rootfs() {
     local efi_part=$1
     local boot_file_path=$2
+    local uki=$3
 
     update_rootfs_inner() {
         local rootfs_mount_point=$1
+        local uki=$2
 
         log::info "Installing rpm packages"
         disk::install_rpm_on_rootfs "$rootfs_mount_point" "${packages[@]}"
@@ -655,7 +659,8 @@ step:update_rootfs() {
         # Prevent duplicate mounting of efi partitions
         sed -i '/[[:space:]]\/boot\/efi[[:space:]]/ s/defaults,/defaults,auto,nofail,/' "${rootfs_mount_point}/etc/fstab"
 
-        if [ "$boot_part_exist" = "false" ]; then
+        if [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
+            log::info "Update /etc/fstab for adding /boot mountpoint"
             # update /etc/fstab
             local root_mount_line_number
             root_mount_line_number=$(grep -n -E '^[[:space:]]*[^#][^[:space:]]+[[:space:]]+/[[:space:]]+.*$' "${rootfs_mount_point}/etc/fstab" | head -n 1 | cut -d: -f1)
@@ -672,14 +677,14 @@ step:update_rootfs() {
             sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
         fi
 
-        echo "Cleaning up package manager cache..."
+        log::info "Cleaning up package manager cache..."
         yum clean all
         rm -rf "${rootfs_mount_point}"/var/lib/dnf/history.*
         rm -rf "${rootfs_mount_point}"/var/cache/dnf/*
 
     }
 
-    run_in_chroot_mounts "$rootfs_orig_part" "$efi_part" "$boot_file_path" update_rootfs_inner
+    run_in_chroot_mounts "$rootfs_orig_part" "$efi_part" "$boot_file_path" update_rootfs_inner "${uki}"
 
 }
 
@@ -802,13 +807,13 @@ step::shrink_and_extract_rootfs_part() {
     log::info "Checking and shrinking rootfs filesystem"
 
     if e2fsck -y -f "${rootfs_orig_part}"; then
-        echo "Filesystem clean or repaired."
+        log::info "Filesystem clean or repaired."
     else
         rc=$?
         if [[ $rc -eq 1 ]]; then
-            echo "Filesystem had errors but was fixed."
+            log::info "Filesystem had errors but was fixed."
         else
-            echo "e2fsck failed with exit code $rc"
+            log::info "e2fsck failed with exit code $rc"
             return $rc
         fi
     fi
@@ -866,16 +871,12 @@ step::create_boot_part() {
 
 step::create_lvm_part() {
     local lvm_start_sector=$1
-
     local lvm_end_sector=$2
-    if [ "$boot_part_exist" = "true" ]; then
-        local lvm_part_num=$rootfs_orig_part_num
-    else
-        local lvm_part_num=$((rootfs_orig_part_num + 1))
-    fi
+    local lvm_part_num=$3
+
     local lvm_part="${device}p${lvm_part_num}"
     lvm_start_sector=$(disk::align_start_sector "${lvm_start_sector}")
-    echo "Creating lvm partition as LVM PV ($lvm_start_sector ... $lvm_end_sector END sectors)"
+    log::info "Creating lvm partition as LVM PV ($lvm_start_sector ... $lvm_end_sector END sectors)"
     parted "$device" --script -- mkpart primary "${lvm_start_sector}s" "${lvm_end_sector}s"
     parted "$device" --script -- set "${lvm_part_num}" lvm on
     partprobe "$device"
@@ -924,7 +925,6 @@ step::setup_rootfs_lv_without_encrypt() {
 
 step::setup_rootfs_hash_lv() {
     local rootfs_file_path=$1
-    local boot_part=$2
     local rootfs_hash_file_path="${workdir}/rootfs_hash.img"
     veritysetup format "${rootfs_file_path}" "${rootfs_hash_file_path}" --format=1 --hash=sha256 |
         tee "${workdir}/rootfs_hash.status" |
@@ -941,7 +941,7 @@ step::setup_rootfs_hash_lv() {
     disk::dm_remove_all "${device}"
 
     # Recording rootfs hash in metadata file
-    echo "Generate metadata file"
+    log::info "Generate metadata file"
     local roothash
     roothash=$(cat "${workdir}/rootfs_hash.roothash")
 
@@ -1178,32 +1178,35 @@ main() {
     #
     log::step "[ 2 ] Extracting /boot to boot partition"
     local boot_file_path=""
-    if [ "$boot_part_exist" = "false" ]; then
+    if [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
         step::extract_boot_part_from_rootfs "$rootfs_orig_part"
+    elif [ "$boot_part_exist" = "false" ] && [ "$uki" = true ]; then
+        log::info "Skipped since UKI mode does not require a separate boot partition"
     else
-        log::step "Skipped since boot partition already exist"
+        log::info "Skipped since boot partition already exist"
     fi
 
     #
     # 3. Update rootfs
     #
     log::step "[ 3 ] Update rootfs"
-    step:update_rootfs "${efi_part}" "${boot_file_path}"
+    step:update_rootfs "${efi_part}" "${boot_file_path}" "${uki}"
 
     #
     # 4. Shrinking rootfs and extract
     #
     log::step "[ 4 ] Shrinking rootfs and extract"
-    local boot_file_path
     step::shrink_and_extract_rootfs_part "${rootfs_orig_part}"
 
     #
     # 5. Create a boot partition
     #
     log::step "[ 5 ] Creating boot partition"
-    if [ "$boot_part_exist" = "false" ]; then
+    if [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
         local boot_part_end_sector
         step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
+    elif [ "$boot_part_exist" = "false" ] && [ "$uki" = true ]; then
+        log::info "Skipped since UKI mode does not require a separate boot partition"
     else
         log::info "Skipped since boot partition already exist"
     fi
@@ -1213,9 +1216,13 @@ main() {
     #
     log::step "[ 6 ] Creating lvm partition"
     if [ "$boot_part_exist" = "true" ]; then
-        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_end_sector"
+        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_end_sector" "$rootfs_orig_part_num"
+    elif [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
+        step::create_lvm_part "$((boot_part_end_sector + 1))" "$rootfs_orig_end_sector" "$((rootfs_orig_part_num + 1))"
     else
-        step::create_lvm_part "$((boot_part_end_sector + 1))" "$rootfs_orig_end_sector"
+        # In UKI mode with no boot partition, we start right after the EFI partition
+        # or at the beginning of the available space
+        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_end_sector" "$rootfs_orig_part_num"
     fi
 
     #
@@ -1232,13 +1239,21 @@ main() {
     # 8. Setting up rootfs hash volume
     #
     log::step "[ 8 ] Setting up rootfs hash volume"
-    step::setup_rootfs_hash_lv "${rootfs_file_path}" "${boot_part}"
+    step::setup_rootfs_hash_lv "${rootfs_file_path}"
 
     #
     # 9. Update initrd
     #
     log::step "[ 9 ] Update initrd"
-    step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
+    if [ "$boot_part_exist" = "true" ]; then
+        step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
+    else
+        if [ "$uki" = true ]; then
+            step:update_initrd "${efi_part}" "" "${uki}" "${uki_append_cmdline}"
+        else
+            step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
+        fi
+    fi
 
     #
     # 10. Cleaning up
