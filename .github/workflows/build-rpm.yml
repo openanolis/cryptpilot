@@ -35,7 +35,7 @@ jobs:
           echo "prerelease=$prerelease"
           echo "PRE_RELEASE=$prerelease" >> $GITHUB_ENV
 
-      - uses: dtolnay/rust-toolchain@1.75.0
+      - uses: dtolnay/rust-toolchain@1.82.0
 
       - name: Build RPM package
         run: |
@@ -90,7 +90,7 @@ jobs:
           yum install -y git yum-utils
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.75.0
+        uses: dtolnay/rust-toolchain@1.82.0
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -110,7 +110,7 @@ jobs:
         with:
           submodules: 'true'
       - name: Install build dependencies
-        run: yum-builddep -y ./cryptpilot.spec
+        run: yum-builddep -y --skip-unavailable ./cryptpilot.spec
       - name: Run test script from repo
         run: make run-test
 

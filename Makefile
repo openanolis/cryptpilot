@@ -62,10 +62,10 @@ rpm-build: create-tarball
 
 	# install build dependencies
 	which yum-builddep || { yum install -y yum-utils ; }
-	yum-builddep -y ./cryptpilot.spec
+	yum-builddep -y --skip-unavailable ./cryptpilot.spec
 	
 	# build 
-	rpmbuild -ba ./cryptpilot.spec
+	rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'
 	@echo "RPM package is:" ~/rpmbuild/RPMS/*/cryptpilot-*
 
 .PHONE: rpm-build-in-an8-docker
@@ -74,7 +74,7 @@ rpm-build-in-an8-docker:
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
 
-	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:8 bash -x -c "yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec"
+	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:8 bash -x -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
 
 .PHONE: rpm-build-in-an23-docker
 rpm-build-in-an23-docker:
@@ -82,8 +82,7 @@ rpm-build-in-an23-docker:
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
 
-	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:23 bash -x -c "yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec"
-
+	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:23 bash -x -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
 
 .PHONE: rpm-build-in-docker
 rpm-build-in-docker: rpm-build-in-an8-docker

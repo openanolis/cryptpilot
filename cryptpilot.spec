@@ -39,10 +39,14 @@ Suggests: attestation-agent
 BuildRequires: protobuf-compiler
 BuildRequires: perl-IPC-Cmd
 BuildRequires: clang-libs
-BuildRequires: cargo
-BuildRequires: rust
 BuildRequires: clang
 BuildRequires: device-mapper-devel
+
+%{!?with_rustup:%global use_system_rust 1}
+%if 0%{?use_system_rust}
+BuildRequires: cargo >= 1.82.0
+BuildRequires: rust >= 1.82.0
+%endif
 
 ExclusiveArch: x86_64
 

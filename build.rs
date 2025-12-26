@@ -5,8 +5,8 @@ use bindgen::RustTarget;
 use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
 fn main() -> shadow_rs::SdResult<()> {
-    let Ok(target_version) = RustTarget::stable(75, 0) else {
-        panic!("Invalid Rust target version, at least version 1.75 required")
+    let Ok(target_version) = RustTarget::stable(82, 0) else {
+        panic!("Invalid Rust target version, at least version 1.82 required")
     };
     let bindings = bindgen::Builder::default()
         .header("src/fs/block/blktrace/wrapper.h")
@@ -50,7 +50,7 @@ fn main() -> shadow_rs::SdResult<()> {
             for line in code.lines() {
                 if !line.starts_with("//!") && !line.starts_with("#!") {
                     std::io::Write::write_all(&mut writer, line.as_bytes()).unwrap();
-                    std::io::Write::write_all(&mut writer, &[b'\n']).unwrap();
+                    std::io::Write::write_all(&mut writer, b"\n").unwrap();
                 }
             }
         }
