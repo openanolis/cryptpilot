@@ -68,13 +68,13 @@ rpm-build: create-tarball
 	rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'
 	@echo "RPM package is:" ~/rpmbuild/RPMS/*/cryptpilot-*
 
-.PHONE: rpm-build-in-an8-docker
-rpm-build-in-an8-docker:
+.PHONE: rpm-build-in-al3-docker
+rpm-build-in-al3-docker:
 	# copy sources
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
 
-	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:8 bash -x -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
+	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest bash -x -c "sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo ; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
 
 .PHONE: rpm-build-in-an23-docker
 rpm-build-in-an23-docker:
@@ -85,7 +85,7 @@ rpm-build-in-an23-docker:
 	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:23 bash -x -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
 
 .PHONE: rpm-build-in-docker
-rpm-build-in-docker: rpm-build-in-an8-docker
+rpm-build-in-docker: rpm-build-in-al3-docker
 
 .PHONE: rpm-install
 rpm-install: rpm-build

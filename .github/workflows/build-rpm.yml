@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distro: ["alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest", "registry.openanolis.cn/openanolis/anolisos:8", "registry.openanolis.cn/openanolis/anolisos:23"]
+        distro: ["alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest", "registry.openanolis.cn/openanolis/anolisos:23"]
     runs-on: ubuntu-latest
     defaults:
       run:

@@ -29,7 +29,7 @@ modprobe nbd max_part=8
 2. Create a container, and run your command in the container.
 
 ```bash
-docker run -it --privileged --ipc=host -v /run/udev/control:/run/udev/control -v /dev:/dev registry.openanolis.cn/openanolis/anolisos:8 bash
+docker run -it --privileged --ipc=host -v /run/udev/control:/run/udev/control -v /dev:/dev alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest bash
 ```
 
 > Note: The additional parameters (`--privileged --ipc=host -v /run/udev/control:/run/udev/control -v /dev:/dev`) are required to make `/dev` works properly in the container.
@@ -234,7 +234,6 @@ systemctl enable --now cryptpilot.service
 
 CryptPilot has been tested on the following distributions, and it may not work on other distributions.
 
-- [Anolis OS 8](https://openanolis.cn/anolisos/8)
 - [Anolis OS 23](https://openanolis.cn/anolisos/23)
 - [Alibaba Cloud Linux 3](https://www.aliyun.com/product/alinux)
 
