@@ -1,7 +1,14 @@
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
-use tokio::{fs::OpenOptions, process::Command};
+use anyhow::{Context, Result};
+use libcryptsetup_rs::{
+    consts::{
+        flags::{CryptActivate, CryptDeactivate, CryptVolumeKey},
+        vals::{CryptDebugLevel, EncryptionFormat},
+    },
+    CryptInit, CryptParamsLuks2, CryptParamsLuks2Ref,
+};
+use tokio::fs::OpenOptions;
 
 use crate::{
     config::volume::MakeFsType,
@@ -9,71 +16,104 @@ use crate::{
 };
 
 use super::{
-    cmd::CheckCommandOutput as _,
     get_verbose,
     mkfs::{IntegrityNoWipeMakeFs, MakeFs, NormalMakeFs},
 };
 
+const LUKS2_VOLUME_KEY_SIZE_BIT_WITH_INTEGRITY: usize = 768;
+const LUKS2_VOLUME_KEY_SIZE_BIT_WITHOUT_INTEGRITY: usize = 512;
+const LUKS2_SECTOR_SIZE: u32 = 4096;
+
 pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType) -> Result<()> {
-    let dev = dev.to_owned();
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
-    let mut cmd = Command::new("cryptsetup");
-    if verbose {
-        cmd.arg("--debug");
-    }
+    let device_path = PathBuf::from(&dev);
 
-    cmd.args([
-        "luksFormat",
-        "--type",
-        "luks2",
-        "--cipher",
-        "aes-xts-plain64",
-    ]);
-
-    match integrity {
-        IntegrityType::None => {}
-        IntegrityType::Journal => {
-            cmd.args(["--integrity", "hmac-sha256", "--integrity-no-wipe"]);
+    tokio::task::spawn_blocking(move || {
+        if verbose {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
+        } else {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
         }
-        IntegrityType::NoJournal => {
-            cmd.args([
-                "--integrity",
-                "hmac-sha256",
-                "--integrity-no-wipe",
-                "--integrity-no-journal",
-            ]);
-        }
-    };
 
-    cmd.arg(&dev).arg("--key-file=-");
+        let params = CryptParamsLuks2 {
+            integrity: Some("hmac(sha256)".to_owned()),
+            pbkdf: None,
+            integrity_params: None,
+            data_alignment: 0,
+            data_device: None,
+            sector_size: LUKS2_SECTOR_SIZE,
+            label: None,
+            subsystem: None,
+        };
+        let mut params_ref = (&params).try_into()?;
 
-    cmd.run_with_input(Some(passphrase.as_bytes()))
-        .await
-        .with_context(|| format!("Failed to format {dev} as LUKS2 volume"))?;
+        let volume_key = match integrity {
+            IntegrityType::None => {
+                libcryptsetup_rs::Either::Right(LUKS2_VOLUME_KEY_SIZE_BIT_WITHOUT_INTEGRITY / 8)
+            }
+            IntegrityType::Journal | IntegrityType::NoJournal => {
+                libcryptsetup_rs::Either::Right(LUKS2_VOLUME_KEY_SIZE_BIT_WITH_INTEGRITY / 8)
+            }
+        };
+
+        let mut device = CryptInit::init(&device_path)?;
+
+        device.context_handle().format::<CryptParamsLuks2Ref>(
+            EncryptionFormat::Luks2,
+            ("aes", "xts-plain64"),
+            None,
+            volume_key,
+            match integrity {
+                IntegrityType::None => None,
+                IntegrityType::Journal | IntegrityType::NoJournal => Some(&mut params_ref),
+            },
+        )?;
+        device.keyslot_handle().add_by_key(
+            None,
+            Some(volume_key),
+            passphrase.as_bytes(),
+            CryptVolumeKey::empty(),
+        )?;
+
+        Ok::<_, anyhow::Error>(())
+    })
+    .await?
+    .with_context(|| format!("Failed to format {dev} as LUKS2 volume"))?;
 
     Ok(())
 }
 
 pub async fn check_passphrase(dev: &str, passphrase: &Passphrase) -> Result<(), anyhow::Error> {
-    let dev = dev.to_owned();
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
-    let mut cmd = Command::new("cryptsetup");
-    if verbose {
-        cmd.arg("--debug");
-    }
+    let device_path = PathBuf::from(&dev);
 
-    cmd.args(["open", "--type", "luks2", "--test-passphrase"]);
+    tokio::task::spawn_blocking(move || {
+        if verbose {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
+        } else {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
+        }
 
-    cmd.args(["--key-file=-"]);
-    cmd.arg(&dev);
+        let mut device = CryptInit::init(&device_path)?;
 
-    cmd.run_with_input(Some(passphrase.as_bytes()))
-        .await
-        .with_context(|| format!("Failed to check passphrase for device {dev}"))?;
+        device
+            .context_handle()
+            .load::<()>(Some(EncryptionFormat::Luks2), None)?;
+        device.activate_handle().activate_by_passphrase(
+            None,
+            None,
+            passphrase.as_bytes(),
+            CryptActivate::empty(),
+        )?;
+
+        Ok::<_, anyhow::Error>(())
+    })
+    .await?
+    .with_context(|| format!("Failed to check passphrase for device {dev}"))?;
 
     Ok(())
 }
@@ -84,8 +124,6 @@ pub async fn open_with_check_passphrase(
     passphrase: &Passphrase,
     integrity: IntegrityType,
 ) -> Result<(), anyhow::Error> {
-    let dev = dev.to_owned();
-    let volume = volume.to_owned();
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
@@ -93,46 +131,60 @@ pub async fn open_with_check_passphrase(
         .await
         .with_context(||format!("Passphrase verification failed for volume {}: the passphrase is likely incorrect. Please check your passphrase configuration.", volume))?;
 
-    let mut cmd = Command::new("cryptsetup");
-    if verbose {
-        cmd.arg("--debug");
-    }
-
-    cmd.args(["open", "--type", "luks2"]);
-
-    match integrity {
-        IntegrityType::None | IntegrityType::Journal => {}
-        IntegrityType::NoJournal => {
-            cmd.args(["--integrity-no-journal"]);
+    let device_path = PathBuf::from(&dev);
+    let volume_name = volume.to_owned();
+    tokio::task::spawn_blocking(move || {
+        if verbose {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
+        } else {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
         }
-    };
 
-    cmd.args(["--key-file=-"]);
-    cmd.arg(dev).arg(&volume);
+        let mut device = CryptInit::init(&device_path)?;
 
-    cmd.run_with_input(Some(passphrase.as_bytes()))
-        .await
-        .with_context(|| format!("Failed to setup mapping for volume {volume}"))?;
+        device
+            .context_handle()
+            .load::<()>(Some(EncryptionFormat::Luks2), None)?;
+        device.activate_handle().activate_by_passphrase(
+            Some(&volume_name),
+            None,
+            passphrase.as_bytes(),
+            match integrity {
+                IntegrityType::None | IntegrityType::Journal => CryptActivate::empty(),
+                IntegrityType::NoJournal => CryptActivate::empty() | CryptActivate::NO_JOURNAL,
+            },
+        )?;
+
+        Ok::<_, anyhow::Error>(())
+    })
+    .await?
+    .with_context(|| format!("Failed to setup mapping for volume {volume}"))?;
 
     Ok(())
 }
 
 pub async fn is_initialized(dev: &str) -> Result<bool> {
-    Command::new("cryptsetup")
-        .arg("isLuks")
-        .arg(dev)
-        .run_with_status_checker(|code, _, _| {
-            let initialized = match code {
-                0 => true,
-                1 => false,
-                _ => {
-                    bail!("Bad exit code")
-                }
-            };
-            Ok(initialized)
-        })
-        .await
-        .with_context(|| format!("Failed to check initialization status of device {dev}"))
+    let verbose = get_verbose().await;
+    let device_path = PathBuf::from(&dev);
+
+    tokio::task::spawn_blocking(move || {
+        if verbose {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
+        } else {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
+        }
+
+        let mut device = CryptInit::init(&device_path)?;
+
+        let load_success = device.context_handle().load::<()>(None, None).is_ok();
+
+        let is_luks2 =
+            load_success && device.format_handle().get_type()? == EncryptionFormat::Luks2;
+
+        Ok::<_, anyhow::Error>(is_luks2)
+    })
+    .await?
+    .with_context(|| format!("Failed to check initialization status of device {dev}"))
 }
 
 pub fn is_active(volume: &str) -> bool {
@@ -152,16 +204,24 @@ pub async fn is_dev_in_use(dev: &str) -> Result<bool> {
 
 pub async fn close(volume: &str) -> Result<()> {
     let verbose = get_verbose().await;
+    let volume_name = volume.to_owned();
 
-    let mut cmd = Command::new("cryptsetup");
-    if verbose {
-        cmd.arg("--debug");
-    }
-    cmd.arg("close")
-        .arg(volume)
-        .run()
-        .await
-        .with_context(|| format!("Failed to close volume `{volume}`"))?;
+    tokio::task::spawn_blocking(move || {
+        if verbose {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
+        } else {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
+        }
+
+        let mut device = CryptInit::init_by_name_and_header(&volume_name, None)?;
+        device
+            .activate_handle()
+            .deactivate(&volume_name, CryptDeactivate::empty())?;
+
+        Ok::<_, anyhow::Error>(())
+    })
+    .await?
+    .with_context(|| format!("Failed to close volume `{volume}`"))?;
 
     Ok(())
 }

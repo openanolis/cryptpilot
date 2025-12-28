@@ -12,7 +12,9 @@ Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/
 
 Requires: dracut
 Requires: lvm2
+# used by cryptpilot-convert
 Requires: cryptsetup
+Requires: cryptsetup-libs
 Requires: coreutils
 Requires: systemd
 Requires: systemd-udev
@@ -37,6 +39,7 @@ Suggests: confidential-data-hub
 Suggests: attestation-agent
 
 BuildRequires: protobuf-compiler
+BuildRequires: cryptsetup-devel
 BuildRequires: perl-IPC-Cmd
 BuildRequires: clang-libs
 BuildRequires: clang

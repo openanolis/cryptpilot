@@ -26,12 +26,14 @@ shadow!(build);
 pub async fn run() -> Result<()> {
     let filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
-    // let filter = tracing_subscriber::filter::LevelFilter::INFO;
+
     let (filter, reload_handle) = tracing_subscriber::reload::Layer::new(filter);
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .init();
+
+    crate::fs::set_verbose(tracing::enabled!(target: "cryptpilot", tracing::Level::DEBUG)).await;
 
     let args = cli::Cli::parse();
 
