@@ -1,5 +1,6 @@
 use std::{
     io::{Seek, Write},
+    os::fd::AsRawFd,
     path::PathBuf,
     time::Duration,
 };
@@ -9,6 +10,8 @@ use anyhow::{Context as _, Result};
 use loopdev::{LoopControl, LoopDevice};
 use tempfile::NamedTempFile;
 
+const BLOCK_SIZE_DEFAULT: u64 = 512;
+
 pub struct DummyDevice {
     #[allow(unused)]
     sparse_file: NamedTempFile,
@@ -17,16 +20,21 @@ pub struct DummyDevice {
 
 impl DummyDevice {
     #[allow(unused)]
-    pub async fn setup_on_tmpfs(device_size: u64) -> Result<Self> {
-        Self::setup(device_size, true).await
+    pub async fn setup_on_tmpfs_with_block_size(device_size: u64, block_size: u64) -> Result<Self> {
+        Self::setup(device_size, block_size, true).await
     }
 
     #[allow(unused)]
-    pub async fn setup_on_disk(device_size: u64) -> Result<Self> {
-        Self::setup(device_size, false).await
+    pub async fn setup_on_tmpfs(device_size: u64) -> Result<Self> {
+        Self::setup(device_size, BLOCK_SIZE_DEFAULT, true).await
     }
 
-    async fn setup(device_size: u64, on_tmpfs: bool) -> Result<Self> {
+    #[allow(unused)]
+    pub async fn setup_on_cache_dir(device_size: u64) -> Result<Self> {
+        Self::setup(device_size, BLOCK_SIZE_DEFAULT, false).await
+    }
+
+    async fn setup(device_size: u64, block_size: u64, on_tmpfs: bool) -> Result<Self> {
         let mut sparse_file = tempfile::Builder::new()
             .prefix("cryptpilot-")
             .suffix(".img")
@@ -58,6 +66,7 @@ impl DummyDevice {
             .retry(|| async {
                 let ld = lc.next_free()?;
                 ld.with().attach(sparse_file.path())?;
+                loop_device_set_block_size(&ld, block_size)?;
                 Ok::<_, anyhow::Error>(ld)
             })
             .await?;
@@ -80,6 +89,16 @@ impl Drop for DummyDevice {
             tracing::error!("{e:#}")
         };
     }
+}
+
+const LOOP_SET_BLOCK_SIZE: u64 = 0x4C09;
+
+fn loop_device_set_block_size(ld: &LoopDevice, block_size: u64) -> Result<()> {
+    let _ = unsafe {
+        nix::errno::Errno::result(libc::ioctl(ld.as_raw_fd(), LOOP_SET_BLOCK_SIZE, block_size))
+    }
+    .context("Failed to LOOP_SET_BLOCK_SIZE")?;
+    Ok(())
 }
 
 #[cfg(test)]

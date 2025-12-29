@@ -152,7 +152,7 @@ pub mod tests {
         volume_config.volume = format!("test-{}", rand::random::<u64>());
 
         let dummy_device = if volume_config.extra_config.makefs == Some(MakeFsType::Swap) {
-            DummyDevice::setup_on_disk(1024 * 1024 * 1024 /* 1G */).await?
+            DummyDevice::setup_on_cache_dir(1024 * 1024 * 1024 /* 1G */).await?
         } else {
             DummyDevice::setup_on_tmpfs(100 * 1024 * 1024 * 1024 /* 100G */).await?
         };

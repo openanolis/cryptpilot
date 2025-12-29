@@ -96,11 +96,10 @@ impl IntegrityNoWipeMakeFs {
         device_path: impl AsRef<Path>,
         fs_type: MakeFsType,
     ) -> Result<()> {
-        let device_size = File::open(&device_path)
-            .await?
-            .into_std()
-            .await
-            .get_block_device_size()?;
+        let (device_size, block_size) = {
+            let file = File::open(&device_path).await?.into_std().await;
+            (file.get_block_device_size()?, file.get_size_of_block()?)
+        };
 
         tracing::trace!(
             "The device size of {:?} is {device_size}",
@@ -108,18 +107,15 @@ impl IntegrityNoWipeMakeFs {
         );
 
         // Create a dummy device same size as the real one
-        let dummy_device = DummyDevice::setup_on_tmpfs(device_size)
+        let dummy_device = DummyDevice::setup_on_tmpfs_with_block_size(device_size, block_size)
             .await
             .context("Failed to create dummy device")?;
         let dummy_device_path = dummy_device.path()?;
-        let dummy_device_sector_size = File::open(&dummy_device_path)
-            .await?
-            .into_std()
-            .await
-            .get_size_of_block()?;
-
         // Enable the blktrace
         let tracer = BlkTrace::monitor(&dummy_device_path).await?;
+        tracing::trace!(
+            device = ?dummy_device_path,  "start blktrace on device"
+        );
 
         // Do some operations to the dummy device
         {
@@ -152,7 +148,9 @@ impl IntegrityNoWipeMakeFs {
                     event.event.bytes
                 );
 
-                let bytes_start = event.event.sector * dummy_device_sector_size;
+                // Linux always considers sectors to be 512 bytes long independently
+                // https://github.com/torvalds/linux/blob/7839932417dd53bb09eb5a585a7a92781dfd7cb2/include/linux/types.h#L132
+                let bytes_start = event.event.sector * 512;
                 let bytes_end = bytes_start + (event.event.bytes as u64);
                 // The range [bytes_start, bytes_end) is touched by the operation
                 for i in (bytes_start / page_size)..((bytes_end + page_size - 1) / page_size) {
