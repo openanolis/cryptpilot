@@ -238,6 +238,7 @@ pub mod tests {
                     let mut file = File::options()
                         .write(true)
                         .create(true)
+                        .truncate(true)
                         .open(mount_dir.join("testfile"))
                         .await?;
                     file.write_all("test".as_bytes()).await?;

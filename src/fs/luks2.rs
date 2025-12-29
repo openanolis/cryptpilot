@@ -127,7 +127,7 @@ pub async fn open_with_check_passphrase(
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
-    crate::fs::luks2::check_passphrase(&dev, &passphrase)
+    crate::fs::luks2::check_passphrase(dev, &passphrase)
         .await
         .with_context(||format!("Passphrase verification failed for volume {}: the passphrase is likely incorrect. Please check your passphrase configuration.", volume))?;
 

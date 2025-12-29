@@ -206,6 +206,7 @@ impl UdevRule {
         let mut file = File::options()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&rule_path)
             .await?;
 

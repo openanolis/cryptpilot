@@ -3,7 +3,7 @@
 //! This plugin will get key in following steps
 //! 1. Call the command to get an OIDC token.
 //! 2. leverages One-Shot CDH to connect to get the key. This might involve
-//! steps like authorization and get the key.
+//!    steps like authorization and get the key.
 //!
 //! Please ensure the Oneshot CDH is included in [`ONE_SHOT_CDH_BINARY_PATH`].
 //! Also, ensure that the commands to get OIDC token are included in the filesystem and
