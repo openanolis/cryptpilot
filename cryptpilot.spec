@@ -67,7 +67,7 @@ A utility for protecting data at rest in confidential environment, with setting 
 %build
 # Build cryptpilot
 pushd src/
-cargo install --path . --bin cryptpilot --root %{_builddir}/%{name}-%{version}/install/cryptpilot/ --locked --offline
+cargo install --path . --bin cryptpilot --bin cryptpilot-verity --root %{_builddir}/%{name}-%{version}/install/cryptpilot/ --locked --offline
 popd
 
 
@@ -76,6 +76,7 @@ popd
 pushd src/
 install -d -p %{buildroot}%{_prefix}/bin
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot %{buildroot}%{_prefix}/bin/cryptpilot
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot-verity %{buildroot}%{_prefix}/bin/cryptpilot-verity
 install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
 install -p -m 755 cryptpilot-enhance.sh %{buildroot}%{_prefix}/bin/cryptpilot-enhance
 # Install remain stuffs
@@ -125,6 +126,7 @@ rm -rf %{buildroot}
 %files
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot
+%{_prefix}/bin/cryptpilot-verity
 %{_prefix}/bin/cryptpilot-convert
 %{_prefix}/bin/cryptpilot-enhance
 %{_prefix}/lib/systemd/system/cryptpilot.service

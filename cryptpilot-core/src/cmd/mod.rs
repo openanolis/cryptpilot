@@ -1,6 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+use crate::cmd::verity::VerityCommand;
+
 pub mod boot_service;
 pub mod close;
 pub mod config;
@@ -41,7 +43,7 @@ impl IntoCommand for crate::cli::GlobalSubcommand {
                 })
             }
             crate::cli::GlobalSubcommand::Fde(fde_options) => fde_options.into_command(),
-            crate::cli::GlobalSubcommand::Verity(verity_options) => verity_options.into_command(),
+            crate::cli::GlobalSubcommand::Verity => Box::new(VerityCommand),
         }
     }
 }
