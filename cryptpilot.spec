@@ -13,8 +13,8 @@ Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/
 # Shared BuildRequires for all packages
 %{!?with_rustup:%global use_system_rust 1}
 %if 0%{?use_system_rust}
-BuildRequires: cargo >= 1.82.0
-BuildRequires: rust >= 1.82.0
+BuildRequires: cargo >= 1.85.0
+BuildRequires: rust >= 1.85.0
 %endif
 # cmake is required by flatc crate for building FlatBuffers compiler
 BuildRequires: cmake

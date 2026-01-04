@@ -5,8 +5,8 @@ use bindgen::RustTarget;
 use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
 fn main() {
-    let Ok(target_version) = RustTarget::stable(82, 0) else {
-        panic!("Invalid Rust target version, at least version 1.82 required")
+    let Ok(target_version) = RustTarget::stable(85, 0) else {
+        panic!("Invalid Rust target version, at least version 1.85 required")
     };
     let bindings = bindgen::Builder::default()
         .header("src/fs/block/blktrace/wrapper.h")

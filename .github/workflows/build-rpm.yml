@@ -35,7 +35,7 @@ jobs:
           echo "prerelease=$prerelease"
           echo "PRE_RELEASE=$prerelease" >> $GITHUB_OUTPUT
 
-      - uses: dtolnay/rust-toolchain@1.82.0
+      - uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Create tarball
         run: make create-tarball

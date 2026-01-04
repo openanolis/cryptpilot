@@ -189,7 +189,7 @@ deb-build-in-docker:
 			apt-get install -y build-essential debhelper devscripts curl cmake \
 				protobuf-compiler libcryptsetup-dev libdevmapper-dev libfuse3-dev \
 				clang pkg-config && \
-			curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.82.0 && \
+			curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.85.0 && \
 			source \"\$$HOME/.cargo/env\" && \
 			dpkg-buildpackage -us -uc -b && \
 			cp ../*.deb /root/deb-packages/"
