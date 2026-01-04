@@ -764,6 +764,8 @@ if [ "${uki:-false}" = true ]; then
     # Remove all other EFI entries
     find /boot/efi/EFI -mindepth 1 -maxdepth 1 ! -name BOOT -exec rm -rf {} +
     find /boot/efi/EFI/BOOT -mindepth 1 -maxdepth 1 ! -name BOOTX64.EFI -exec rm -rf {} +
+    # Remove NvVars file
+    rm -f /boot/efi/NvVars
 else
     echo "Generating new initrd image"
     dracut "${dracut_common_args[@]}"
