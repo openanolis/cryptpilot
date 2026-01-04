@@ -1,0 +1,12 @@
+[package]
+edition = "2021"
+name = "verity-core"
+version = "0.1.0"
+
+[dependencies]
+digest = "0.10.7"
+hex = "0.4.3"
+libc = "0.2.146"
+num_enum = "0.6.1"
+parse-display = "0.8.0"
+sha2 = {version = "0.10.9", features = ["asm"]}

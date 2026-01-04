@@ -4,6 +4,8 @@ members = [
   "cryptpilot-crypt",
   "cryptpilot-fde",
   "cryptpilot-verity",
+  "verity-core",
+  "verity-fuse",
 ]
 resolver = "2"
 
