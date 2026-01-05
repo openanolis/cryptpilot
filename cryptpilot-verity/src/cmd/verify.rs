@@ -21,11 +21,7 @@ impl Command for VerifyCommand {
 
         // Determine the metadata file path
         let metadata_path = if let Some(ref metadata) = self.options.metadata {
-            if metadata.is_absolute() {
-                metadata.clone()
-            } else {
-                self.options.data_dir.join(metadata)
-            }
+            metadata.clone()
         } else {
             self.options.data_dir.join(DEFAULT_METADATA_FILE)
         };
