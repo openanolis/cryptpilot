@@ -9,6 +9,7 @@ anyhow = {workspace = true}
 async-trait = {workspace = true}
 async-walkdir = {workspace = true}
 clap = {workspace = true}
+flatbuffers = "24.3.25"
 futures = {workspace = true}
 hex = {workspace = true}
 serde = {version = "1.0", features = ["derive"]}
@@ -20,6 +21,9 @@ tokio-util = {workspace = true}
 tracing = {workspace = true}
 tracing-log = {workspace = true}
 tracing-subscriber = {workspace = true}
+verity-core = { path = "../verity-core" }
 
 [build-dependencies]
+flatc = { git = "https://github.com/petehayes102/flatc.rs", rev = "7ca870b7c576f95dfc869b0f7aa48b605cb60c70" } # v25.12.19
+flatc-rust = "0.2"
 shadow-rs = {workspace = true, default-features = true}

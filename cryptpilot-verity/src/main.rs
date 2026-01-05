@@ -7,6 +7,7 @@ use crate::cmd::IntoCommand as _;
 
 mod cli;
 mod cmd;
+mod metadata;
 
 shadow!(build);
 

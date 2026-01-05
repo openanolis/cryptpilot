@@ -4,7 +4,7 @@ use digest::typenum::Unsigned;
 use sha2::Digest;
 
 #[derive(Default, Clone)]
-pub struct MerkleTree<D: InnerHash>(Vec<digest::Output<D>>);
+pub struct MerkleTree<D: InnerHash>(pub Vec<digest::Output<D>>);
 
 impl<D: InnerHash> MerkleTree<D> {
     pub fn append_level_1_hash(&mut self, hash: digest::Output<D>) {

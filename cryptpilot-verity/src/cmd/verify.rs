@@ -1,21 +1,14 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::fs;
 
 use crate::cmd::Command;
 
-const DEFAULT_METADATA_FILE: &str = "cryptpilot.metadata.json";
+const DEFAULT_METADATA_FILE: &str = "cryptpilot.metadata.fb";
 
 pub struct VerifyCommand {
     pub options: crate::cli::VerifyOptions,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FileInfo {
-    path: String,
-    sha256: String,
 }
 
 #[async_trait]
@@ -38,13 +31,13 @@ impl Command for VerifyCommand {
 
         tracing::info!("Reading metadata from: {:?}", metadata_path);
 
-        // Read metadata file
-        let metadata_content = fs::read_to_string(&metadata_path).await?;
-        let file_infos: Vec<FileInfo> = serde_json::from_str(&metadata_content)?;
+        // Read metadata file as binary
+        let metadata_bytes = fs::read(&metadata_path).await?;
+        let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
 
         // Calculate overall directory root hash from metadata
         let mut hasher = Sha256::new();
-        hasher.update(&metadata_content);
+        hasher.update(&metadata_bytes);
         let root_hash = hex::encode(hasher.finalize());
 
         // Compare root hash with expected hash
@@ -59,25 +52,27 @@ impl Command for VerifyCommand {
         tracing::info!("Root hash verification passed");
 
         // Verify each file
-        for file_info in file_infos {
-            let file_path = self.options.data_dir.join(&file_info.path);
+        for info in file_infos {
+            let file_path = self.options.data_dir.join(&info.path);
             tracing::debug!("Verifying file: {:?}", file_path);
 
             // Read file content
             let content = fs::read(&file_path).await?;
 
-            // Calculate file hash
-            let hash = hex::encode(Sha256::digest(&content));
+            // Calculate fs-verity hash
+            let calculated_info = crate::metadata::calculate_fsverity_hash(&content)?;
 
-            // Compare with expected hash
-            if hash != file_info.sha256 {
+            // Compare with expected descriptor hash
+            if calculated_info.descriptor_hash != info.descriptor_hash {
                 anyhow::bail!(
-                    "File hash mismatch for {}. Expected: {}, Actual: {}",
-                    file_info.path,
-                    file_info.sha256,
-                    hash
+                    "File descriptor hash mismatch for {}. Expected: {}, Actual: {}",
+                    info.path,
+                    info.descriptor_hash,
+                    calculated_info.descriptor_hash
                 );
             }
+            
+            tracing::debug!("File {} verified successfully", info.path);
         }
 
         tracing::info!("All file hash verifications passed");

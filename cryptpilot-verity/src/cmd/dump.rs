@@ -1,21 +1,14 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::fs;
 
 use crate::cmd::Command;
 
-const DEFAULT_METADATA_FILE: &str = "cryptpilot.metadata.json";
+const DEFAULT_METADATA_FILE: &str = "cryptpilot.metadata.fb";
 
 pub struct DumpCommand {
     pub options: crate::cli::DumpOptions,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FileInfo {
-    path: String,
-    sha256: String,
 }
 
 #[async_trait]
@@ -34,21 +27,37 @@ impl Command for DumpCommand {
 
         tracing::info!("Reading metadata from: {:?}", metadata_path);
 
-        // Read metadata file
-        let metadata_content = fs::read_to_string(&metadata_path).await?;
-        let file_infos: Vec<FileInfo> = serde_json::from_str(&metadata_content)?;
+        // Read metadata file as binary
+        let metadata_bytes = fs::read(&metadata_path).await?;
+        let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
 
         // Handle output based on flags
         if self.options.print_root_hash {
             // Calculate and print root hash
             let mut hasher = Sha256::new();
-            hasher.update(&metadata_content);
+            hasher.update(&metadata_bytes);
             let root_hash = hex::encode(hasher.finalize());
             println!("{}", root_hash);
         } else if self.options.print_metadata {
-            // Print full metadata JSON
-            let metadata_content = serde_json::to_string_pretty(&file_infos)?;
-            println!("{}", metadata_content);
+            // Print metadata in human-readable format
+            println!("Metadata contents:");
+            println!("Total files: {}", file_infos.len());
+            println!();
+            for info in &file_infos {
+                println!("File: {}", info.path);
+                println!("  Descriptor Hash: {}", info.descriptor_hash);
+                println!("  FsVerity Descriptor:");
+                println!("    Version: {}", info.descriptor.version);
+                println!("    Hash Algorithm: {} (1=SHA256, 2=SHA512)", info.descriptor.hash_algorithm);
+                println!("    Block Size: {} bytes", info.descriptor.block_size());
+                println!("    Data Size: {} bytes", info.descriptor.data_size);
+                println!("    Root Hash: {}", hex::encode(&info.descriptor.root_hash));
+                if !info.descriptor.salt.is_empty() {
+                    println!("    Salt: {}", hex::encode(&info.descriptor.salt));
+                }
+                println!("    Merkle Tree Level 1 Size: {} bytes", info.merkle_tree_level1.len());
+                println!();
+            }
         } else {
             anyhow::bail!("Either --print-root-hash or --print-metadata must be specified");
         };
