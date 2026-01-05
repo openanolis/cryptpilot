@@ -2,7 +2,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use async_walkdir::WalkDir;
 use futures::StreamExt;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -35,17 +34,29 @@ impl Command for FormatCommand {
         for file_path in files {
             tracing::debug!("Processing file: {:?}", file_path);
             let content = fs::read(&file_path).await?;
-            
+
             // Calculate fs-verity hash
-            let mut info = crate::metadata::calculate_fsverity_hash(&content)?;
-            
+            let (descriptor, merkle_tree) = crate::metadata::calculate_fsverity_hash(&content);
+
             let relative_path = file_path
                 .strip_prefix(&self.options.data_dir)?
                 .to_path_buf();
             let path_str = relative_path.to_string_lossy().to_string();
-            info.path = path_str;
-            
-            tracing::debug!("File: {:?}, descriptor_hash: {}", file_path, info.descriptor_hash);
+
+            let descriptor_hash = hex::encode(descriptor.to_descriptor_hash());
+
+            let info = crate::metadata::FileVerityInfo {
+                path: path_str,
+                descriptor,
+                merkle_tree_level1: merkle_tree.level1_as_bytes(),
+                descriptor_hash: descriptor_hash.clone(),
+            };
+
+            tracing::debug!(
+                "File: {:?}, descriptor_hash: {}",
+                file_path,
+                descriptor_hash
+            );
             file_infos.push(info);
         }
 
@@ -72,10 +83,8 @@ impl Command for FormatCommand {
         // Write FlatBuffers metadata to file
         fs::write(&metadata_path, &fb_data).await?;
 
-        // Calculate overall directory root hash
-        let mut hasher = Sha256::new();
-        hasher.update(&fb_data);
-        let root_hash = hex::encode(hasher.finalize());
+        // Calculate metadata hash (only from essential fields)
+        let root_hash = crate::metadata::calculate_metadata_hash(&fb_data)?;
 
         tracing::info!("Root hash calculated: {}", root_hash);
 

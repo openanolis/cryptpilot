@@ -1,7 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use memmap2::Mmap;
-use sha2::{Digest, Sha256};
 use std::fs::File;
 use tokio::fs;
 
@@ -36,11 +35,9 @@ impl Command for VerifyCommand {
         // Read metadata file completely into memory for security
         // (Avoid TOCTOU attacks - we need immutable snapshot)
         let metadata_bytes = fs::read(&metadata_path).await?;
-        
-        // Calculate overall directory root hash from metadata
-        let mut hasher = Sha256::new();
-        hasher.update(&metadata_bytes);
-        let root_hash = hex::encode(hasher.finalize());
+
+        // Calculate metadata hash (only from essential fields)
+        let root_hash = crate::metadata::calculate_metadata_hash(&metadata_bytes)?;
 
         // Compare root hash with expected hash
         if root_hash != self.options.hash {
@@ -52,7 +49,7 @@ impl Command for VerifyCommand {
         }
 
         tracing::info!("Root hash verification passed");
-        
+
         // Parse metadata after hash verification
         let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
 
@@ -61,26 +58,32 @@ impl Command for VerifyCommand {
             let file_path = self.options.data_dir.join(&info.path);
             tracing::debug!("Verifying file: {:?}", file_path);
 
+            // Check self consistency
+            info.verify_self()?;
+
             // Open and mmap the file
             let file = File::open(&file_path)
                 .map_err(|e| anyhow::anyhow!("Failed to open file {:?}: {}", file_path, e))?;
-            
+
             // Safety: Opening regular file in read-only mode
             let mmap = unsafe { Mmap::map(&file)? };
 
             // Calculate fs-verity hash from mmap data
-            let calculated_info = crate::metadata::calculate_fsverity_hash(&mmap)?;
+            let (calculated_descriptor, _calculated_merkle_tree) =
+                crate::metadata::calculate_fsverity_hash(&mmap);
+            let calculated_descriptor_hash =
+                hex::encode(calculated_descriptor.to_descriptor_hash());
 
-            // Compare with expected descriptor hash
-            if calculated_info.descriptor_hash != info.descriptor_hash {
+            // Verify descriptor hash
+            if calculated_descriptor_hash != info.descriptor_hash {
                 anyhow::bail!(
                     "File descriptor hash mismatch for {}. Expected: {}, Actual: {}",
                     info.path,
                     info.descriptor_hash,
-                    calculated_info.descriptor_hash
+                    calculated_descriptor_hash
                 );
             }
-            
+
             tracing::debug!("File {} verified successfully", info.path);
         }
 

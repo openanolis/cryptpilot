@@ -22,6 +22,7 @@ table FileInfo {
 
 // Root metadata structure containing all file information
 table Metadata {
+  version: uint = 1;        // metadata format version for backward compatibility
   files: [FileInfo];
 }
 
