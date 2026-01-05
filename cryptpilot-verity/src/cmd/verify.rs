@@ -1,6 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use memmap2::Mmap;
 use sha2::{Digest, Sha256};
+use std::fs::File;
 use tokio::fs;
 
 use crate::cmd::Command;
@@ -31,10 +33,10 @@ impl Command for VerifyCommand {
 
         tracing::info!("Reading metadata from: {:?}", metadata_path);
 
-        // Read metadata file as binary
+        // Read metadata file completely into memory for security
+        // (Avoid TOCTOU attacks - we need immutable snapshot)
         let metadata_bytes = fs::read(&metadata_path).await?;
-        let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
-
+        
         // Calculate overall directory root hash from metadata
         let mut hasher = Sha256::new();
         hasher.update(&metadata_bytes);
@@ -50,17 +52,24 @@ impl Command for VerifyCommand {
         }
 
         tracing::info!("Root hash verification passed");
+        
+        // Parse metadata after hash verification
+        let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
 
-        // Verify each file
-        for info in file_infos {
+        // Verify each file using mmap (files can use mmap safely)
+        for info in &file_infos {
             let file_path = self.options.data_dir.join(&info.path);
             tracing::debug!("Verifying file: {:?}", file_path);
 
-            // Read file content
-            let content = fs::read(&file_path).await?;
+            // Open and mmap the file
+            let file = File::open(&file_path)
+                .map_err(|e| anyhow::anyhow!("Failed to open file {:?}: {}", file_path, e))?;
+            
+            // Safety: Opening regular file in read-only mode
+            let mmap = unsafe { Mmap::map(&file)? };
 
-            // Calculate fs-verity hash
-            let calculated_info = crate::metadata::calculate_fsverity_hash(&content)?;
+            // Calculate fs-verity hash from mmap data
+            let calculated_info = crate::metadata::calculate_fsverity_hash(&mmap)?;
 
             // Compare with expected descriptor hash
             if calculated_info.descriptor_hash != info.descriptor_hash {

@@ -27,9 +27,8 @@ impl Command for DumpCommand {
 
         tracing::info!("Reading metadata from: {:?}", metadata_path);
 
-        // Read metadata file as binary
+        // Read metadata file into memory for security
         let metadata_bytes = fs::read(&metadata_path).await?;
-        let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
 
         // Handle output based on flags
         if self.options.print_root_hash {
@@ -39,6 +38,9 @@ impl Command for DumpCommand {
             let root_hash = hex::encode(hasher.finalize());
             println!("{}", root_hash);
         } else if self.options.print_metadata {
+            // Parse metadata
+            let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
+            
             // Print metadata in human-readable format
             println!("Metadata contents:");
             println!("Total files: {}", file_infos.len());
