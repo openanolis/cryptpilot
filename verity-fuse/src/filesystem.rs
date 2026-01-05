@@ -15,12 +15,12 @@ use std::time::{Duration, SystemTime};
 const TTL: Duration = Duration::from_secs(1);
 const FS_BLOCK_SIZE: u32 = 4096;
 
-pub struct PassthroughFS {
+pub struct VerityFS {
     source: Dir,
     mapper: InodeMapper,
 }
 
-impl PassthroughFS {
+impl VerityFS {
     pub fn new(source: &Path) -> anyhow::Result<Self> {
         let dir: Dir = Dir::open_ambient_dir(source, cap_std::ambient_authority())?;
 
@@ -180,7 +180,7 @@ fn metadata_to_attr(metadata: &Metadata, ino: u64) -> Result<FileAttr, i32> {
     })
 }
 
-impl fuser::Filesystem for PassthroughFS {
+impl fuser::Filesystem for VerityFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         tracing::debug!(parent, ?name, "lookup");
 

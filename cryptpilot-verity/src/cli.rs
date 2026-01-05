@@ -27,6 +27,14 @@ pub enum VeritySubcommand {
     /// Dump metadata or root hash of a data directory.
     #[command(name = "dump")]
     Dump(DumpOptions),
+
+    /// Mount a data directory as a verity-fuse filesystem.
+    #[command(name = "open")]
+    Open(OpenOptions),
+
+    /// Unmount a verity-fuse filesystem.
+    #[command(name = "close")]
+    Close(CloseOptions),
 }
 
 #[derive(Parser, Debug)]
@@ -76,4 +84,30 @@ pub struct DumpOptions {
     /// Print only the root hash instead of full metadata
     #[arg(long, required_unless_present = "print_metadata")]
     pub print_root_hash: bool,
+}
+
+#[derive(Parser, Debug)]
+pub struct OpenOptions {
+    /// Path to the data directory to mount
+    #[arg()]
+    pub data_dir: std::path::PathBuf,
+
+    /// Mount point where the verity-fuse filesystem will be mounted
+    #[arg()]
+    pub mount_point: std::path::PathBuf,
+
+    /// Expected root hash for verification
+    #[arg()]
+    pub hash: String,
+
+    /// Path to the metadata file
+    #[arg(short, long)]
+    pub metadata: Option<std::path::PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+pub struct CloseOptions {
+    /// Mount point to unmount
+    #[arg()]
+    pub mount_point: std::path::PathBuf,
 }

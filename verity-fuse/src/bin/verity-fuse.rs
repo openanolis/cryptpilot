@@ -2,7 +2,7 @@ use anyhow::{bail, Context};
 use clap::Parser;
 use fuser::MountOption;
 use tracing::info;
-use verity_fuse::{cli::Cli, filesystem::PassthroughFS};
+use verity_fuse::{cli::Cli, filesystem::VerityFS};
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -20,12 +20,12 @@ fn main() -> anyhow::Result<()> {
         bail!("Mount point does not exist: {:?}", cli.mount_point)
     }
 
-    let fs = PassthroughFS::new(&cli.source).context("Failed to create verity-fuse fs")?;
+    let fs = VerityFS::new(&cli.source).context("Failed to create verity-fuse fs")?;
 
     info!(
         source = ?cli.source,
         mount_point = ?cli.mount_point,
-        "Starting passthrough FUSE FS with recursive inode mapping"
+        "Starting verity-fuse with recursive inode mapping"
     );
 
     fuser::mount2(

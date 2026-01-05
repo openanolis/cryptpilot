@@ -1063,9 +1063,12 @@ dependencies = [
  "flatbuffers",
  "flatc",
  "flatc-rust",
+ "fuser",
  "futures",
  "hex",
+ "libc",
  "memmap2",
+ "mountinfo2",
  "serde",
  "serde_json",
  "sha2",
@@ -1076,6 +1079,7 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "verity-core",
+ "verity-fuse",
 ]
 
 [[package]]
@@ -2420,6 +2424,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1587ebb20a5b04738f16cffa7e2526f1b8496b84f92920facd518362ff1559eb"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "mountinfo2"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2efb3f1acbb26b834bb0e855ca2ba27baf944fb5d84c40cca00e40d0ffb05b30"
+dependencies = [
+ "regex",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

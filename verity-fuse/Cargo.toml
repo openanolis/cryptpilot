@@ -4,11 +4,12 @@ name = "verity-fuse"
 version = "0.1.0"
 
 [dependencies]
-anyhow = "1.0.100"
-cap-std = "4.0.0"
-clap = {version = "4.0", features = ["derive"]}
-fuser = "0.13"
-libc = "0.2"
-relative-path = "1.9.3"
-tracing = "0.1"
-tracing-subscriber = "0.3"
+
+anyhow = {workspace = true}
+cap-std = {workspace = true}
+clap = {workspace = true}
+fuser = {workspace = true}
+libc = {workspace = true}
+relative-path = {workspace = true}
+tracing = {workspace = true}
+tracing-subscriber = {workspace = true}
