@@ -16,11 +16,11 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum VeritySubcommand {
-    /// Format and calculate reference values (hashes) for a given data directory.
+    /// Format and calculate root hash for a given data directory.
     #[command(name = "format")]
     Format(FormatOptions),
 
-    /// Verify the integrity of a data directory against reference values.
+    /// Verify the integrity of a data directory against root hash.
     #[command(name = "verify")]
     Verify(VerifyOptions),
 
@@ -39,7 +39,7 @@ pub enum VeritySubcommand {
 
 #[derive(Parser, Debug)]
 pub struct FormatOptions {
-    /// Path to the data directory to calculate reference values for
+    /// Path to the data directory for which to calculate reference values
     #[arg()]
     pub data_dir: std::path::PathBuf,
 

@@ -2,9 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::fs;
 
-use crate::cmd::Command;
-
-const DEFAULT_METADATA_FILE: &str = "cryptpilot.metadata.fb";
+use crate::cmd::{Command, DEFAULT_METADATA_FILE};
 
 pub struct DumpCommand {
     pub options: crate::cli::DumpOptions,
@@ -59,7 +57,7 @@ impl Command for DumpCommand {
                 }
                 println!(
                     "    Merkle Tree Level 1 Size: {} bytes",
-                    info.merkle_tree_level1.len()
+                    info.merkle_tree.level1_as_bytes().len()
                 );
                 println!();
             }

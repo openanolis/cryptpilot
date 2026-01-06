@@ -68,19 +68,67 @@ test: clean-test
 	@HASH=$$(cat $(TEST_HASH_FILE)); \
 	echo "  → Attempting mount with built-in FUSE implementation..."; \
 	cargo run -- open $(TEST_DATA_DIR) $(TEST_MOUNT_DIR) $$HASH 2>&1 & \
-	sleep 2; \
+	MOUNT_PID=$$!; \
+	sleep 3; \
 	if mountpoint -q $(TEST_MOUNT_DIR) 2>/dev/null; then \
 		echo "✓ Successfully mounted at $(TEST_MOUNT_DIR)"; \
 		echo "  → Listing mounted files:"; \
 		ls -la $(TEST_MOUNT_DIR); \
-		echo "  → Reading test file from mount:"; \
-		cat $(TEST_MOUNT_DIR)/file1.txt; \
+		echo ""; \
+		echo "  → Reading and verifying test file from mount:"; \
+		FILE_CONTENT=$$(cat $(TEST_MOUNT_DIR)/file1.txt); \
+		EXPECTED_CONTENT="test file 1 content"; \
+		if [ "$$FILE_CONTENT" = "$$EXPECTED_CONTENT" ]; then \
+			echo "✓ File content matches: $$FILE_CONTENT"; \
+		else \
+			echo "✗ File content mismatch!"; \
+			echo "  Expected: $$EXPECTED_CONTENT"; \
+			echo "  Got: $$FILE_CONTENT"; \
+			exit 1; \
+		fi; \
+		echo ""; \
+		echo "  → Testing binary file read:"; \
+		if dd if=$(TEST_MOUNT_DIR)/binary_file.bin of=/dev/null bs=1024 2>/dev/null; then \
+			echo "✓ Binary file read successfully"; \
+		else \
+			echo "✗ Binary file read failed"; \
+			exit 1; \
+		fi; \
 	else \
-		echo "⚠ Mount may have failed, but continuing..."; \
+		echo "✗ Mount failed!"; \
+		if ps -p $$MOUNT_PID > /dev/null 2>&1; then \
+			kill $$MOUNT_PID 2>/dev/null || true; \
+		fi; \
+		exit 1; \
 	fi
 	@echo ""
 	
-	@echo "Step 9: Testing close command (unmount)..."
+	@echo "Step 9: Testing tampering detection..."
+	@echo "  → Tampering with underlying data file..."
+	@echo "TAMPERED DATA" > $(TEST_DATA_DIR)/file1.txt
+	@echo "  → Attempting to read tampered file (should fail)..."
+	@if cat $(TEST_MOUNT_DIR)/file1.txt 2>/dev/null; then \
+		echo "✗ ERROR: Tampered data was NOT detected!"; \
+		echo "  This is a critical security failure."; \
+		exit 1; \
+	else \
+		ERRCODE=$$?; \
+		if [ $$ERRCODE -ne 0 ]; then \
+			echo "✓ Tampering detected! Read failed with error code $$ERRCODE (expected)"; \
+			echo "  Verification is working correctly."; \
+		fi; \
+	fi
+	@echo "  → Restoring original data..."
+	@echo "test file 1 content" > $(TEST_DATA_DIR)/file1.txt
+	@echo "  → Verifying restored file can be read..."
+	@if cat $(TEST_MOUNT_DIR)/file1.txt >/dev/null 2>&1; then \
+		echo "✓ Restored file reads successfully"; \
+	else \
+		echo "⚠ Restored file still fails (may need remount)"; \
+	fi
+	@echo ""
+	
+	@echo "Step 10: Testing close command (unmount)..."
 	@if mountpoint -q $(TEST_MOUNT_DIR) 2>/dev/null; then \
 		echo "  → Mount point is active, attempting unmount..."; \
 		cargo run -- close $(TEST_MOUNT_DIR) 2>&1 || true; \

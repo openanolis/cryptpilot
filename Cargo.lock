@@ -4749,10 +4749,13 @@ dependencies = [
  "cap-std",
  "clap",
  "fuser",
+ "hex",
  "libc",
  "relative-path",
+ "sha2",
  "tracing",
  "tracing-subscriber",
+ "verity-core",
 ]
 
 [[package]]

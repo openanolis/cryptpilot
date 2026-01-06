@@ -10,6 +10,8 @@ mod verify;
 pub const FUSE_FS_NAME: &str = "verity-fuse";
 pub const FUSE_SUBTYPE: &str = "verity-fuse";
 
+pub const DEFAULT_METADATA_FILE: &str = "cryptpilot-verity.metadata.fb";
+
 #[async_trait]
 pub trait Command {
     async fn run(&self) -> Result<()>;

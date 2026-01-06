@@ -4,10 +4,9 @@ use async_walkdir::WalkDir;
 use futures::StreamExt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use verity_fuse::file_verifier::file_verity_info::FileVerityInfo;
 
-use crate::cmd::Command;
-
-const DEFAULT_METADATA_FILE: &str = "cryptpilot.metadata.fb";
+use crate::cmd::{Command, DEFAULT_METADATA_FILE};
 
 pub struct FormatCommand {
     pub options: crate::cli::FormatOptions,
@@ -45,10 +44,10 @@ impl Command for FormatCommand {
 
             let descriptor_hash = hex::encode(descriptor.to_descriptor_hash());
 
-            let info = crate::metadata::FileVerityInfo {
+            let info = FileVerityInfo {
                 path: path_str,
                 descriptor,
-                merkle_tree_level1: merkle_tree.level1_as_bytes(),
+                merkle_tree,
                 descriptor_hash: descriptor_hash.clone(),
             };
 

@@ -1,5 +1,4 @@
-use crate::inode_mapper::{InodeMapper, ROOT_PATH};
-use anyhow::{bail, Context};
+use crate::file_verifier::{FileVerifier, VerifiableFile};
 use cap_std::fs::{Dir, Metadata};
 use cap_std::fs::{MetadataExt as _, PermissionsExt};
 use fuser::{FileAttr, FileType, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request};
@@ -10,71 +9,64 @@ use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 const TTL: Duration = Duration::from_secs(1);
 const FS_BLOCK_SIZE: u32 = 4096;
 
-pub struct VerityFS {
+pub struct VerityFS<V: FileVerifier> {
     source: Dir,
-    mapper: InodeMapper,
+    verifier: Arc<V>,
 }
 
-impl VerityFS {
-    pub fn new(source: &Path) -> anyhow::Result<Self> {
+impl<V: FileVerifier> VerityFS<V> {
+    pub fn new(source: &Path, verifier: V) -> anyhow::Result<Self> {
         let dir: Dir = Dir::open_ambient_dir(source, cap_std::ambient_authority())?;
+        let verifier = Arc::new(verifier);
 
-        let mapper = InodeMapper::new();
-
-        let mut this = Self {
-            mapper,
+        Ok(Self {
             source: dir,
-        };
-
-        // Preload entire tree at startup (safe because read-only)
-        let root = RelativePath::new(ROOT_PATH);
-        this.preload_recursive_from_fs(&root)?;
-
-        Ok(this)
+            verifier,
+        })
     }
 
-    // build the directory tree
-    fn preload_recursive_from_fs(&mut self, root: &RelativePath) -> anyhow::Result<()> {
-        let mut stack = vec![root.to_owned()];
-
-        while let Some(dir_path) = stack.pop() {
-            self.mapper.get_or_insert(&dir_path);
-
-            let Ok(entries) = self.read_dir(&dir_path) else {
-                bail!("failed to read dir: {dir_path:?}")
-            };
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let child_path = dir_path.join(
-                    RelativePath::from_path(Path::new(&name))
-                        .with_context(|| format!("invalid dir entry name: {name:?}"))?,
-                );
-
-                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    stack.push(child_path);
-                } else {
-                    // Insert file too
-                    self.mapper.get_or_insert(&child_path);
-                }
-                // Symlinks and others also inserted when accessed
-            }
-        }
-
-        Ok(())
-    }
-
-    fn get_metadata(&self, relative_path: &RelativePath) -> Result<Metadata, i32> {
+    fn get_metadata(&self, file: &V::File) -> Result<Metadata, i32> {
         self.source
-            .symlink_metadata(relative_path_to_path_in_source_dir(relative_path))
+            .symlink_metadata(relative_path_to_path_in_source_dir(file.path()))
             .map_err(|e| {
-                tracing::error!(?e, ?relative_path, "failed to get metadata");
+                tracing::error!(?e, path = ?file.path(), "failed to get metadata");
                 e.raw_os_error().unwrap_or(libc::EIO)
             })
+            .and_then(|metadata| {
+                self.check_metadata_file_size(file, &metadata)?;
+                Ok(metadata)
+            })
+    }
+
+    fn check_metadata_file_size(&self, file: &V::File, metadata: &Metadata) -> Result<(), i32> {
+        // Verify file size if metadata indicates a regular file or symlink
+        if metadata.is_file() || metadata.is_symlink() {
+            // Only check size for files, not directories
+            let expected_size = file.expected_size().ok_or_else(|| {
+                tracing::error!(
+                    path = ?file.path(),
+                    "Cannot get expected size for file (possibly a directory)"
+                );
+                libc::EIO
+            })?;
+            let actual_size = metadata.len();
+            if actual_size != expected_size {
+                tracing::error!(
+                    path = ?file.path(),
+                    expected_size,
+                    actual_size,
+                    "File size mismatch"
+                );
+                return Err(libc::EIO);
+            }
+        }
+        Ok(())
     }
 
     fn open_file(&self, relative_path: &RelativePath) -> Result<cap_std::fs::File, i32> {
@@ -86,35 +78,80 @@ impl VerityFS {
             })
     }
 
-    fn read_file(
-        &self,
-        relative_path: &RelativePath,
-        offset: i64,
-        size: u32,
-    ) -> Result<Vec<u8>, i32> {
+    fn read_file(&self, file: &V::File, offset: i64, size: u32) -> Result<Vec<u8>, i32> {
         if offset < 0 {
             tracing::error!(offset, "invalid offset");
             return Err(libc::EINVAL);
         }
-        let offset = offset as u64;
+        let requested_offset = offset as u64;
+        let requested_size = size as u64;
 
-        let mut file = self.open_file(relative_path)?;
+        // Get block size from file - only files have block size
+        let block_size = file.block_size().ok_or_else(|| {
+            tracing::error!(
+                path = ?file.path(),
+                "Cannot read from directory"
+            );
+            libc::EISDIR
+        })? as u64;
 
-        file.seek(SeekFrom::Start(offset)).map_err(|e| {
-            tracing::error!(?e, ?relative_path, offset, "failed to seek file");
-            e.raw_os_error().unwrap_or(libc::EIO)
-        })?;
+        // Calculate aligned offset and size for block reading
+        let aligned_offset = (requested_offset / block_size) * block_size;
+        let end_offset = requested_offset + requested_size;
+        let aligned_end = ((end_offset + block_size - 1) / block_size) * block_size;
+        let aligned_size = aligned_end - aligned_offset;
 
-        let mut buf = Vec::with_capacity(size as usize);
+        // Calculate starting block index
+        let start_block = (aligned_offset / block_size) as usize;
 
-        file.take(size as u64).read_to_end(&mut buf).map_err(|e| {
-            tracing::error!(?e, ?relative_path, offset, size, "failed to read file");
-            e.raw_os_error().unwrap_or(libc::EIO)
-        })?;
+        // Open file and seek to aligned offset
+        let mut file_handle = self.open_file(file.path())?;
+        file_handle
+            .seek(SeekFrom::Start(aligned_offset))
+            .map_err(|e| {
+                tracing::error!(?e, path = ?file.path(), aligned_offset, "failed to seek file");
+                e.raw_os_error().unwrap_or(libc::EIO)
+            })?;
 
-        Ok(buf)
+        // Read all aligned blocks
+        let mut aligned_buf = Vec::with_capacity(aligned_size as usize);
+        file_handle
+            .take(aligned_size)
+            .read_to_end(&mut aligned_buf)
+            .map_err(|e| {
+                tracing::error!(
+                    ?e,
+                    path = ?file.path(),
+                    aligned_offset,
+                    aligned_size,
+                    "failed to read file"
+                );
+                e.raw_os_error().unwrap_or(libc::EIO)
+            })?;
+
+        // Verify each block using chunks
+        for (chunk_idx, block_data) in aligned_buf.chunks(block_size as usize).enumerate() {
+            let block_idx = start_block + chunk_idx;
+
+            if let Err(e) = file.verify_data_block(block_idx, block_data) {
+                tracing::error!(
+                    ino = file.ino(),
+                    path = ?file.path(),
+                    block_idx,
+                    "Data block verification failed: {}",
+                    e
+                );
+                return Err(libc::EIO);
+            }
+        }
+
+        // Extract the originally requested data range from aligned buffer
+        let start_in_buf = (requested_offset - aligned_offset) as usize;
+        let end_in_buf = start_in_buf + requested_size as usize;
+        let end_in_buf = end_in_buf.min(aligned_buf.len());
+
+        Ok(aligned_buf[start_in_buf..end_in_buf].to_vec())
     }
-
     fn read_dir(&self, relative_path: &RelativePath) -> Result<cap_std::fs::ReadDir, i32> {
         self.source
             .read_dir(relative_path_to_path_in_source_dir(relative_path))
@@ -180,23 +217,28 @@ fn metadata_to_attr(metadata: &Metadata, ino: u64) -> Result<FileAttr, i32> {
     })
 }
 
-impl fuser::Filesystem for VerityFS {
+impl<V: FileVerifier> fuser::Filesystem for VerityFS<V> {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         tracing::debug!(parent, ?name, "lookup");
 
         let result = || -> _ {
-            let parent_path = self.mapper.lookup_path(parent).ok_or(libc::ENOENT)?;
+            // First lookup parent to get its path
+            let parent_file = self.verifier.lookup_by_ino(parent).ok_or(libc::ENOENT)?;
+            let parent_path = parent_file.path();
             let child_path =
                 parent_path.join(RelativePath::from_path(Path::new(name)).map_err(|e| {
                     tracing::error!(?parent_path, ?name, ?e, "invalid lookup entry name");
                     libc::EINVAL
                 })?);
 
-            let metadata = self.get_metadata(&child_path)?;
-            metadata_to_attr(
-                &metadata,
-                self.mapper.lookup_ino(&child_path).ok_or(libc::ENOENT)?,
-            )
+            // Try to lookup child as a verifiable file
+            let child_file = self
+                .verifier
+                .lookup_by_path(&child_path)
+                .ok_or(libc::ENOENT)?;
+
+            let metadata = self.get_metadata(child_file)?;
+            metadata_to_attr(&metadata, child_file.ino())
         }();
 
         match result {
@@ -214,8 +256,8 @@ impl fuser::Filesystem for VerityFS {
         tracing::debug!(ino, "getattr");
 
         let result = || -> _ {
-            let path = self.mapper.lookup_path(ino).ok_or(libc::ENOENT)?;
-            let metadata = self.get_metadata(&path)?;
+            let file = self.verifier.lookup_by_ino(ino).ok_or(libc::ENOENT)?;
+            let metadata = self.get_metadata(file)?;
             metadata_to_attr(&metadata, ino)
         }();
 
@@ -242,8 +284,8 @@ impl fuser::Filesystem for VerityFS {
         tracing::debug!(ino, offset, size, "read");
 
         let data_result = || -> _ {
-            let path = self.mapper.lookup_path(ino).ok_or(libc::EINVAL)?;
-            self.read_file(&path, offset, size)
+            let file = self.verifier.lookup_by_ino(ino).ok_or(libc::EINVAL)?;
+            self.read_file(file, offset, size)
         }();
 
         match data_result {
@@ -264,9 +306,10 @@ impl fuser::Filesystem for VerityFS {
 
         // TODO: Replace this implementation to return from the recorded file list instead of from the underlying filesystem, so that the returned directory entries are not affected by modifications from the underlying unsafe filesystem.
         let entries_result = || -> _ {
-            let dir_path = self.mapper.lookup_path(ino).ok_or(libc::ENOENT)?;
+            let file = self.verifier.lookup_by_ino(ino).ok_or(libc::ENOENT)?;
+            let dir_path = file.path();
+            let metadata = self.get_metadata(file)?;
 
-            let metadata = self.get_metadata(&dir_path)?;
             if !metadata.is_dir() {
                 return Err(libc::ENOTDIR);
             }
@@ -295,9 +338,12 @@ impl fuser::Filesystem for VerityFS {
                         tracing::error!(?dir_path, ?name, ?e, "failed to get dir entry metadata");
                     })?;
 
-                    let child_ino = self.mapper.lookup_ino(&child_path).ok_or_else(|| {
-                        tracing::error!(?dir_path, ?name, "failed to lookup dir entry ino");
+                    // Try to lookup child
+                    let child_file = self.verifier.lookup_by_path(&child_path).ok_or_else(|| {
+                        tracing::debug!(?dir_path, ?name, "failed to lookup dir entry, maybe the file was not recorded");
                     })?;
+                    self.check_metadata_file_size(child_file, &metadata).map_err(|_e|())?;
+
                     let child_type = if metadata.is_dir() {
                         FileType::Directory
                     } else if metadata.is_file() {
@@ -309,7 +355,7 @@ impl fuser::Filesystem for VerityFS {
                         Err(())?
                     };
 
-                    entries.push((child_ino, child_type, name));
+                    entries.push((child_file.ino(), child_type, name));
 
                     Ok::<_, ()>(())
                 }();
@@ -341,8 +387,8 @@ impl fuser::Filesystem for VerityFS {
         tracing::info!(ino, "open");
 
         let result = || -> _ {
-            let path = self.mapper.lookup_path(ino).ok_or(libc::ENOENT)?;
-            self.open_file(&path)
+            let file = self.verifier.lookup_by_ino(ino).ok_or(libc::ENOENT)?;
+            self.open_file(file.path())
         }();
 
         match result {
@@ -358,8 +404,8 @@ impl fuser::Filesystem for VerityFS {
         tracing::debug!(ino, "readlink");
 
         let result = || -> _ {
-            let path = self.mapper.lookup_path(ino).ok_or(libc::ENOENT)?;
-            self.read_link(&path)
+            let file = self.verifier.lookup_by_ino(ino).ok_or(libc::ENOENT)?;
+            self.read_link(file.path())
         }();
 
         match result {

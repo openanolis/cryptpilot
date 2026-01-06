@@ -20,60 +20,7 @@ use sha2::digest::typenum::Unsigned;
 use sha2::{digest::OutputSizeUser, Digest, Sha256};
 use verity_core::digest::{FsVeritySha256, InnerHash};
 use verity_core::tree::MerkleTree;
-
-/// File information with fs-verity data
-pub struct FileVerityInfo {
-    pub path: String,
-    pub descriptor: verity_core::descriptor::FsVerityDescriptor<sha2::Sha256>,
-    pub merkle_tree_level1: Vec<u8>,
-    pub descriptor_hash: String,
-}
-
-impl FileVerityInfo {
-    pub fn verify_self(&self) -> Result<()> {
-        let calculated_descriptor_hash = hex::encode(self.descriptor.to_descriptor_hash());
-        if calculated_descriptor_hash != self.descriptor_hash {
-            bail!(
-                "Descriptor hash mismatch for {}, expected {}, got {}",
-                self.path,
-                self.descriptor_hash,
-                calculated_descriptor_hash
-            );
-        }
-        // convert merkle_tree_level1 to Vec<digest::Output<D>>
-        let merkle_tree_level1: Vec<sha2::digest::Output<Sha256>> = {
-            const chunk_size: usize = <Sha256 as OutputSizeUser>::OutputSize::USIZE;
-            let iter = self.merkle_tree_level1.chunks_exact(chunk_size);
-            if !iter.remainder().is_empty() {
-                bail!(
-                    "Broken merkle tree for {}: level 1 length is {} not a multiple of the hash size {}",
-                    self.path,
-                    self.merkle_tree_level1.len(),
-                    chunk_size
-                );
-            }
-            iter.map(|chunk| {
-                let array: [u8; chunk_size] = chunk.try_into().unwrap(); // this should never fail
-                From::from(array)
-            })
-            .collect()
-        };
-
-        let merkle_tree = MerkleTree::<Sha256>::from_level1_hashes(merkle_tree_level1);
-        let root_hash = merkle_tree
-            .rebuild_root_hash(self.descriptor.salt.clone(), self.descriptor.block_size());
-        if root_hash != self.descriptor.root_hash {
-            bail!(
-                "Merkle tree root hash mismatch for {}, expected {}, got {}",
-                self.path,
-                hex::encode(self.descriptor.root_hash),
-                hex::encode(root_hash)
-            );
-        }
-
-        Ok(())
-    }
-}
+use verity_fuse::file_verifier::file_verity_info::FileVerityInfo;
 
 /// Calculate fs-verity hash for file data
 pub fn calculate_fsverity_hash(
@@ -117,7 +64,7 @@ pub fn serialize_metadata(file_infos: &[FileVerityInfo]) -> Result<Vec<u8>> {
         );
 
         // Create merkle tree level 1 vector
-        let merkle_tree_vec = builder.create_vector(&info.merkle_tree_level1);
+        let merkle_tree_vec = builder.create_vector(&info.merkle_tree.level1_as_bytes());
 
         let file_info = FileInfo::create(
             &mut builder,
@@ -206,10 +153,31 @@ pub fn deserialize_metadata(data: &[u8]) -> Result<Vec<FileVerityInfo>> {
                 .map(|mt| mt.bytes().to_vec())
                 .unwrap_or_default();
 
+            // convert merkle_tree_level1 to Vec<digest::Output<D>>
+            let merkle_tree_level1: Vec<sha2::digest::Output<Sha256>> = {
+                const chunk_size: usize = <Sha256 as OutputSizeUser>::OutputSize::USIZE;
+                let iter = merkle_tree_level1.chunks_exact(chunk_size);
+                if !iter.remainder().is_empty() {
+                    bail!(
+                        "Broken merkle tree for {}: level 1 length is {} not a multiple of the hash size {}",
+                        path,
+                        merkle_tree_level1.len(),
+                        chunk_size
+                    );
+                }
+                iter.map(|chunk| {
+                    let array: [u8; chunk_size] = chunk.try_into().unwrap(); // this should never fail
+                    From::from(array)
+                })
+                .collect()
+            };
+
+            let merkle_tree = MerkleTree::<Sha256>::from_level1_hashes(merkle_tree_level1);
+
             result.push(FileVerityInfo {
                 path,
                 descriptor,
-                merkle_tree_level1,
+                merkle_tree,
                 descriptor_hash,
             });
         }
@@ -296,9 +264,11 @@ mod tests {
         let info = FileVerityInfo {
             path: "test.txt".to_string(),
             descriptor,
-            merkle_tree_level1: merkle_tree.level1_as_bytes(),
+            merkle_tree,
             descriptor_hash,
         };
+
+        info.verify_self().unwrap();
 
         let file_infos = vec![info];
 

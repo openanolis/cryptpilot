@@ -4,9 +4,7 @@ use memmap2::Mmap;
 use std::fs::File;
 use tokio::fs;
 
-use crate::cmd::Command;
-
-const DEFAULT_METADATA_FILE: &str = "cryptpilot.metadata.fb";
+use crate::cmd::{Command, DEFAULT_METADATA_FILE};
 
 pub struct VerifyCommand {
     pub options: crate::cli::VerifyOptions,

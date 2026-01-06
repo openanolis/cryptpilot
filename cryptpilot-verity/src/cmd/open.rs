@@ -3,11 +3,12 @@ use async_trait::async_trait;
 use fuser::MountOption;
 use std::path::Path;
 use tokio::fs;
+use verity_fuse::file_verifier::{
+    file_verity_info::FileVerityInfo, verity_verifier::VerityVerifier,
+};
 use verity_fuse::filesystem::VerityFS;
 
-use crate::cmd::{is_mounted, Command, FUSE_FS_NAME, FUSE_SUBTYPE};
-
-const DEFAULT_METADATA_FILE: &str = "cryptpilot.metadata.fb";
+use crate::cmd::{is_mounted, Command, DEFAULT_METADATA_FILE, FUSE_FS_NAME, FUSE_SUBTYPE};
 
 pub struct OpenCommand {
     pub options: crate::cli::OpenOptions,
@@ -80,20 +81,44 @@ impl Command for OpenCommand {
         let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
         tracing::info!("Metadata contains {} files", file_infos.len());
 
-        // Mount using verity-fuse
-        self.mount_verity_fuse(&self.options.data_dir, &self.options.mount_point)
-            .await?;
+        // Verify metadata integrity for each file
+        tracing::info!("Verifying metadata integrity...");
+        for info in &file_infos {
+            info.verify_self().map_err(|e| {
+                anyhow::anyhow!("Metadata verification failed for {}: {}", info.path, e)
+            })?;
+        }
+        tracing::info!("Metadata integrity verification passed");
+
+        // Mount using verity-fuse with real verification
+        self.mount_verity_fuse(
+            &self.options.data_dir,
+            &self.options.mount_point,
+            file_infos,
+        )
+        .await?;
 
         Ok(())
     }
 }
 
 impl OpenCommand {
-    async fn mount_verity_fuse(&self, source: &Path, mount_point: &Path) -> Result<()> {
-        tracing::info!("Initializing verity-fuse filesystem");
+    async fn mount_verity_fuse(
+        &self,
+        source: &Path,
+        mount_point: &Path,
+        file_infos: Vec<FileVerityInfo>,
+    ) -> Result<()> {
+        tracing::info!(
+            "Initializing verity-fuse filesystem with {} files",
+            file_infos.len()
+        );
 
-        // Create VerityFS instance
-        let fs = VerityFS::new(source)?;
+        // Create VerityVerifier from metadata
+        let verifier = VerityVerifier::new(file_infos)?;
+
+        // Create VerityFS instance with real verifier
+        let fs = VerityFS::new(source, verifier)?;
 
         // Prepare mount options
         let options = vec![
@@ -104,7 +129,7 @@ impl OpenCommand {
             MountOption::Subtype(FUSE_SUBTYPE.to_string()),
         ];
 
-        tracing::info!("Mounting verity-fuse in foreground");
+        tracing::info!("Mounting verity-fuse fs with verity enabled");
         // Mount in foreground - this will block
         fuser::mount2(fs, mount_point, &options)?;
         Ok(())
