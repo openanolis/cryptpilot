@@ -92,7 +92,7 @@ impl OnExternalFdeDisk {
                             };
                         }
                         Err(error) => {
-                            tracing::warn!(?error, ?file, "This disk is not a UKI booted disk since BOOTX64.EFI is not a valid UKI image.");
+                            tracing::debug!(?error, ?file, "This disk is not a UKI booted disk since BOOTX64.EFI is not a valid UKI image.");
                         }
                     }
                 }
