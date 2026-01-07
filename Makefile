@@ -1,4 +1,5 @@
 VERSION 	:= $(shell grep '^version' Cargo.toml | awk -F' = ' '{print $$2}' | tr -d '"')
+RELEASE_NUM := 1
 
 .PHONE: help
 help:
@@ -99,6 +100,16 @@ update-rpm-tree:
 	cp /tmp/cryptpilot-${VERSION}.tar.gz ../rpm-tree-cryptpilot/
 	cp ./cryptpilot.spec ../rpm-tree-cryptpilot/
 
+
+.PHONE: deb-build
+deb-build:
+	bash build_deb.sh $(VERSION) $(RELEASE_NUM)
+	@echo "DEB package is: build/cryptpilot_$(VERSION)-$(RELEASE_NUM)_amd64.deb"
+
+.PHONE: deb-install
+deb-install: deb-build
+	apt-get remove -y cryptpilot || true
+	dpkg -i build/cryptpilot_$(VERSION)-$(RELEASE_NUM)_amd64.deb
 
 .PHONE: run-test
 run-test: install-test-depend
