@@ -210,30 +210,20 @@ impl OnExternalFdeDisk {
         }
 
         // 2. Try MBR-style fallback: search all ext4 partitions and check contents
-        let output = Command::new("lsblk")
-            .args(["-lnpo", "NAME,FSTYPE"])
-            .run()
-            .await
-            .context("lsblk failed")?;
+        let mut lsblk_cmd = Command::new("lsblk");
+        lsblk_cmd.args(["-lnpo", "NAME,FSTYPE"]);
+
+        lsblk_cmd.arg(hint_device);
+
+        let output = lsblk_cmd.run().await.context("lsblk failed")?;
 
         let content = String::from_utf8_lossy(&output);
         for line in content.lines() {
             let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() != 2 {
-                continue;
-            }
+
             let dev = fields[0];
             let has_boot_kernel = async {
                 // Try mounting and checking for boot content
-                let already_mounted = Command::new("findmnt")
-                    .args(["-n", "-o", "TARGET", dev])
-                    .run()
-                    .await
-                    .is_ok();
-
-                if already_mounted {
-                    return Ok(None);
-                }
                 let tmp_mount = TmpMountPoint::mount(&dev, false).await?;
 
                 let mut has_boot_kernel = false;
