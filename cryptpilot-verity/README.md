@@ -14,6 +14,32 @@ through a FUSE filesystem that enforces filesystem-level integrity checks at rea
 
 The CLI interface and subcommand design are intentionally similar to the `veritysetup` tooling, so that users familiar with dm-verity find it easy to adopt.
 
+## Threat Model
+
+`cryptpilot-verity` is primarily designed for confidential-computing style deployments where a virtual machine mounts a read-only data directory whose backing storage is **not trusted** (for example, a host-side disk, object storage such as OSS, a remote NAS, or a virtio-fs share backed by untrusted storage). An attacker may be able to modify the underlying storage at any time, but cannot directly compromise the guest kernel.
+
+- **What we defend against**:
+  - Offline or online tampering with file contents in the protected directory tree.
+  - Attacks that try to replace a protected file with an unprotected one by changing the directory structure.
+  - Path traversal and symlink tricks that attempt to escape the intended tree or redirect file accesses. The implementation relies on Rust's type system together with kernel features such as `openat2()` + `RESOLVE_BENEATH` to ensure paths stay confined.
+  - Runtime read-time tampering: data is re-verified using a Merkle tree before being returned to the caller, very similar to the fs-verity mechanism.
+
+- **What the verity measurement covers**:
+  - **File contents** of the protected files.
+  - **File paths** and their association with protected content, so that changing which file a path points to is detectable.
+
+- **What is *not* covered**:
+  - POSIX metadata such as permissions bits, ownership (`uid`, `gid`), and timestamps.
+  - Mount options, kernel-side permission checks, or higher-level application logic.
+  - Integrity of files or directories that were never included in the formatted metadata; in practice such paths are ignored and do not appear in the exposed filesystem view. Likewise, if a file that was included in the metadata is later removed from the underlying filesystem, this is treated as absence rather than active tampering and does not by itself trigger an integrity failure.
+  
+## Security Notes
+
+- The tool assumes the data directory is **read-only** once formatted; modifying underlying files after formatting will cause verification failures.
+- The FUSE layer performs filesystem-level verification on read and returns I/O errors if integrity checks fail.
+- The integrity of the metadata file itself does not need separate protection: as long as the expected root hash is protected, any tampering with the metadata will be detected when the hash is recomputed.
+- Always protect the expected root hash from tampering; it forms the trust anchor for verification and can be safeguarded using mechanisms such as TPM measurements or dynamic attestation inside a confidential-computing TEE.
+
 ## Features
 
 - **Format**: Scan a data directory and compute fs-verity descriptors, Merkle trees, and a global root hash.
@@ -104,17 +130,6 @@ cryptpilot-verity close <MOUNT_POINT>
 - **Arguments**:
   - `<MOUNT_POINT>`: Mount point to unmount.
 
-## Configuration
-
-The CLI accepts an optional global configuration directory:
-
-```bash
-cryptpilot-verity --config-dir /etc/cryptpilot <subcommand> ...
-```
-
-- **`--config-dir, -c`**: Path to the root directory from which to load configuration files.
-  If not provided, the default is `/etc/cryptpilot`.
-
 ## Metadata Format
 
 Metadata is stored and consumed using a FlatBuffers schema defined in `src/metadata/metadata.fbs`. The resulting FlatBuffers file (typically named `cryptpilot-verity.metadata.fb`) is what `cryptpilot-verity` uses for verification and mounting.
@@ -122,29 +137,3 @@ Metadata is stored and consumed using a FlatBuffers schema defined in `src/metad
 The hash algorithm for individual files is fully compatible with the Linux kernel's fs-verity implementation (SHA-256 hash with empty salt and 4096-byte blocks by default). This means that for any given file, the fs-verity descriptor hash computed by `cryptpilot-verity` matches exactly what the kernel's `FS_IOC_ENABLE_VERITY` ioctl would produce with the same parameters, and also matches the output of the `fsverity digest` command from the [fsverity-utils](https://git.kernel.org/pub/scm/fs/fsverity/fsverity-utils.git/) toolset.
 
 The metadata file stores per-file Merkle trees and descriptors. As a rule of thumb, the metadata size is approximately **1/128** of the total data directory size (for example, a 1 GiB data directory typically produces around 8 MiB of metadata). The exact size depends on file count and size distribution, but this ratio holds for typical workloads with files larger than a few blocks.
-
-## Threat Model
-
-`cryptpilot-verity` is primarily designed for confidential-computing style deployments where a virtual machine mounts a read-only data directory whose backing storage is **not trusted** (for example, a host-side disk, object storage such as OSS, a remote NAS, or a virtio-fs share backed by untrusted storage). An attacker may be able to modify the underlying storage at any time, but cannot directly compromise the guest kernel.
-
-- **What we defend against**:
-  - Offline or online tampering with file contents in the protected directory tree.
-  - Attacks that try to replace a protected file with an unprotected one by changing the directory structure.
-  - Path traversal and symlink tricks that attempt to escape the intended tree or redirect file accesses. The implementation relies on Rust's type system (using `relative-path`'s `RelativePath` / `RelativePathBuf` instead of `std::path::Path` / `PathBuf` for FUSE paths) together with kernel features such as `openat2()` + `RESOLVE_BENEATH` to ensure paths stay confined.
-  - Runtime read-time tampering: data is re-verified using a Merkle tree before being returned to the caller, very similar to the fs-verity mechanism.
-
-- **What the verity measurement covers**:
-  - **File contents** of the protected files.
-  - **File paths** and their association with protected content, so that changing which file a path points to is detectable.
-
-- **What is *not* covered**:
-  - POSIX metadata such as permissions bits, ownership (`uid`, `gid`), and timestamps.
-  - Mount options, kernel-side permission checks, or higher-level application logic.
-  - Integrity of files or directories that were never included in the formatted metadata; in practice such paths are ignored and do not appear in the exposed filesystem view. Likewise, if a file that was included in the metadata is later removed from the underlying filesystem, this is treated as absence rather than active tampering and does not by itself trigger an integrity failure.
-  
-## Security Notes
-
-- The tool assumes the data directory is **read-only** once formatted; modifying underlying files after formatting will cause verification failures.
-- The FUSE layer performs filesystem-level verification on read and returns I/O errors if integrity checks fail.
-- The integrity of the metadata file itself does not need separate protection: as long as the expected root hash is protected, any tampering with the metadata will be detected when the hash is recomputed.
-- Always protect the expected root hash from tampering; it forms the trust anchor for verification and can be safeguarded using mechanisms such as TPM measurements or dynamic attestation inside a confidential-computing TEE.
