@@ -51,7 +51,7 @@ impl Command for FormatCommand {
                 descriptor_hash: descriptor_hash.clone(),
             };
 
-            tracing::debug!(
+            tracing::info!(
                 "File: {:?}, descriptor_hash: {}",
                 file_path,
                 descriptor_hash
@@ -62,8 +62,9 @@ impl Command for FormatCommand {
         // Serialize to FlatBuffers format
         let fb_data = crate::metadata::serialize_metadata(&file_infos)?;
         tracing::debug!(
-            "Generated FlatBuffers metadata with {} entries",
-            file_infos.len()
+            "Generated FlatBuffers metadata with {} entries, metadata size: {} bytes",
+            file_infos.len(),
+            fb_data.len()
         );
 
         // Determine the actual metadata file path

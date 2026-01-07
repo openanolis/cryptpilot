@@ -19,7 +19,7 @@ impl Command for DumpCommand {
         } else if let Some(ref data_dir) = self.options.data_dir {
             data_dir.join(DEFAULT_METADATA_FILE)
         } else {
-            anyhow::bail!("Either --metadata or --data-dir must be specified");
+            anyhow::bail!("Either data-dir or --metadata must be specified");
         };
 
         tracing::info!("Reading metadata from: {:?}", metadata_path);

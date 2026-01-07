@@ -32,11 +32,11 @@ test: clean-test
 	@echo ""
 	
 	@echo "Step 3: Running dump command (print root hash)..."
-	@cargo run -- dump --data-dir $(TEST_DATA_DIR) --print-root-hash
+	@cargo run -- dump $(TEST_DATA_DIR) --print-root-hash
 	@echo ""
 	
 	@echo "Step 4: Running dump command (print metadata)..."
-	@cargo run -- dump --data-dir $(TEST_DATA_DIR) --print-metadata
+	@cargo run -- dump $(TEST_DATA_DIR) --print-metadata
 	@echo ""
 	
 	@echo "Step 5: Running verify command..."

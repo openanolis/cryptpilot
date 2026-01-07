@@ -8,10 +8,6 @@ use crate::build::CLAP_LONG_VERSION;
 pub struct Cli {
     #[command(subcommand)]
     pub command: VeritySubcommand,
-
-    #[clap(long, short = 'c', global = true)]
-    /// Path to the root directory where to load configuration files. Default value is /etc/cryptpilot.
-    pub config_dir: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -43,7 +39,8 @@ pub struct FormatOptions {
     #[arg()]
     pub data_dir: std::path::PathBuf,
 
-    /// Output file path for the metadata JSON result
+    /// [optional] Output file path for the metadata JSON result.
+    /// If not specified, defaults to <data_dir>/cryptpilot-verity.metadata.fb
     #[arg(short, long)]
     pub metadata: Option<std::path::PathBuf>,
 
@@ -76,11 +73,14 @@ pub struct VerifyOptions {
 
 #[derive(Parser, Debug)]
 pub struct DumpOptions {
-    /// Path to the data directory
-    #[arg(long, required_unless_present = "metadata")]
+    /// Path to the data directory from which to read metadata.
+    /// Either data_dir or --metadata must be specified (not both required).
+    /// If data_dir is provided without --metadata, reads from <data_dir>/cryptpilot-verity.metadata.fb
+    #[arg(required_unless_present = "metadata")]
     pub data_dir: Option<std::path::PathBuf>,
 
-    /// Path to the metadata JSON file
+    /// [optional] Path to the metadata file to read directly.
+    /// Either --metadata or data_dir must be specified (not both required)
     #[arg(long, required_unless_present = "data_dir")]
     pub metadata: Option<std::path::PathBuf>,
 
@@ -107,7 +107,8 @@ pub struct OpenOptions {
     #[arg()]
     pub hash: String,
 
-    /// Path to the metadata file
+    /// [optional] Path to the metadata file.
+    /// If not specified, defaults to <data_dir>/cryptpilot-verity.metadata.fb
     #[arg(short, long)]
     pub metadata: Option<std::path::PathBuf>,
 }

@@ -45,13 +45,13 @@ All commands are subcommands of the `cryptpilot-verity` binary. Run `cryptpilot-
 ### `format`
 
 ```bash
-cryptpilot-verity format <DATA_DIR> --metadata <METADATA_PATH> --hash-output <HASH_OUTPUT>
+cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] --hash-output <HASH_OUTPUT>
 ```
 
 - **Purpose**: Generate fs-verity metadata and the root hash for a given data directory.
 - **Arguments**:
   - `<DATA_DIR>`: Path to the data directory for which to calculate reference values.
-  - `--metadata, -m`: Optional path to the output metadata file (FlatBuffers-encoded).
+  - `--metadata, -m` **[optional]**: Path to the output metadata file (FlatBuffers-encoded). If not specified, defaults to `<DATA_DIR>/cryptpilot-verity.metadata.fb`.
   - `--hash-output`: Path to write the root hash (use `-` for stdout).
 
 ### `verify`
@@ -70,21 +70,21 @@ cryptpilot-verity verify <DATA_DIR> <HASH> [--metadata <METADATA_PATH>] [--metad
 ### `dump`
 
 ```bash
-cryptpilot-verity dump --data-dir <DATA_DIR> --print-metadata
+cryptpilot-verity dump <DATA_DIR> --print-metadata
 cryptpilot-verity dump --metadata <METADATA_PATH> --print-root-hash
 ```
 
 - **Purpose**: Inspect metadata and/or print only the root hash.
 - **Arguments**:
-  - `--data-dir`: Path to the data directory (used when deriving metadata from the directory).
-  - `--metadata`: Path to the metadata file (used when operating on existing metadata).
-  - `--print-metadata`: Print the full decoded metadata.
-  - `--print-root-hash`: Print only the root hash.
+  - `<DATA_DIR>` **[optional]**: Path to the data directory from which to read metadata. Either `<DATA_DIR>` or `--metadata` must be specified (not both required). If `<DATA_DIR>` is provided without `--metadata`, reads from `<DATA_DIR>/cryptpilot-verity.metadata.fb`.
+  - `--metadata` **[optional]**: Path to the metadata file to read directly. Either `--metadata` or `<DATA_DIR>` must be specified (not both required).
+  - `--print-metadata`: Print the full decoded metadata (must specify either this or `--print-root-hash`).
+  - `--print-root-hash`: Print only the root hash (must specify either this or `--print-metadata`).
 
 ### `open`
 
 ```bash
-cryptpilot-verity open <DATA_DIR> <MOUNT_POINT> <HASH> --metadata <METADATA_PATH>
+cryptpilot-verity open <DATA_DIR> <MOUNT_POINT> <HASH> [--metadata <METADATA_PATH>]
 ```
 
 - **Purpose**: Mount the data directory as a verity-fuse filesystem with verification enabled.
@@ -92,7 +92,7 @@ cryptpilot-verity open <DATA_DIR> <MOUNT_POINT> <HASH> --metadata <METADATA_PATH
   - `<DATA_DIR>`: Path to the data directory to mount (must match the metadata).
   - `<MOUNT_POINT>`: Target mount point for the FUSE filesystem.
   - `<HASH>`: Expected root hash; used to validate the metadata before mounting.
-  - `--metadata, -m`: Path to the metadata file.
+  - `--metadata, -m` **[optional]**: Path to the metadata file. If not specified, defaults to `<DATA_DIR>/cryptpilot-verity.metadata.fb`.
 
 ### `close`
 
@@ -117,11 +117,11 @@ cryptpilot-verity --config-dir /etc/cryptpilot <subcommand> ...
 
 ## Metadata Format
 
-Metadata is stored and consumed using a FlatBuffers schema defined in `src/metadata/metadata.fbs`:
+Metadata is stored and consumed using a FlatBuffers schema defined in `src/metadata/metadata.fbs`. The resulting FlatBuffers file (typically named `cryptpilot-verity.metadata.fb`) is what `cryptpilot-verity` uses for verification and mounting.
 
-- **`metadata.fbs`**: Storage schema including file path, fs-verity descriptor, Merkle tree, and descriptor hash.
+The hash algorithm for individual files is fully compatible with the Linux kernel's fs-verity implementation (SHA-256 hash with empty salt and 4096-byte blocks by default). This means that for any given file, the fs-verity descriptor hash computed by `cryptpilot-verity` matches exactly what the kernel's `FS_IOC_ENABLE_VERITY` ioctl would produce with the same parameters, and also matches the output of the `fsverity digest` command from the [fsverity-utils](https://git.kernel.org/pub/scm/fs/fsverity/fsverity-utils.git/) toolset.
 
-The resulting FlatBuffers file (typically named `cryptpilot-verity.metadata.fb`) is what `cryptpilot-verity` uses for verification and mounting.
+The metadata file stores per-file Merkle trees and descriptors. As a rule of thumb, the metadata size is approximately **1/128** of the total data directory size (for example, a 1 GiB data directory typically produces around 8 MiB of metadata). The exact size depends on file count and size distribution, but this ratio holds for typical workloads with files larger than a few blocks.
 
 ## Threat Model
 
