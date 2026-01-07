@@ -57,14 +57,15 @@ cryptpilot-verity format <DATA_DIR> --metadata <METADATA_PATH> --hash-output <HA
 ### `verify`
 
 ```bash
-cryptpilot-verity verify <DATA_DIR> <HASH> --metadata <METADATA_PATH>
+cryptpilot-verity verify <DATA_DIR> <HASH> [--metadata <METADATA_PATH>] [--metadata-only]
 ```
 
 - **Purpose**: Verify that the metadata for a data directory matches an expected root hash.
 - **Arguments**:
   - `<DATA_DIR>`: Path to the data directory to verify.
   - `<HASH>`: Expected root hash (hex-encoded).
-  - `--metadata, -m`: Path to the metadata JSON/FlatBuffers file.
+  - `--metadata, -m` **[optional]**: Path to the metadata file. If not specified, defaults to `<DATA_DIR>/cryptpilot-verity.metadata.fb`.
+  - `--metadata-only` **[optional]**: Only verify metadata integrity without reading actual files. When enabled, only checks that the metadata hash matches the expected root hash and validates metadata self-consistency, without verifying individual file contents against their descriptors.
 
 ### `dump`
 

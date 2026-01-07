@@ -62,9 +62,16 @@ pub struct VerifyOptions {
     #[arg()]
     pub hash: String,
 
-    /// Path to the metadata JSON file
+    /// [optional] Path to the metadata file.
+    /// If not specified, defaults to <data_dir>/cryptpilot-verity.metadata.fb
     #[arg(short, long)]
     pub metadata: Option<std::path::PathBuf>,
+
+    /// Only verify metadata integrity without reading actual files.
+    /// When enabled, only checks that the metadata hash matches the expected root hash,
+    /// without verifying individual file contents against their descriptors
+    #[arg(long, default_value = "false")]
+    pub metadata_only: bool,
 }
 
 #[derive(Parser, Debug)]

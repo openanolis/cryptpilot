@@ -47,41 +47,50 @@ impl Command for VerifyCommand {
         // Parse metadata after hash verification
         let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
 
-        // Verify each file using mmap (files can use mmap safely)
+        // Verify self-consistency of metadata entries (always required)
         for info in &file_infos {
-            let file_path = self.options.data_dir.join(&info.path);
-            tracing::debug!("Verifying file: {:?}", file_path);
-
-            // Check self consistency
+            tracing::debug!("Verifying self-consistency for: {}", info.path);
             info.verify_self()?;
+        }
+        tracing::info!("Metadata self-consistency verification passed");
 
-            // Open and mmap the file
-            let file = File::open(&file_path)
-                .map_err(|e| anyhow::anyhow!("Failed to open file {:?}: {}", file_path, e))?;
+        // If metadata-only mode, skip file content verification
+        if self.options.metadata_only {
+            tracing::info!("Metadata-only mode: skipping file content verification");
+        } else {
+            // Verify each file using mmap (files can use mmap safely)
+            for info in &file_infos {
+                let file_path = self.options.data_dir.join(&info.path);
+                tracing::debug!("Verifying file: {:?}", file_path);
 
-            // Safety: Opening regular file in read-only mode
-            let mmap = unsafe { Mmap::map(&file)? };
+                // Open and mmap the file
+                let file = File::open(&file_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to open file {:?}: {}", file_path, e))?;
 
-            // Calculate fs-verity hash from mmap data
-            let (calculated_descriptor, _calculated_merkle_tree) =
-                crate::metadata::calculate_fsverity_hash(&mmap);
-            let calculated_descriptor_hash =
-                hex::encode(calculated_descriptor.to_descriptor_hash());
+                // Safety: Opening regular file in read-only mode
+                let mmap = unsafe { Mmap::map(&file)? };
 
-            // Verify descriptor hash
-            if calculated_descriptor_hash != info.descriptor_hash {
-                anyhow::bail!(
-                    "File descriptor hash mismatch for {}. Expected: {}, Actual: {}",
-                    info.path,
-                    info.descriptor_hash,
-                    calculated_descriptor_hash
-                );
+                // Calculate fs-verity hash from mmap data
+                let (calculated_descriptor, _calculated_merkle_tree) =
+                    crate::metadata::calculate_fsverity_hash(&mmap);
+                let calculated_descriptor_hash =
+                    hex::encode(calculated_descriptor.to_descriptor_hash());
+
+                // Verify descriptor hash
+                if calculated_descriptor_hash != info.descriptor_hash {
+                    anyhow::bail!(
+                        "File descriptor hash mismatch for {}. Expected: {}, Actual: {}",
+                        info.path,
+                        info.descriptor_hash,
+                        calculated_descriptor_hash
+                    );
+                }
+
+                tracing::info!("File {} verified successfully", info.path);
             }
-
-            tracing::debug!("File {} verified successfully", info.path);
         }
 
-        tracing::info!("All file hash verifications passed");
+        tracing::info!("All verifications passed");
 
         Ok(())
     }
