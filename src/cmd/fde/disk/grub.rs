@@ -502,6 +502,14 @@ pub(super) trait FdeDiskGrubExt: Disk {
         let mut in_target_entry = false;
         let mut kernel_line = None;
         let mut initrd_line = None;
+        let saved_entry = if saved_entry.contains('>') {
+            saved_entry
+                .rsplit_once('>')
+                .map(|(_, last)| last)
+                .unwrap_or(saved_entry)
+        } else {
+            saved_entry
+        };
 
         for line in grub_cfg.lines() {
             let line = line.trim();
@@ -518,11 +526,14 @@ pub(super) trait FdeDiskGrubExt: Disk {
             }
 
             // Process lines within the target menuentry
+            let trimmed = line.trim();
+
+            // Process lines within the target menuentry
             if in_target_entry {
-                if line.starts_with("linuxefi") {
-                    kernel_line = Some(line.to_string());
-                } else if line.starts_with("initrdefi") {
-                    initrd_line = Some(line.to_string());
+                if trimmed.starts_with("linux") || trimmed.starts_with("linuxefi") {
+                    kernel_line = Some(trimmed.to_string());
+                } else if trimmed.starts_with("initrd") || trimmed.starts_with("initrdefi") {
+                    initrd_line = Some(trimmed.to_string());
                 }
             }
         }
@@ -532,14 +543,13 @@ pub(super) trait FdeDiskGrubExt: Disk {
         let mut cmdline = String::new();
 
         if let Some(kernel_line) = kernel_line {
-            let parts: Vec<&str> = kernel_line.splitn(2, ' ').collect();
+            let parts: Vec<&str> = kernel_line.split_whitespace().collect();
             if parts.len() >= 2 {
                 kernel_path = parts[1].to_string();
 
-                // Extract command line parameters if present
-                if let Some(space_pos) = kernel_path.find(' ') {
-                    cmdline = kernel_path[space_pos + 1..].to_string();
-                    kernel_path = kernel_path[..space_pos].to_string();
+                // Extract command line parameters (everything after the kernel path)
+                if parts.len() > 2 {
+                    cmdline = parts[2..].join(" ");
                 }
             }
         }
@@ -553,13 +563,9 @@ pub(super) trait FdeDiskGrubExt: Disk {
         // Extract initrd path
         let mut initrd_path = String::new();
         if let Some(initrd_line) = initrd_line {
-            let parts: Vec<&str> = initrd_line.splitn(2, ' ').collect();
+            let parts: Vec<&str> = initrd_line.split_whitespace().collect();
             if parts.len() >= 2 {
                 initrd_path = parts[1].to_string();
-                // Clean up if there's extra content
-                if let Some(space_pos) = initrd_path.find(' ') {
-                    initrd_path = initrd_path[..space_pos].to_string();
-                }
             }
         }
 
@@ -650,7 +656,12 @@ pub(super) trait FdeDiskGrubExt: Disk {
     async fn load_global_grub_env_file(&self) -> Result<String>;
 
     async fn load_global_grub_cfg_file(&self) -> Result<String> {
-        let grub_cfg_path = Path::new("/boot/grub2/grub.cfg");
+        let mut grub_cfg_path = Path::new("/boot/grub2/grub.cfg");
+
+        // If grub2/grub.cfg doesn't exist, try grub/grub.cfg
+        if !matches!(self.check_file_exist_on_disk(grub_cfg_path), Ok(true)) {
+            grub_cfg_path = Path::new("/boot/grub/grub.cfg");
+        }
 
         // Read GRUB environment
         let grub_cfg_content = self
