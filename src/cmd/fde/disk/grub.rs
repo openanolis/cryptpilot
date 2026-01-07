@@ -398,7 +398,7 @@ pub(super) trait FdeDiskGrubExt: Disk {
         {
             Ok(v) => v,
             Err(error) => {
-                tracing::warn!(
+                tracing::debug!(
                     ?error,
                     "Failed to parse kernel artifacts info from loader entry file, fallback to parse from grub.cfg"
                 );

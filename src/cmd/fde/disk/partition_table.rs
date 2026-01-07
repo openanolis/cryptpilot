@@ -35,7 +35,7 @@ impl PartitionTableType {
         }
 
         // If we can't determine the type from the output, default to GPT
-        tracing::warn!(
+        tracing::debug!(
             "Cannot determine partition table type for {:?} from fdisk output, defaulting to GPT",
             disk_dev
         );
