@@ -487,6 +487,95 @@ disk::install_rpm_on_rootfs() {
     done
 }
 
+disk::install_deb_on_rootfs() {
+    local rootfs_mount_point="$1"
+    shift
+    local packages=("$@")
+
+    # Essential packages for Debian/Ubuntu
+    local essential_packages=(
+        "cryptpilot"
+        "attestation-agent"
+        "confidential-data-hub"
+    )
+
+    local copied_debs=()
+    local deb_args=()
+    local packages_to_install=()
+
+    for package in "${packages[@]}"; do
+        if [[ -f "$package" && "$package" == *.deb ]]; then
+            base_name=$(basename "$package")
+            cp "$package" "${rootfs_mount_point}/tmp/"
+            copied_debs+=("/tmp/$base_name")
+            deb_args+=("/tmp/$base_name")
+        else
+            # For package names, we will ask apt to install after dpkg -i
+            deb_args+=("$package")
+        fi
+    done
+
+    # Check which essential packages are NOT available as local .deb files
+    for essential_pkg in "${essential_packages[@]}"; do
+        local found=false
+        for deb in "${copied_debs[@]}"; do
+            if [[ "$deb" == *"${essential_pkg}"* ]]; then
+                found=true
+                break
+            fi
+        done
+        if [ "$found" = false ]; then
+            packages_to_install+=("$essential_pkg")
+        fi
+    done
+
+    # Try to install .deb files first, then fix dependencies via apt
+    if [ ${#deb_args[@]} -gt 0 ]; then
+        chroot "${rootfs_mount_point}" bash -c "dpkg --configure -a || true"
+        chroot "${rootfs_mount_point}" bash -c "dpkg -i $(printf '%s ' "${deb_args[@]}"| sed 's/ $//')" || true
+
+         # Fix dependencies
+        chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+            ${https_proxy:+https_proxy=$https_proxy} \
+            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+            ${all_proxy:+all_proxy=$all_proxy} \
+            ${no_proxy:+no_proxy=$no_proxy} \
+            apt-get update || true
+
+        # Fix dependencies
+        chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+            ${https_proxy:+https_proxy=$https_proxy} \
+            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+            ${all_proxy:+all_proxy=$all_proxy} \
+            ${no_proxy:+no_proxy=$no_proxy} \
+            apt-get -y -f install || true
+
+        # Install only packages not provided as local .deb files
+        if [ ${#packages_to_install[@]} -gt 0 ]; then
+            chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+                ${https_proxy:+https_proxy=$https_proxy} \
+                ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+                ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+                ${all_proxy:+all_proxy=$all_proxy} \
+                ${no_proxy:+no_proxy=$no_proxy} \
+                apt-get -y install "${packages_to_install[@]}" || true
+        fi
+
+        # Hold package versions for essential packages
+        for p in "${essential_packages[@]}"; do
+            chroot "${rootfs_mount_point}" apt-mark hold "$p" || true
+        done
+        chroot "${rootfs_mount_point}" apt-get clean || true
+    fi
+
+    # cleanup copied debs
+    for d in "${copied_debs[@]}"; do
+        rm -f "${rootfs_mount_point}${d}"
+    done
+}
+
 # Sets up a chroot environment by mounting essential filesystems and configurations.
 # This includes virtual filesystems (dev, proc, sys, run, pts), boot/efi partitions if applicable,
 # and bind-mounts host's resolv.conf and hosts for network access inside chroot.
@@ -652,8 +741,15 @@ step:update_rootfs() {
         local rootfs_mount_point=$1
         local uki=$2
 
-        log::info "Installing rpm packages"
-        disk::install_rpm_on_rootfs "$rootfs_mount_point" "${packages[@]}"
+        log::info "Installing packages into target rootfs"
+        # Detect package manager inside chroot and choose appropriate installer
+        if [ -x "${rootfs_mount_point}/usr/bin/apt-get" ] || [ -x "${rootfs_mount_point}/usr/bin/dpkg" ]; then
+            log::info "Detected Debian/Ubuntu rootfs; using DEB installer"
+            disk::install_deb_on_rootfs "$rootfs_mount_point" "${packages[@]}"
+        else
+            log::info "Detected RPM-based rootfs; using RPM installer"
+            disk::install_rpm_on_rootfs "$rootfs_mount_point" "${packages[@]}"
+        fi
 
         log::info "Updating /etc/fstab"
         # Prevent duplicate mounting of efi partitions
@@ -677,10 +773,103 @@ step:update_rootfs() {
             sed -i "${boot_mount_insert_line_number}i${boot_mount_line}" "${rootfs_mount_point}/etc/fstab"
         fi
 
-        log::info "Cleaning up package manager cache..."
+        chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; $(
+            cat <<'EOF'
+set -e
+set -u
+
+BASH_XTRACEFD=3
+set -x
+if [ "${uki:-false}" = false ]; then
+    # Ensure kernel cmdline includes rd.neednet=1 ip=dhcp for Ubuntu only (prefer cloudimg cfg if present)
+    if command -v apt-get >/dev/null 2>&1; then
+        GRUB_TARGET="/etc/default/grub.d/50-cloudimg-settings.cfg"
+        if [ ! -f "$GRUB_TARGET" ]; then
+            GRUB_TARGET="/etc/default/grub"
+        fi
+        [ -f "$GRUB_TARGET" ] || touch "$GRUB_TARGET"
+
+        grub_add_args() {
+            local var="$1"
+            local line current
+            line=$(grep "^${var}=" "$GRUB_TARGET" | head -n1)
+            if [ -n "$line" ]; then
+                # Extract value: remove var name and = sign, then remove outer quotes if present
+                current="${line#${var}=}"
+                current="${current#\"}"
+                current="${current%\"}"
+            else
+                current=""
+            fi
+
+            case " $current " in
+                *" rd.neednet=1 "*) : ;;
+                *) current="$current rd.neednet=1" ;;
+            esac
+            case " $current " in
+                *" ip=dhcp "*) : ;;
+                *) current="$current ip=dhcp" ;;
+            esac
+
+            # normalize whitespace
+            set -- $current
+            current="$*"
+
+            local tmp
+            tmp=$(mktemp)
+            grep -v "^${var}=" "$GRUB_TARGET" > "$tmp" || true
+            echo "${var}=\"${current}\"" >> "$tmp"
+            mv "$tmp" "$GRUB_TARGET"
+        }
+
+        grub_add_args "GRUB_CMDLINE_LINUX_DEFAULT"
+    fi
+
+    echo "Updating grub2.cfg"
+    grub2_cfg=""
+    if [ -e /etc/grub2.cfg ] ; then
+        # alinux3 iso with lagecy BIOS support. The real grub2.cfg is in /boot/grub2/grub.cfg
+        grub2_cfg=/etc/grub2.cfg
+    elif [ -e /etc/grub2-efi.cfg ] ; then
+        # alinux3 iso for UEFI only. The real grub2.cfg is in /boot/efi/EFI/alinux/grub.cfg
+        grub2_cfg=/etc/grub2-efi.cfg
+    elif [ -e /boot/grub2/grub.cfg ] ; then
+        # fallback for other distros
+        grub2_cfg=/boot/grub2/grub.cfg
+    elif [ -e /boot/grub/grub.cfg ] ; then
+        grub2_cfg=/boot/grub/grub.cfg
+    else
+       echo "Cannot find grub config file, will attempt to run update-grub if available"
+    fi
+
+    if [ -n "$grub2_cfg" ]; then
+        if command -v grub2-mkconfig >/dev/null 2>&1; then
+            echo "Generating grub config with grub2-mkconfig -> $grub2_cfg"
+            grub2-mkconfig -o "$grub2_cfg" || true
+        elif command -v grub-mkconfig >/dev/null 2>&1; then
+            echo "Generating grub config with grub-mkconfig -> $grub2_cfg"
+            grub-mkconfig -o "$grub2_cfg" || true
+        else
+            echo "No grub-mkconfig found, will try update-grub if available"
+        fi
+    else
+        if command -v update-grub >/dev/null 2>&1; then
+            echo "Running update-grub"
+            update-grub || true
+        fi
+    fi
+    echo "Cleaning up package manager cache..."
+    if command -v yum >/dev/null 2>&1; then
         yum clean all
-        rm -rf "${rootfs_mount_point}"/var/lib/dnf/history.*
-        rm -rf "${rootfs_mount_point}"/var/cache/dnf/*
+        rm -rf /var/lib/dnf/history.*
+        rm -rf /var/cache/dnf/*
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get clean
+    fi
+fi
+EOF
+        )"
 
     }
 
@@ -703,7 +892,6 @@ step:update_initrd() {
         cp "${workdir}/metadata.toml" "${rootfs_mount_point}/tmp/"
         mkdir -p "${rootfs_mount_point}/tmp/cryptpilot/"
         cp -a "${config_dir}/." "${rootfs_mount_point}/tmp/cryptpilot/"
-
         # update initrd
         log::info "Updating initrd"
         chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; uki_append_cmdline='${uki_append_cmdline}' ; $(
@@ -713,6 +901,8 @@ set -u
 
 BASH_XTRACEFD=3
 set -x
+
+printf '%s\n' 'omit_dracutmodules+=" iscsi nvmf multipath "' > /etc/dracut.conf.d/99-disable-cryptpilot-conflict-modules.conf
 
 KERNELIMG=/boot/vmlinuz
 if [ ! -f "$KERNELIMG" ]; then
@@ -731,7 +921,7 @@ echo "Kernel version: $KERNELVER"
 
 echo "Generating initrd with dracut"
 
-dracut_common_args=(--kver "$KERNELVER" --hostonly --fstab --add-fstab /etc/fstab --force -v)
+dracut_common_args=(-N --kver "$KERNELVER" --fstab --add-fstab /etc/fstab --force -v)
 dracut_common_args+=(--add cryptpilot)
 dracut_common_args+=(--include /tmp/metadata.toml /etc/cryptpilot/metadata.toml)
 if [[ -f /tmp/cryptpilot/fde.toml ]]; then
@@ -770,26 +960,7 @@ else
     echo "Generating new initrd image"
     dracut "${dracut_common_args[@]}"
 
-    echo "Updating grub2.cfg"
-    grub2_cfg=""
-    if [ -e /etc/grub2.cfg ] ; then
-        # alinux3 iso with lagecy BIOS support. The real grub2.cfg is in /boot/grub2/grub.cfg
-        grub2_cfg=/etc/grub2.cfg
-    elif [ -e /etc/grub2-efi.cfg ] ; then
-        # alinux3 iso for UEFI only. The real grub2.cfg is in /boot/efi/EFI/alinux/grub.cfg
-        grub2_cfg=/etc/grub2-efi.cfg
-    elif [ -e /boot/grub2/grub.cfg ] ; then
-        # fallback for other distros
-        grub2_cfg=/boot/grub2/grub.cfg
-    else
-        echo "Cannot find grub2 config file"
-        exit 1
-    fi
-
-    echo "Detected grub2.cfg, re-generate it now: $grub2_cfg"
-    grub2-mkconfig -o "$grub2_cfg"
 fi
-
 EOF
         )"
 
@@ -1092,7 +1263,7 @@ main() {
         fi
 
         # Check if the input file is a vhd or qcow2
-        if [[ "$input_file" != *.vhd ]] && [[ "$input_file" != *.qcow2 ]]; then
+        if [[ "$input_file" != *.vhd ]] && [[ "$input_file" != *.qcow2 ]] && [[ "$input_file" != *.img ]]; then
             proc::fatal "Input file $input_file is not supported, should be a vhd or qcow2 file"
         fi
     else
@@ -1109,11 +1280,22 @@ main() {
     step::setup_workdir
 
     log::step "[ 0 ] Checking for required tools"
-    local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof)
-    if [[ "$uki" == "true" ]]; then
-        tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+
+    # Install required host tools via appropriate package manager
+    if command -v apt-get >/dev/null 2>&1; then
+        local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gawk)
+        if [[ "$uki" == "true" ]]; then
+            tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+        fi
+        apt-get update
+        apt-get install -y "${tool_packages[@]}"
+    else
+        local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof)
+        if [[ "$uki" == "true" ]]; then
+            tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+        fi
+        yum install -y "${tool_packages[@]}"
     fi
-    yum install -y "${tool_packages[@]}"
 
     #
     # 1. Prepare disk
