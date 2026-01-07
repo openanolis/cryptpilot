@@ -4,12 +4,34 @@
 Name: cryptpilot
 Version: 0.2.10
 Release: %{release_num}%{?dist}
-Summary: A utility for protecting data at rest in confidential environment
+Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
 License: Apache-2.0
 URL: https://www.alibaba.com
 Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}.tar.gz
 
+# Shared BuildRequires for all packages
+%{!?with_rustup:%global use_system_rust 1}
+%if 0%{?use_system_rust}
+BuildRequires: cargo >= 1.85.0
+BuildRequires: rust >= 1.85.0
+%endif
+# cmake is required by flatc crate for building FlatBuffers compiler
+BuildRequires: cmake
+
+ExclusiveArch: x86_64
+
+%define dracut_dst %{_prefix}/lib/dracut/modules.d/91cryptpilot/
+
+# Build dependencies for cryptpilot (main package)
+BuildRequires: protobuf-compiler
+BuildRequires: cryptsetup-devel
+BuildRequires: perl-IPC-Cmd
+BuildRequires: clang-libs
+BuildRequires: clang
+BuildRequires: device-mapper-devel
+
+# Runtime dependencies for cryptpilot (main package)
 Requires: dracut
 Requires: lvm2
 # used by cryptpilot-convert
@@ -38,26 +60,25 @@ Suggests: confidential-data-hub
 # If not installed, the AAEL will not work.
 Suggests: attestation-agent
 
-BuildRequires: protobuf-compiler
-BuildRequires: cryptsetup-devel
-BuildRequires: perl-IPC-Cmd
-BuildRequires: clang-libs
-BuildRequires: clang
-BuildRequires: device-mapper-devel
-
-%{!?with_rustup:%global use_system_rust 1}
-%if 0%{?use_system_rust}
-BuildRequires: cargo >= 1.82.0
-BuildRequires: rust >= 1.82.0
-%endif
-
-ExclusiveArch: x86_64
-
-%define dracut_dst %{_prefix}/lib/dracut/modules.d/91cryptpilot/
-
-
 %description
-A utility for protecting data at rest in confidential environment, with setting up tools and dracut module.
+Cryptpilot is a full-disk encryption utility for protecting data at rest in confidential computing environments.
+It provides LUKS2-based encryption for rootfs and data volumes, integrates with dracut for early-boot decryption,
+and supports multiple key providers including TPM2, KBS (Key Broker Service), KMS, OIDC, OTP, and custom exec plugins.
+Includes tools for disk image conversion (cryptpilot-convert) and enhancement (cryptpilot-enhance).
+
+%package -n cryptpilot-verity
+Summary: Integrity measurement tool for directory trees
+Group: Applications/System
+License: Apache-2.0
+
+# Runtime dependencies for cryptpilot-verity
+Requires: fuse3-libs
+Requires: fuse3
+
+BuildRequires: fuse3-devel
+
+%description -n cryptpilot-verity
+Cryptpilot-verity is an integrity measurement tool for directory trees in confidential computing environments.
 
 
 %prep
@@ -66,8 +87,13 @@ A utility for protecting data at rest in confidential environment, with setting 
 
 %build
 # Build cryptpilot
-pushd src/
-cargo install --path . --bin cryptpilot --bin cryptpilot-verity --root %{_builddir}/%{name}-%{version}/install/cryptpilot/ --locked --offline
+pushd src/cryptpilot-core/
+cargo install --path . --bin cryptpilot --root %{_builddir}/%{name}-%{version}/install/cryptpilot/ --locked --offline
+popd
+
+# Build cryptpilot-verity
+pushd src/cryptpilot-verity/
+cargo install --path . --bin cryptpilot-verity --root %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/ --locked --offline
 popd
 
 
@@ -76,9 +102,11 @@ popd
 pushd src/
 install -d -p %{buildroot}%{_prefix}/bin
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot %{buildroot}%{_prefix}/bin/cryptpilot
-install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot-verity %{buildroot}%{_prefix}/bin/cryptpilot-verity
 install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
 install -p -m 755 cryptpilot-enhance.sh %{buildroot}%{_prefix}/bin/cryptpilot-enhance
+
+# Install cryptpilot-verity
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/bin/cryptpilot-verity %{buildroot}%{_prefix}/bin/cryptpilot-verity
 # Install remain stuffs
 rm -rf %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{dracut_dst}
@@ -126,7 +154,6 @@ rm -rf %{buildroot}
 %files
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot
-%{_prefix}/bin/cryptpilot-verity
 %{_prefix}/bin/cryptpilot-convert
 %{_prefix}/bin/cryptpilot-enhance
 %{_prefix}/lib/systemd/system/cryptpilot.service
@@ -150,6 +177,11 @@ rm -rf %{buildroot}
 %dir /usr/share/cryptpilot
 /usr/share/cryptpilot/policy.rego
 /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+
+
+%files -n cryptpilot-verity
+%license src/LICENSE
+%{_prefix}/bin/cryptpilot-verity
 
 
 %preun

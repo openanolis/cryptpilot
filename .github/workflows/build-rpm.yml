@@ -103,8 +103,10 @@ jobs:
           set -x
 
           # test rpm package install
-          yum install -y ./rpm-packages/RPMS/*/cryptpilot-*.rpm
+          yum install -y ./rpm-packages/RPMS/*/cryptpilot-[0-9]*.rpm
+          yum install -y ./rpm-packages/RPMS/*/cryptpilot-verity-*.rpm
           cryptpilot --version
+          cryptpilot-verity --version
       - name: Checkout repository
         uses: actions/checkout@v4
         with:

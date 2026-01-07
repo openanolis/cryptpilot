@@ -67,7 +67,8 @@ rpm-build:
 	
 	# build 
 	rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'
-	@echo "RPM package is:" ~/rpmbuild/RPMS/*/cryptpilot-*
+	@echo "RPM packages are:"
+	@ls -1 ~/rpmbuild/RPMS/*/cryptpilot-[0-9]*.rpm ~/rpmbuild/RPMS/*/cryptpilot-verity-[0-9]*.rpm 2>/dev/null || true
 
 .PHONE: rpm-build-in-al3-docker
 rpm-build-in-al3-docker:
@@ -90,8 +91,9 @@ rpm-build-in-docker: rpm-build-in-al3-docker
 
 .PHONE: rpm-install
 rpm-install: rpm-build
-	yum remove cryptpilot -y
-	ls -t /root/rpmbuild/RPMS/x86_64/cryptpilot-*.rpm | head -n 1 | xargs rpm --install
+	yum remove cryptpilot cryptpilot-verity -y || true
+	ls -t /root/rpmbuild/RPMS/x86_64/cryptpilot-[0-9]*.rpm | head -n 1 | xargs rpm --install
+	ls -t /root/rpmbuild/RPMS/x86_64/cryptpilot-verity-*.rpm | head -n 1 | xargs rpm --install
 
 .PHONE: update-rpm-tree
 update-rpm-tree:
