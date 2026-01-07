@@ -16,8 +16,7 @@ Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/
 BuildRequires: cargo >= 1.85.0
 BuildRequires: rust >= 1.85.0
 %endif
-# cmake is required by flatc crate for building FlatBuffers compiler
-BuildRequires: cmake
+
 
 
 %define dracut_dst %{_prefix}/lib/dracut/modules.d/91cryptpilot/
@@ -48,15 +47,29 @@ Group: Applications/System
 License: Apache-2.0
 
 # Runtime dependencies for cryptpilot-verity
+# fuse filesystem support for user-space fs-verity implementation
 Requires: fuse3-libs
+# libfuse3 requires fusermount3 binary for auto-umount. see: https://github.com/cberner/fuser/issues/283
 Requires: fuse3
 
 Obsoletes: cryptpilot < %{version}-%{release}
 
+# Build dependencies for cryptpilot-verity
+# Requires Rust toolchain (cargo >= 1.85.0, rust >= 1.85.0) and cmake
+# cmake is needed by the flatc crate to build FlatBuffers compiler from source
+# FlatBuffers Rust code generation is provided by flatc-rust crate
+BuildRequires: cmake
 BuildRequires: fuse3-devel
 
 %description -n cryptpilot-verity
 Cryptpilot-verity is an integrity measurement tool for directory trees in confidential computing environments.
+It provides a user-space implementation of fs-verity for generic read-only directory trees.
+It computes integrity metadata (fs-verity descriptors and Merkle trees) for a data directory,
+stores verification data in FlatBuffers format, and provides a FUSE filesystem that enforces
+integrity checks at read time. Unlike kernel fs-verity which works per-file, cryptpilot-verity
+protects the entire directory tree structure including path-to-file mappings, making it suitable
+for confidential computing scenarios where the underlying storage is untrusted (e.g., virtio-fs,
+object storage, or host-side disks).
 
 %package -n cryptpilot-fde-host
 Summary: Full-disk encryption host-side tooling (conversion, configuration, reference values)
