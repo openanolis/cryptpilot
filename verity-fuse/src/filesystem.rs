@@ -384,15 +384,19 @@ impl<V: FileVerifier> fuser::Filesystem for VerityFS<V> {
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: fuser::ReplyOpen) {
-        tracing::info!(ino, "open");
+        tracing::debug!(ino, "open");
 
         let result = || -> _ {
             let file = self.verifier.lookup_by_ino(ino).ok_or(libc::ENOENT)?;
-            self.open_file(file.path())
+            let _ = self.open_file(file.path())?;
+            Ok(file)
         }();
 
         match result {
-            Ok(_) => reply.opened(0, 0),
+            Ok(file) => {
+                tracing::info!(ino, path=?file.path(), "open");
+                reply.opened(0, 0)
+            }
             Err(e) => {
                 tracing::error!(ino, "open failed");
                 reply.error(e);

@@ -81,6 +81,7 @@ impl VerifiableFile for FsEntry {
 pub struct VerityVerifier {
     path_to_ino: HashMap<RelativePathBuf, u64>,
     ino_to_file: HashMap<u64, FsEntry>,
+    next_ino: u64,
 }
 
 impl std::fmt::Debug for VerityVerifier {
@@ -93,24 +94,38 @@ impl std::fmt::Debug for VerityVerifier {
 }
 
 impl VerityVerifier {
+    /// Helper function to register a new entry and log the mapping
+    fn register_entry(&mut self, path: RelativePathBuf, kind: EntryKind) {
+        let ino = self.next_ino;
+        self.next_ino += 1;
+
+        let kind_str = match &kind {
+            EntryKind::Directory(_) => "DIR",
+            EntryKind::VerityEnabled(_) => "FILE",
+        };
+
+        tracing::info!("Register entry: ino={} -> {} [{}]", ino, path, kind_str);
+
+        self.path_to_ino.insert(path.clone(), ino);
+        self.ino_to_file.insert(ino, FsEntry { ino, kind });
+    }
+
     /// Create a new verifier from metadata file information
     ///
     /// # Arguments
     /// * `file_infos` - List of file information from metadata
     pub fn new(file_infos: Vec<FileVerityInfo>) -> Result<Self> {
-        let mut path_to_ino = HashMap::new();
-        let mut ino_to_file = HashMap::new();
-        let mut next_ino = ROOT_INO + 1;
+        let mut verifier = Self {
+            path_to_ino: HashMap::new(),
+            ino_to_file: HashMap::new(),
+            next_ino: ROOT_INO,
+        };
 
-        // Insert root directory
+        // Insert root directory (uses ROOT_INO and advances next_ino to ROOT_INO + 1)
         let root_path = RelativePathBuf::from(ROOT_PATH);
-        path_to_ino.insert(root_path.clone(), ROOT_INO);
-        ino_to_file.insert(
-            ROOT_INO,
-            FsEntry {
-                ino: ROOT_INO,
-                kind: EntryKind::Directory(root_path),
-            },
+        verifier.register_entry(
+            root_path,
+            EntryKind::Directory(RelativePathBuf::from(ROOT_PATH)),
         );
 
         // Process all files from metadata (verity-enabled files)
@@ -124,41 +139,17 @@ impl VerityVerifier {
                     break; // Reached root
                 }
                 let parent_buf = parent.to_relative_path_buf();
-                if !path_to_ino.contains_key(&parent_buf) {
-                    let parent_ino = next_ino;
-                    next_ino += 1;
-                    path_to_ino.insert(parent_buf.clone(), parent_ino);
-                    ino_to_file.insert(
-                        parent_ino,
-                        FsEntry {
-                            ino: parent_ino,
-                            kind: EntryKind::Directory(parent_buf),
-                        },
-                    );
+                if !verifier.path_to_ino.contains_key(&parent_buf) {
+                    verifier.register_entry(parent_buf.clone(), EntryKind::Directory(parent_buf));
                 }
                 current = parent;
             }
 
             // Now register the file itself
-            let ino = next_ino;
-            next_ino += 1;
-
-            path_to_ino.insert(path.clone(), ino);
-
-            // Store verity-enabled file
-            ino_to_file.insert(
-                ino,
-                FsEntry {
-                    ino,
-                    kind: EntryKind::VerityEnabled(info),
-                },
-            );
+            verifier.register_entry(path, EntryKind::VerityEnabled(info));
         }
 
-        Ok(Self {
-            path_to_ino,
-            ino_to_file,
-        })
+        Ok(verifier)
     }
 }
 

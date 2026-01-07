@@ -41,9 +41,13 @@ pub fn calculate_fsverity_hash(
 pub fn serialize_metadata(file_infos: &[FileVerityInfo]) -> Result<Vec<u8>> {
     let mut builder = FlatBufferBuilder::new();
 
-    // Build FileInfo vector
+    // Sort by path for stable output (using references to avoid copying)
+    let mut sorted_refs: Vec<&FileVerityInfo> = file_infos.iter().collect();
+    sorted_refs.sort_unstable_by_key(|info| &info.path);
+
+    // Build FileInfo vector in sorted order
     let mut file_info_offsets = Vec::with_capacity(file_infos.len());
-    for info in file_infos {
+    for info in sorted_refs {
         let path_offset = builder.create_string(&info.path);
         let descriptor_hash_offset = builder.create_string(&info.descriptor_hash);
 
