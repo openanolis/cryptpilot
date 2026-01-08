@@ -83,10 +83,6 @@ async fn temporary_disk_open(
     .await?;
 
     if let Some(makefs) = &volume_config.extra_config.makefs {
-        tracing::info!(
-            "Initializing {makefs} fs on volume {}",
-            volume_config.volume
-        );
         match crate::fs::luks2::makefs_if_empty(&volume_config.volume, makefs, integrity).await {
             Ok(_) => (),
             Err(e) => {

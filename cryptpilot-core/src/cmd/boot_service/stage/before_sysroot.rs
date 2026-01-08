@@ -160,6 +160,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
         }
 
         // TODO: support change size of the LUKS2 volume and inner ext4 file system
+        tracing::info!("Opening data volume");
         crate::fs::luks2::open_with_check_passphrase(
             DATA_LAYER_NAME,
             DATA_LOGICAL_VOLUME,

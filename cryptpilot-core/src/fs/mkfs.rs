@@ -77,12 +77,12 @@ impl MakeFs for IntegrityNoWipeMakeFs {
         };
 
         if is_empty_disk {
-            tracing::debug!(
+            tracing::info!(
                 "The device {device_path:?} is uninitialized (empty) and is ok to be initialized with mkfs"
             );
             Self::mkfs_on_no_wipe_volume(device_path, fs_type).await?
         } else {
-            tracing::debug!(
+            tracing::info!(
                 "The device {device_path:?} is not empty and maybe some data on it, so we won't touch it"
             );
         }
@@ -101,17 +101,16 @@ impl IntegrityNoWipeMakeFs {
             (file.get_block_device_size()?, file.get_size_of_block()?)
         };
 
-        tracing::trace!(
-            "The device size of {:?} is {device_size}",
-            device_path.as_ref()
-        );
+        tracing::info!("Setup dummy device with {device_size} bytes size for recording");
 
         // Create a dummy device same size as the real one
         let dummy_device = DummyDevice::setup_on_tmpfs_with_block_size(device_size, block_size)
             .await
             .context("Failed to create dummy device")?;
         let dummy_device_path = dummy_device.path()?;
+
         // Enable the blktrace
+        tracing::info!("Starting to record device operations");
         let tracer = BlkTrace::monitor(&dummy_device_path).await?;
         tracing::trace!(
             device = ?dummy_device_path,  "start blktrace on device"
@@ -164,8 +163,8 @@ impl IntegrityNoWipeMakeFs {
                 }
             }
         }
-        tracing::debug!(
-            "Num of pages need to update to volume: {} ({} reads, {} writes), total size: {} bytes",
+        tracing::info!(
+            "Recording finished, num of pages need to update to volume: {} ({} reads, {} writes), total size: {} bytes",
             rw_positions.len(),
             r_positions.len(),
             w_positions.len(),
@@ -200,6 +199,7 @@ impl IntegrityNoWipeMakeFs {
         .await
         .context("Failed to migrate data from tmp device to the real device")?;
 
+        tracing::info!("Replaying data to the real device finished");
         Ok(())
     }
 }

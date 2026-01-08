@@ -235,6 +235,12 @@ pub async fn makefs_if_empty(
     let makefs = makefs.to_owned();
 
     let device_path = format!("/dev/mapper/{volume}");
+    tracing::info!(
+        "Initializing {} fs on volume {}, with volume integrity type {:?}",
+        makefs,
+        volume,
+        integrity
+    );
     match integrity {
         IntegrityType::None => NormalMakeFs::mkfs(device_path, makefs).await,
         IntegrityType::Journal | IntegrityType::NoJournal => {

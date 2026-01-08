@@ -42,10 +42,18 @@ pub struct BlkTraceTask {
     pub block_name: Option<String>,
 }
 
-#[derive(Debug)]
 pub struct BlkTraceEvent {
     pub event: blk_io_trace,
     pub data: Vec<u8>,
+}
+
+impl std::fmt::Debug for BlkTraceEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlkTraceEvent")
+            .field("event", &self.event)
+            .field("data_len", &self.data.len())
+            .finish()
+    }
 }
 
 impl BlkTraceEvent {
@@ -219,6 +227,7 @@ impl BlkTrace {
         let join_handle = tokio::spawn(async move {
             let mut traces = vec![];
             while let Some(blk_event) = rx.recv().await {
+                tracing::trace!(?blk_event, "Received a blktrace event");
                 traces.push(blk_event);
             }
 
