@@ -12,8 +12,8 @@ use tokio::{
 };
 
 use crate::{
-    config::volume::MakeFsType,
     fs::{block::dummy::DummyDevice, cmd::CheckCommandOutput as _},
+    types::MakeFsType,
 };
 
 use super::block::blktrace::BlkTrace;
@@ -200,88 +200,6 @@ impl IntegrityNoWipeMakeFs {
         .context("Failed to migrate data from tmp device to the real device")?;
 
         tracing::info!("Replaying data to the real device finished");
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-pub mod tests {
-
-    use std::path::PathBuf;
-
-    use crate::{
-        async_defer,
-        cli::{CloseOptions, OpenOptions},
-        cmd::{close::CloseCommand, open::OpenCommand, Command as _},
-        config::{
-            encrypt::{EncryptConfig, KeyProviderConfig},
-            volume::{ExtraConfig, VolumeConfig},
-            ConfigBundle,
-        },
-        provider::otp::OtpConfig,
-    };
-
-    use super::*;
-    use anyhow::Result;
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-    async fn test_mkfs_with_integrity() -> Result<()> {
-        let dummy_device = DummyDevice::setup_on_tmpfs(10 * 1024 * 1024 * 1024).await?;
-
-        let volume_config = VolumeConfig {
-            volume: "mkfs_with_integrity".to_owned(),
-            dev: dummy_device.path().unwrap().to_str().unwrap().to_owned(),
-            extra_config: ExtraConfig {
-                auto_open: Some(true),
-                makefs: Some(MakeFsType::Ext4),
-                integrity: Some(true),
-            },
-            encrypt: EncryptConfig {
-                key_provider: KeyProviderConfig::Otp(OtpConfig {}),
-            },
-        };
-
-        crate::config::source::set_config_source(ConfigBundle {
-            global: None,
-            fde: None,
-            volumes: vec![volume_config.clone()],
-        })
-        .await;
-
-        // Close the volume if it is already opened
-        CloseCommand {
-            close_options: CloseOptions {
-                volume: vec![volume_config.volume.clone()],
-            },
-        }
-        .run()
-        .await
-        .unwrap();
-
-        async_defer! {
-            async{
-                CloseCommand {
-                    close_options: CloseOptions {
-                        volume: vec![volume_config.volume.clone()],
-                    }
-                }.run().await.unwrap();
-            }
-        }
-
-        OpenCommand {
-            open_options: OpenOptions {
-                volume: vec![volume_config.volume.clone()],
-            },
-        }
-        .run()
-        .await?;
-
-        Command::new("blkid")
-            .arg("-p")
-            .arg(PathBuf::from("/dev/mapper/").join(&volume_config.volume))
-            .run()
-            .await?;
-
         Ok(())
     }
 }

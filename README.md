@@ -141,7 +141,7 @@ After you finished your tests, you can use Ctrl-A C to get to the qemu console, 
 4. Calculate the reference values from the encrypted disk image file:
 
 ```sh
-cryptpilot fde show-reference-value --stage system --disk ./encrypted.qcow2
+cryptpilot-fde show-reference-value --stage system --disk ./encrypted.qcow2
 ```
 
 You can then upload them to the [Reference Value Provider Service](https://github.com/confidential-containers/trustee/tree/main/rvps).
@@ -192,11 +192,11 @@ This volume will be encrypted with One-Time-Password, which means the data on it
 2. Open the volume, and check that we have created a encrypted volume.
 
 ```sh
-cryptpilot open data0
+cryptpilot-crypt open data0
 ```
 
 ```sh
-cryptpilot show
+cryptpilot-crypt show
 ```
 
 It may outputs like this:

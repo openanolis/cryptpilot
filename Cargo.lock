@@ -943,6 +943,71 @@ dependencies = [
 ]
 
 [[package]]
+name = "cryptpilot-crypt"
+version = "0.2.10"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "block-devs",
+ "cgroups-rs",
+ "clap",
+ "comfy-table",
+ "cryptpilot",
+ "ctor",
+ "dialoguer",
+ "documented",
+ "lazy_static",
+ "rand 0.8.5",
+ "rstest",
+ "rstest_reuse",
+ "scopeguard",
+ "serde",
+ "serde_variant",
+ "shadow-rs",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.19",
+ "toml_edit",
+ "tracing",
+ "tracing-subscriber",
+ "two-rusty-forks",
+]
+
+[[package]]
+name = "cryptpilot-fde"
+version = "0.2.10"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "async-walkdir",
+ "authenticode",
+ "block-devs",
+ "clap",
+ "cryptpilot",
+ "digest",
+ "documented",
+ "futures",
+ "glob",
+ "hex",
+ "indexmap 2.11.0",
+ "lazy_static",
+ "nix 0.29.0",
+ "object",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "shadow-rs",
+ "sm3",
+ "tempfile",
+ "tokio",
+ "toml 0.8.19",
+ "toml_edit",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "cryptpilot-verity"
 version = "0.2.10"
 dependencies = [

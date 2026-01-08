@@ -1,6 +1,5 @@
 [package]
 authors.workspace = true
-default-run = "cryptpilot"
 description = "A utility for protecting data at rest in confidential environment"
 edition.workspace = true
 name = "cryptpilot"

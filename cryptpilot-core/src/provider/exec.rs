@@ -46,12 +46,9 @@ impl KeyProvider for ExecKeyProvider {
 #[cfg(test)]
 pub mod tests {
     use crate::provider::exec::{ExecConfig, ExecKeyProvider};
-    use crate::provider::tests::{run_test_on_volume, test_volume_base};
     use crate::provider::KeyProvider;
 
     use anyhow::Result;
-    use rstest::rstest;
-    use rstest_reuse::apply;
 
     #[tokio::test]
     async fn test_get_key_str_from_exec() -> Result<()> {
@@ -94,26 +91,5 @@ pub mod tests {
         let result = provider.get_key().await;
 
         assert!(result.is_err());
-    }
-
-    #[apply(test_volume_base)]
-    async fn test_volume(makefs: &str, integrity: bool) -> Result<()> {
-        run_test_on_volume(
-            &format!(
-                r#"
-            volume = "<placeholder>"
-            dev = "<placeholder>"
-            auto_open = true
-            makefs = "{makefs}"
-            integrity = {integrity}
-
-            [encrypt.exec]
-            command = "echo"
-            args = ["-n", "test-passphrase"]
-            "#,
-            ),
-            false,
-        )
-        .await
     }
 }

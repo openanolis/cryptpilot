@@ -1,6 +1,8 @@
 [workspace]
 members = [
   "cryptpilot-core",
+  "cryptpilot-crypt",
+  "cryptpilot-fde",
   "cryptpilot-verity",
 ]
 resolver = "2"

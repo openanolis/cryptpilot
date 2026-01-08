@@ -189,15 +189,10 @@ mod tests {
 
     use crate::config::encrypt::KeyProviderConfig;
     use crate::provider::oidc::AliyunKmsConfig;
-    use crate::provider::tests::{run_test_on_volume, test_volume_base};
     use crate::provider::{
         oidc::{Kms, OidcConfig},
         IntoProvider, KeyProvider,
     };
-
-    use anyhow::Result;
-    use rstest::rstest;
-    use rstest_reuse::apply;
 
     #[ignore]
     #[tokio::test]
@@ -216,37 +211,5 @@ mod tests {
         let key = provider.get_key().await.unwrap();
         println!("Get key (bytes): {:?}", key.as_bytes());
         println!("Get key (utf-8): {:?}", str::from_utf8(key.as_bytes()));
-    }
-
-    #[apply(test_volume_base)]
-    async fn test_volume(makefs: &str, integrity: bool) -> Result<()> {
-        run_test_on_volume(
-            &format!(
-                r#"
-            volume = "<placeholder>"
-            dev = "<placeholder>"
-            auto_open = true
-            makefs = "{makefs}"
-            integrity = {integrity}
-
-            [encrypt.oidc]
-            command = "some-cli"
-            args = [
-                "-c",
-                "/etc/config.json",
-                "get-token",
-            ]
-            key_id = "disk-decryption-key"
-
-            [encrypt.oidc.kms]
-            type = "aliyun"
-            oidc_provider_arn = "acs:ram::113511544585:oidc-provider/TestOidcIdp"
-            role_arn = "acs:ram::113511544585:role/testoidc"
-            region_id = "cn-beijing"
-            "#,
-            ),
-            false,
-        )
-        .await
     }
 }

@@ -7,13 +7,15 @@ help:
 
 .PHONE: update-template
 update-template:
-	cargo run --bin gen-template -- volume -t otp > dist/etc/volumes/otp.toml.template
-	cargo run --bin gen-template -- volume -t kbs > dist/etc/volumes/kbs.toml.template
-	cargo run --bin gen-template -- volume -t kms > dist/etc/volumes/kms.toml.template
-	cargo run --bin gen-template -- volume -t oidc > dist/etc/volumes/oidc.toml.template
-	cargo run --bin gen-template -- volume -t exec > dist/etc/volumes/exec.toml.template
-	cargo run --bin gen-template -- global > dist/etc/global.toml.template
-	cargo run --bin gen-template -- fde > dist/etc/fde.toml.template
+	# Generate volume templates using cryptpilot-crypt
+	cargo run --bin crypt-gen-template --package cryptpilot-crypt -- -t otp > dist/etc/volumes/otp.toml.template
+	cargo run --bin crypt-gen-template --package cryptpilot-crypt -- -t kbs > dist/etc/volumes/kbs.toml.template
+	cargo run --bin crypt-gen-template --package cryptpilot-crypt -- -t kms > dist/etc/volumes/kms.toml.template
+	cargo run --bin crypt-gen-template --package cryptpilot-crypt -- -t oidc > dist/etc/volumes/oidc.toml.template
+	cargo run --bin crypt-gen-template --package cryptpilot-crypt -- -t exec > dist/etc/volumes/exec.toml.template
+	# Generate FDE templates using cryptpilot-fde
+	cargo run --bin fde-gen-template --package cryptpilot-fde -- global > dist/etc/global.toml.template
+	cargo run --bin fde-gen-template --package cryptpilot-fde -- fde > dist/etc/fde.toml.template
 
 .PHONE: build-static
 build-static:
@@ -68,7 +70,7 @@ rpm-build:
 	# build 
 	rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'
 	@echo "RPM packages are:"
-	@ls -1 ~/rpmbuild/RPMS/*/cryptpilot-[0-9]*.rpm ~/rpmbuild/RPMS/*/cryptpilot-verity-[0-9]*.rpm 2>/dev/null || true
+	@ls -1 ~/rpmbuild/RPMS/*/cryptpilot-[0-9]*.rpm ~/rpmbuild/RPMS/*/cryptpilot-fde-[0-9]*.rpm ~/rpmbuild/RPMS/*/cryptpilot-crypt-[0-9]*.rpm ~/rpmbuild/RPMS/*/cryptpilot-verity-[0-9]*.rpm 2>/dev/null || true
 
 .PHONE: rpm-build-in-al3-docker
 rpm-build-in-al3-docker:
@@ -91,8 +93,10 @@ rpm-build-in-docker: rpm-build-in-al3-docker
 
 .PHONE: rpm-install
 rpm-install: rpm-build
-	yum remove cryptpilot cryptpilot-verity -y || true
+	yum remove cryptpilot cryptpilot-fde cryptpilot-crypt cryptpilot-verity -y || true
 	ls -t /root/rpmbuild/RPMS/x86_64/cryptpilot-[0-9]*.rpm | head -n 1 | xargs rpm --install
+	ls -t /root/rpmbuild/RPMS/x86_64/cryptpilot-fde-*.rpm | head -n 1 | xargs rpm --install
+	ls -t /root/rpmbuild/RPMS/x86_64/cryptpilot-crypt-*.rpm | head -n 1 | xargs rpm --install
 	ls -t /root/rpmbuild/RPMS/x86_64/cryptpilot-verity-*.rpm | head -n 1 | xargs rpm --install
 
 .PHONE: update-rpm-tree

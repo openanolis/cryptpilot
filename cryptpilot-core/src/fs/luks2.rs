@@ -10,10 +10,7 @@ use libcryptsetup_rs::{
 };
 use tokio::fs::OpenOptions;
 
-use crate::{
-    config::volume::MakeFsType,
-    types::{IntegrityType, Passphrase},
-};
+use crate::types::{IntegrityType, MakeFsType, Passphrase};
 
 use super::{
     get_verbose,

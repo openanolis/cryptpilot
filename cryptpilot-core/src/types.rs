@@ -1,6 +1,7 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use rand::RngCore as _;
+use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const GENERATED_PASSPHRASE_LEN: usize = 64;
@@ -36,4 +37,20 @@ pub enum IntegrityType {
     None,
     Journal,
     NoJournal,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields)]
+pub enum MakeFsType {
+    Swap,
+    Ext4,
+    Xfs,
+    Vfat,
+}
+
+impl Display for MakeFsType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(serde_variant::to_variant_name(self).unwrap_or("<unknown>"))
+    }
 }
