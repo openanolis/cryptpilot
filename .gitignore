@@ -3,3 +3,4 @@ release/
 /TODO
 .vscode/
 *.qcow2
+/build

@@ -53,7 +53,7 @@ create-tarball:
 	@echo "Tarball generated:" /tmp/cryptpilot-${VERSION}.tar.gz
 
 .PHONE: rpm-build
-rpm-build: create-tarball
+rpm-build:
 	# setup build tree
 	which rpmdev-setuptree || { yum install -y rpmdevtools ; }
 	rpmdev-setuptree
