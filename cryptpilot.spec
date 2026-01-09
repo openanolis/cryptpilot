@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.2.9
+Version: 0.2.10
 Release: %{release_num}%{?dist}
 Summary: A utility for protecting data at rest in confidential environment
 Group: Applications/System
@@ -166,6 +166,31 @@ fi
 
 
 %changelog
+* Fri Jan 09 2026 Kun Lai <laikun@linux.alibaba.com> - 0.2.10-1
+- fde: Remove the warning print when obtaining the reference value
+- fde: support ubuntu GRUB configuration
+- fde: improve external disk detection
+- dracut: improve cryptpilot initrd module
+- cryptpilot-convert: add Debian/Ubuntu system support
+- build: add Debian/Ubuntu package building support
+- fix(convert): fix boot failure in UKI mode by removing NvVars
+- chore(clippy): make cargo clippy happy
+- fix(fs): align loop device block size with underlying LUKS2 device
+- chore(build): remove support for AnoliOS:8 due to libc dependency on gettid
+- refactor: replace cryptsetup CLI calls with libcryptsetup-rs bindings
+- chore(build): update Rust toolchain to 1.82.0 and improve build reliability
+- feat: add cryptpilot-enhance Secure VM disk image hardening tool
+- feat(cryptpilot-convert): skip boot partition creation in UKI mode
+- feat: add verity command for data integrity verification
+- Make attestation-agent and confidential-data-hub optional Suggests dependencies
+- refactor: remove custom aa eventlog entries for config and roothash
+- feat(fde): support reference value calculation for UKI boot images
+- feat: add --uki-append-cmdline option to customize UKI kernel command line
+- refactor(initrd): defer initrd generation and move configs into initrd for UKI support
+- feat: add --uki option to generate and boot from Unified Kernel Image
+- doc(README.md): upgrade to latest Alinux3 image with updated kernel
+- refactor(cmd): add child PID callback hook in command execution
+
 * Tue Nov 11 2025 Kun Lai <laikun@linux.alibaba.com> - 0.2.9-1
 - fix(fde): fix panic due to wrong default hash algo
 
