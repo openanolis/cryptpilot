@@ -19,14 +19,4 @@ CryptPilot的部分功能依赖于在系统的启动过程的某些位置插入�
 
 - [`cryptpilot-fde-after-sysroot.service`](/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service)：在`initrd-root-device.target`之后启动，它会负责将data卷挂载到`/data`目录中，并处理一些琐碎的挂载任务。
 
-## System Manager阶段
-
-在System Manager阶段，我们依赖于一个名为[cryptpilot.service](/dist/systemd/cryptpilot.service)的systemd服务，来实现加密数据卷的自动打开（Auto Open）特性。该服务会在系统启动过程中检查`/etc/cryptpilot/volumes/`中的配置文件，并根据配置自动打开加密数据卷。
-
-如果你需要使用Auto Open特性，请使用以下命令配置该服务自动启动：
-
-```sh
-systemctl enable --now cryptpilot.service
-```
-
 

@@ -18,13 +18,3 @@ As described in the [systemd documentation](https://www.freedesktop.org/software
 - [[cryptpilot-fde-before-sysroot.service](file:///root/cryptpilot/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service)](/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service): Starts before `initrd-root-device.target`, which decrypts the rootfs volume (if necessary) and performs measurement on its content. Additionally, it checks the data volume; if the data volume does not exist, it initializes a new data volume using the remaining space on the disk, which usually happens during the first system boot. If the data volume already exists, it will decrypt it.
 
 - [[cryptpilot-fde-after-sysroot.service](file:///root/cryptpilot/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service)](/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service): Starts after `initrd-root-device.target`, responsible for mounting the data volume to the `/data` directory and handling some trivial mount tasks.
-
-## System Manager Stage
-
-In the System Manager stage, we rely on a systemd service named [cryptpilot.service](/dist/systemd/cryptpilot.service) to implement the Auto Open feature for encrypted data volumes. During system startup, this service checks configuration files within `/etc/cryptpilot/volumes/` and automatically opens encrypted data volumes according to the configurations.
-
-If you need to use the Auto Open feature, please use the following command to make the service start at boot:
-
-```sh
-systemctl enable --now cryptpilot.service
-```
