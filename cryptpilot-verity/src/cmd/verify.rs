@@ -13,7 +13,7 @@ pub struct VerifyCommand {
 #[async_trait]
 impl Command for VerifyCommand {
     async fn run(&self) -> Result<()> {
-        tracing::info!("Starting verity verify command");
+        tracing::info!("Starting verify command");
         tracing::info!("Data directory: {:?}", self.options.data_dir);
         tracing::info!("Expected root hash: {}", self.options.hash);
 

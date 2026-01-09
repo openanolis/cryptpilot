@@ -11,7 +11,7 @@ pub struct DumpCommand {
 #[async_trait]
 impl Command for DumpCommand {
     async fn run(&self) -> Result<()> {
-        tracing::info!("Starting verity dump command");
+        tracing::info!("Starting dump command");
 
         // Determine the metadata file path
         let metadata_path = if let Some(ref metadata) = self.options.metadata {

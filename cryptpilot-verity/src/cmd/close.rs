@@ -10,7 +10,7 @@ pub struct CloseCommand {
 #[async_trait]
 impl Command for CloseCommand {
     async fn run(&self) -> Result<()> {
-        tracing::info!("Starting verity close command");
+        tracing::info!("Starting close command");
         tracing::info!("Mount point: {:?}", self.options.mount_point);
 
         // Validate mount point exists

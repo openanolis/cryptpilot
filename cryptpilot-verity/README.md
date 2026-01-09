@@ -71,7 +71,7 @@ All commands are subcommands of the `cryptpilot-verity` binary. Run `cryptpilot-
 ### `format`
 
 ```bash
-cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] --hash-output <HASH_OUTPUT>
+cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] [--force] --hash-output <HASH_OUTPUT>
 ```
 
 - **Purpose**: Generate fs-verity metadata and the root hash for a given data directory.
@@ -79,6 +79,7 @@ cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] --hash-output <
   - `<DATA_DIR>`: Path to the data directory for which to calculate reference values.
   - `--metadata, -m` **[optional]**: Path to the output metadata file (FlatBuffers-encoded). If not specified, defaults to `<DATA_DIR>/cryptpilot-verity.metadata.fb`.
   - `--hash-output`: Path to write the root hash (use `-` for stdout).
+  - `--force` **[optional]**: Overwrite an existing metadata file at the target path. Intended for re-formatting or third-party auditing of an already formatted directory.
 
 ### `verify`
 

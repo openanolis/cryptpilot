@@ -47,6 +47,11 @@ pub struct FormatOptions {
     /// Output file path for the root hash ("-" for stdout)
     #[arg(long)]
     pub hash_output: std::path::PathBuf,
+
+    /// Overwrite existing metadata file if it already exists.
+    /// Intended for re-formatting or third-party auditing of an already formatted directory.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Parser, Debug)]

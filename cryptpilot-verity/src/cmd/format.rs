@@ -15,8 +15,30 @@ pub struct FormatCommand {
 #[async_trait]
 impl Command for FormatCommand {
     async fn run(&self) -> Result<()> {
-        tracing::info!("Starting verity format command");
+        tracing::info!("Starting format command");
         tracing::info!("Data directory: {:?}", self.options.data_dir);
+
+        // Determine the actual metadata file path
+        let metadata_path = if let Some(ref metadata) = self.options.metadata {
+            metadata.clone()
+        } else {
+            self.options.data_dir.join(DEFAULT_METADATA_FILE)
+        };
+
+        // If metadata file already exists and force is not set, refuse to overwrite
+        if tokio::fs::metadata(&metadata_path).await.is_ok() && !self.options.force {
+            anyhow::bail!(
+                "Metadata file already exists at {:?}. Refusing to overwrite. Re-run with --force to regenerate metadata.",
+                metadata_path
+            );
+        }
+
+        if self.options.force {
+            tracing::warn!(
+                "Overwriting existing metadata file at {:?} due to --force",
+                metadata_path
+            );
+        }
 
         // Collect all file paths
         let mut files = Vec::new();
@@ -66,13 +88,6 @@ impl Command for FormatCommand {
             file_infos.len(),
             fb_data.len()
         );
-
-        // Determine the actual metadata file path
-        let metadata_path = if let Some(ref metadata) = self.options.metadata {
-            metadata.clone()
-        } else {
-            self.options.data_dir.join(DEFAULT_METADATA_FILE)
-        };
 
         tracing::info!("Writing metadata to: {:?}", metadata_path);
 

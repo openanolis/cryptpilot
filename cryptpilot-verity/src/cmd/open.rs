@@ -17,7 +17,7 @@ pub struct OpenCommand {
 #[async_trait]
 impl Command for OpenCommand {
     async fn run(&self) -> Result<()> {
-        tracing::info!("Starting verity open command");
+        tracing::info!("Starting open command");
         tracing::info!("Data directory: {:?}", self.options.data_dir);
         tracing::info!("Mount point: {:?}", self.options.mount_point);
 
