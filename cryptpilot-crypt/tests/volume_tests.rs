@@ -126,6 +126,9 @@ where
 }
 
 pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> Result<()> {
+    // Set test mode environment variable to skip external binary checks
+    std::env::set_var("CRYPTPILOT_TEST_MODE", "1");
+
     let mut volume_config: VolumeConfig = toml::from_str(config_str)?;
 
     // Random volume name

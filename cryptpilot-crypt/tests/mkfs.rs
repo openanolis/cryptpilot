@@ -40,6 +40,9 @@ impl VolumeConfigSource for InMemoryVolumeConfigSource {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn test_mkfs_with_integrity() -> Result<()> {
+    // Set test mode environment variable to skip some external binary checks
+    std::env::set_var("CRYPTPILOT_TEST_MODE", "1");
+
     let dummy_device = DummyDevice::setup_on_tmpfs(10 * 1024 * 1024 * 1024).await?;
 
     let volume_config = VolumeConfig {

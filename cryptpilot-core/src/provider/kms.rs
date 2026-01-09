@@ -65,11 +65,12 @@ impl KeyProvider for KmsKeyProvider {
     }
 
     async fn get_key(&self) -> Result<Passphrase> {
-        #[cfg(not(test))]
-        let key_u8 = self.get_key_from_kms().await?;
-
-        #[cfg(test)]
-        let key_u8 = { BASE64_STANDARD.encode(b"test").into_bytes() };
+        let key_u8 = if cfg!(test) || std::env::var("CRYPTPILOT_TEST_MODE").is_ok() {
+            // In test mode, return mock data
+            BASE64_STANDARD.encode(b"test").into_bytes()
+        } else {
+            self.get_key_from_kms().await?
+        };
 
         let passphrase = (|| -> Result<_> {
             let key_base64 = String::from_utf8(key_u8)?;

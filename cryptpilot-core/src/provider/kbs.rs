@@ -44,8 +44,10 @@ impl KeyProvider for KbsKeyProvider {
 
     async fn get_key(&self) -> Result<Passphrase> {
         let cdh_bin_path = helper::find_cdh_binary_or_default();
-        #[cfg(not(test))]
-        if !std::path::Path::new(&cdh_bin_path).exists() {
+        if !cfg!(test)
+            && !std::path::Path::new(&cdh_bin_path).exists()
+            && std::env::var("CRYPTPILOT_TEST_MODE").is_err()
+        {
             anyhow::bail!(
                 "The confidential-data-hub binary not found, you may need to install it first."
             )
@@ -101,11 +103,11 @@ url = "{}"
                 )
             });
 
-        #[cfg(not(test))]
-        let key_u8 = get_secret_res?;
-
-        #[cfg(test)]
-        let key_u8 = { BASE64_STANDARD.encode(b"test").into_bytes() };
+        let key_u8 = if cfg!(test) || std::env::var("CRYPTPILOT_TEST_MODE").is_ok() {
+            BASE64_STANDARD.encode(b"test").into_bytes()
+        } else {
+            get_secret_res?
+        };
 
         let passphrase = (|| -> Result<_> {
             let key_base64 = String::from_utf8(key_u8)?;
