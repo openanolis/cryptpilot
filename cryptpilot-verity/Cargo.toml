@@ -1,0 +1,25 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+name = "cryptpilot-verity"
+version.workspace = true
+
+[dependencies]
+anyhow = {workspace = true}
+async-trait = {workspace = true}
+async-walkdir = {workspace = true}
+clap = {workspace = true}
+futures = {workspace = true}
+hex = {workspace = true}
+serde = {version = "1.0", features = ["derive"]}
+serde_json = {workspace = true}
+sha2 = {workspace = true}
+shadow-rs = {workspace = true}
+tokio = {workspace = true}
+tokio-util = {workspace = true}
+tracing = {workspace = true}
+tracing-log = {workspace = true}
+tracing-subscriber = {workspace = true}
+
+[build-dependencies]
+shadow-rs = {workspace = true, default-features = true}

@@ -12,7 +12,7 @@ Requires=sysroot.mount
 [Service]
 Type=oneshot
 RemainAfterExit=true
-ExecStart=/usr/bin/cryptpilot boot-service --stage initrd-fde-after-sysroot
+ExecStart=/usr/bin/cryptpilot-fde boot-service --stage initrd-fde-after-sysroot
 StandardOutput=journal+console
 StandardError=journal+console
 

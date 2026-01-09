@@ -443,7 +443,7 @@ disk::install_rpm_on_rootfs() {
     # Define the essential packages
     local essential_packages=(
         "yum-plugin-versionlock"
-        "cryptpilot"
+        "cryptpilot-fde"
     )
 
     # Add the essential packages to the installation list
@@ -1477,7 +1477,7 @@ main() {
     echo
     log::info "You can calculate reference value of the disk with:"
     echo ""
-    log::highlight "    cryptpilot fde show-reference-value --disk ${output_file}"
+    log::highlight "    cryptpilot-fde show-reference-value --disk ${output_file}"
 }
 
 main "$@"

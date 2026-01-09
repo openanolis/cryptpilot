@@ -9,7 +9,7 @@ After=attestation-agent.service
 [Service]
 Type=oneshot
 RemainAfterExit=true
-ExecStart=/usr/bin/cryptpilot boot-service --stage system-volumes-auto-open
+ExecStart=/usr/bin/cryptpilot-crypt boot-service --stage system-volumes-auto-open
 StandardOutput=journal+console
 StandardError=journal+console
 

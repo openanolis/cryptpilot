@@ -4,40 +4,26 @@
 Name: cryptpilot
 Version: 0.2.10
 Release: %{release_num}%{?dist}
-Summary: A utility for protecting data at rest in confidential environment
+Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
 License: Apache-2.0
 URL: https://www.alibaba.com
 Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}.tar.gz
 
-Requires: dracut
-Requires: lvm2
-# used by cryptpilot-convert
-Requires: cryptsetup
-Requires: cryptsetup-libs
-Requires: coreutils
-Requires: systemd
-Requires: systemd-udev
-Requires: veritysetup
-Requires: device-mapper-libs
-Requires: kmod
-# mkfs.vfat
-Requires: dosfstools
-# mkfs.xfs
-Requires: xfsprogs
-# mkfs.ext4
-Requires: e2fsprogs
-# swapon, sfdisk
-Requires: util-linux
-# qemu-nbd
-Requires: qemu-img
-Requires: file
+# Shared BuildRequires for all packages
+%{!?with_rustup:%global use_system_rust 1}
+%if 0%{?use_system_rust}
+BuildRequires: cargo >= 1.82.0
+BuildRequires: rust >= 1.82.0
+%endif
+# cmake is required by flatc crate for building FlatBuffers compiler
+BuildRequires: cmake
 
-# If not installed, the kbs and kms-oidc keyprovider will not work.
-Suggests: confidential-data-hub
-# If not installed, the AAEL will not work.
-Suggests: attestation-agent
+ExclusiveArch: x86_64
 
+%define dracut_dst %{_prefix}/lib/dracut/modules.d/91cryptpilot/
+
+# Build dependencies (shared across all packages)
 BuildRequires: protobuf-compiler
 BuildRequires: cryptsetup-devel
 BuildRequires: perl-IPC-Cmd
@@ -45,39 +31,136 @@ BuildRequires: clang-libs
 BuildRequires: clang
 BuildRequires: device-mapper-devel
 
-%{!?with_rustup:%global use_system_rust 1}
-%if 0%{?use_system_rust}
-BuildRequires: cargo >= 1.82.0
-BuildRequires: rust >= 1.82.0
-%endif
-
-ExclusiveArch: x86_64
-
-%define dracut_dst %{_prefix}/lib/dracut/modules.d/91cryptpilot/
-
+# Runtime dependencies for cryptpilot (main package)
+# Main package provides wrapper script and shared configuration
+Requires: cryptpilot-fde = %{version}-%{release}
+Requires: cryptpilot-crypt = %{version}-%{release}
+Requires: cryptpilot-verity = %{version}-%{release}
 
 %description
-A utility for protecting data at rest in confidential environment, with setting up tools and dracut module.
+Cryptpilot is a full-disk encryption utility for protecting data at rest in confidential computing environments.
+It provides LUKS2-based encryption for rootfs and data volumes, integrates with dracut for early-boot decryption,
+and supports multiple key providers including TPM2, KBS (Key Broker Service), KMS, OIDC, OTP, and custom exec plugins.
+Includes tools for disk image conversion (cryptpilot-convert) and enhancement (cryptpilot-enhance).
 
+%package -n cryptpilot-verity
+Summary: Integrity measurement tool for directory trees
+Group: Applications/System
+License: Apache-2.0
+
+# Runtime dependencies for cryptpilot-verity
+Requires: fuse3-libs
+Requires: fuse3
+
+BuildRequires: fuse3-devel
+
+%description -n cryptpilot-verity
+Cryptpilot-verity is an integrity measurement tool for directory trees in confidential computing environments.
+
+%package -n cryptpilot-fde
+Summary: Full-disk encryption tooling for system volumes
+Group: Applications/System
+License: Apache-2.0
+
+# FDE runtime dependencies
+Requires: cryptsetup
+Requires: cryptsetup-libs
+Requires: device-mapper-libs
+Requires: kmod
+Requires: coreutils
+Requires: systemd
+Requires: systemd-udev
+Requires: dracut
+Requires: lvm2
+# Used by cryptpilot-convert for disk conversion
+Requires: qemu-img
+Requires: file
+# Used by cryptpilot-enhance for partition manipulation
+Requires: util-linux
+Requires: veritysetup
+# Filesystem tools for volume formatting
+# mkfs.vfat
+Requires: dosfstools
+# mkfs.xfs
+Requires: xfsprogs
+# mkfs.ext4
+Requires: e2fsprogs
+# swapon for swap volumes
+Requires: util-linux
+# If not installed, the kbs and kms-oidc keyprovider will not work.
+Suggests: confidential-data-hub
+# If not installed, the AAEL will not work.
+Suggests: attestation-agent
+
+%description -n cryptpilot-fde
+Cryptpilot-fde provides system disk encryption and boot-time processing for full-disk encryption setups.
+Includes cryptpilot-convert for disk image conversion and cryptpilot-enhance for FDE enhancement.
+
+%package -n cryptpilot-crypt
+Summary: Data volume encryption tooling
+Group: Applications/System
+License: Apache-2.0
+
+# Crypt runtime dependencies
+Requires: cryptsetup
+Requires: cryptsetup-libs
+Requires: device-mapper-libs
+Requires: kmod
+Requires: coreutils
+Requires: systemd
+# Filesystem tools for volume formatting
+# mkfs.vfat
+Requires: dosfstools
+# mkfs.xfs
+Requires: xfsprogs
+# mkfs.ext4
+Requires: e2fsprogs
+# swapon for swap volumes
+Requires: util-linux
+
+# If not installed, the kbs and kms-oidc keyprovider will not work.
+Suggests: confidential-data-hub
+# If not installed, the AAEL will not work.
+Suggests: attestation-agent
+
+%description -n cryptpilot-crypt
+Cryptpilot-crypt provides data volume encryption and automatic volume management for confidential computing environments.
 
 %prep
 %setup -q -n %{name}-%{version}
 
 
 %build
-# Build cryptpilot
-pushd src/
-cargo install --path . --bin cryptpilot --root %{_builddir}/%{name}-%{version}/install/cryptpilot/ --locked --offline
+# Build cryptpilot-fde
+pushd src/cryptpilot-fde/
+cargo install --path . --bin cryptpilot-fde --root %{_builddir}/%{name}-%{version}/install/cryptpilot-fde/ --locked --offline
+popd
+
+# Build cryptpilot-crypt
+pushd src/cryptpilot-crypt/
+cargo install --path . --bin cryptpilot-crypt --root %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/ --locked --offline
+popd
+
+# Build cryptpilot-verity
+pushd src/cryptpilot-verity/
+cargo install --path . --bin cryptpilot-verity --root %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/ --locked --offline
 popd
 
 
 %install
-# Install cryptpilot
+# Install cryptpilot-fde
 pushd src/
 install -d -p %{buildroot}%{_prefix}/bin
-install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot/bin/cryptpilot %{buildroot}%{_prefix}/bin/cryptpilot
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-fde/bin/cryptpilot-fde %{buildroot}%{_prefix}/bin/cryptpilot-fde
+# Install FDE enhancement scripts
 install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
 install -p -m 755 cryptpilot-enhance.sh %{buildroot}%{_prefix}/bin/cryptpilot-enhance
+
+# Install cryptpilot-crypt
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/bin/cryptpilot-crypt %{buildroot}%{_prefix}/bin/cryptpilot-crypt
+
+# Install cryptpilot-verity
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/bin/cryptpilot-verity %{buildroot}%{_prefix}/bin/cryptpilot-verity
 # Install remain stuffs
 rm -rf %{buildroot}%{dracut_dst}
 install -d -p %{buildroot}%{dracut_dst}
@@ -106,37 +189,27 @@ install -p -m 644 dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devi
 popd
 
 
-%post
-# Reload systemd manager configuration to pick up new/updated service files
-if command -v systemctl >/dev/null 2>&1; then
-    systemctl daemon-reload || :
-fi
-
-# Reload udev rules to apply new device filtering rules
-if command -v udevadm >/dev/null 2>&1; then
-    udevadm control --reload-rules || :
-fi
-
-
 %clean
 rm -rf %{buildroot}
 
 
 %files
 %license src/LICENSE
-%{_prefix}/bin/cryptpilot
+
+%files -n cryptpilot-verity
+%license src/LICENSE
+%{_prefix}/bin/cryptpilot-verity
+
+%files -n cryptpilot-fde
+%license src/LICENSE
+%{_prefix}/bin/cryptpilot-fde
 %{_prefix}/bin/cryptpilot-convert
 %{_prefix}/bin/cryptpilot-enhance
-%{_prefix}/lib/systemd/system/cryptpilot.service
+# FDE configuration templates
 %dir /etc/cryptpilot
 /etc/cryptpilot/global.toml.template
 /etc/cryptpilot/fde.toml.template
-%dir /etc/cryptpilot/volumes
-/etc/cryptpilot/volumes/otp.toml.template
-/etc/cryptpilot/volumes/kbs.toml.template
-/etc/cryptpilot/volumes/kms.toml.template
-/etc/cryptpilot/volumes/oidc.toml.template
-/etc/cryptpilot/volumes/exec.toml.template
+# Dracut integration for FDE boot
 %dir %{dracut_dst}
 %{dracut_dst}module-setup.sh
 %{dracut_dst}initrd-trigger-network-online.sh
@@ -145,12 +218,39 @@ rm -rf %{buildroot}
 %{dracut_dst}cryptpilot-fde-after-sysroot.service
 %{dracut_dst}initrd-wait-network-online.service
 %{dracut_dst}lvm.conf
+# Policy for FDE
 %dir /usr/share/cryptpilot
 /usr/share/cryptpilot/policy.rego
+# Udev rules for device hiding
 /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
 
+%post -n cryptpilot-fde
+# Reload udev rules to apply new device filtering rules
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || :
+fi
 
-%preun
+%files -n cryptpilot-crypt
+%license src/LICENSE
+%{_prefix}/bin/cryptpilot-crypt
+# Systemd service for volume management
+%{_prefix}/lib/systemd/system/cryptpilot.service
+# Volume configuration templates
+%dir /etc/cryptpilot/volumes
+/etc/cryptpilot/volumes/otp.toml.template
+/etc/cryptpilot/volumes/kbs.toml.template
+/etc/cryptpilot/volumes/kms.toml.template
+/etc/cryptpilot/volumes/oidc.toml.template
+/etc/cryptpilot/volumes/exec.toml.template
+
+%post -n cryptpilot-crypt
+# Reload systemd manager configuration to pick up new/updated service files
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || :
+fi
+
+
+%preun -n cryptpilot-crypt
 if [ $1 == 0 ]; then #uninstall
   systemctl unmask cryptpilot.service
   systemctl stop cryptpilot.service
@@ -158,7 +258,7 @@ if [ $1 == 0 ]; then #uninstall
 fi
 
 
-%postun
+%postun -n cryptpilot-crypt
 if [ $1 == 0 ]; then #uninstall
   systemctl daemon-reload
   systemctl reset-failed

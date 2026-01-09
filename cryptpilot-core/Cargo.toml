@@ -1,0 +1,86 @@
+[package]
+authors.workspace = true
+description = "A utility for protecting data at rest in confidential environment"
+edition.workspace = true
+name = "cryptpilot"
+version.workspace = true
+
+[dependencies]
+again = {workspace = true}
+anyhow = {workspace = true}
+async-trait = {workspace = true}
+async-walkdir = {workspace = true}
+authenticode = {workspace = true}
+base64 = {workspace = true}
+block-devs = {workspace = true}
+clap = {workspace = true}
+comfy-table = {workspace = true}
+devicemapper = {workspace = true}
+dialoguer = {workspace = true}
+digest = {workspace = true}
+dirs = {workspace = true}
+documented = {workspace = true}
+futures = {workspace = true}
+futures-lite = {workspace = true}
+glob = {workspace = true}
+hex = {workspace = true}
+indexmap = {workspace = true}
+kms = {workspace = true, optional = true}
+lazy_static = {workspace = true}
+libc = {workspace = true}
+libcryptsetup-rs = {workspace = true}
+loopdev-3 = {workspace = true}
+mnt = {workspace = true}
+nix = {workspace = true}
+num_cpus = {workspace = true}
+object = {workspace = true}
+ordermap = {workspace = true}
+protobuf = {workspace = true, optional = true}
+rand = {workspace = true}
+reqwest = {workspace = true}
+rsntp = {workspace = true}
+scopeguard = {workspace = true}
+serde = {workspace = true}
+serde_json = {workspace = true}
+serde_variant = {workspace = true}
+sha1 = {workspace = true}
+sha2 = {workspace = true}
+shadow-rs = {workspace = true}
+sm3 = {workspace = true}
+strum = {workspace = true}
+tempfile = {workspace = true}
+tokio = {workspace = true}
+tokio-util = {workspace = true}
+toml = {workspace = true}
+toml_edit = {workspace = true}
+tracing = {workspace = true}
+tracing-log = {workspace = true}
+tracing-subscriber = {workspace = true}
+ttrpc = {workspace = true, optional = true}
+which = {workspace = true}
+zeroize = {workspace = true}
+
+[build-dependencies]
+bindgen = {workspace = true}
+shadow-rs = {workspace = true, default-features = true}
+ttrpc-codegen = {workspace = true, optional = true}
+
+[dev-dependencies]
+cgroups-rs = "0.3.4"
+ctor = "=0.4.1"
+rstest = "0.25.0"
+rstest_reuse = "0.7.0"
+two-rusty-forks = {version = "0.4.0", features = ["macro"]}
+
+[features]
+default = ["provider-kbs", "provider-kms", "provider-otp", "provider-tpm2", "provider-oidc", "provider-exec"]
+provider-exec = []
+provider-kbs = [
+  "dep:ttrpc-codegen",
+  "dep:ttrpc",
+  "dep:protobuf",
+]
+provider-kms = ["dep:kms"]
+provider-oidc = []
+provider-otp = []
+provider-tpm2 = []

@@ -11,7 +11,7 @@ After=attestation-agent.service
 [Service]
 Type=oneshot
 RemainAfterExit=true
-ExecStart=/usr/bin/cryptpilot boot-service --stage initrd-fde-before-sysroot
+ExecStart=/usr/bin/cryptpilot-fde boot-service --stage initrd-fde-before-sysroot
 StandardOutput=journal+console
 StandardError=journal+console
 

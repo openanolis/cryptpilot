@@ -22,7 +22,8 @@ install() {
         inst_simple /usr/share/misc/magic.mgc
         # For debug only
         # inst_multiple curl nc ip find systemctl journalctl ifconfig lsblk df
-        inst_multiple cryptpilot
+        # Install cryptpilot-fde for FDE boot-time decryption
+        inst_multiple cryptpilot-fde
 
         # TODO: It would be better compatible to use the same network service in initrd as in system. So here we enable NetworkManager in initrd since the Alinux3 OS is using NetworkManager in system. But it would be better to have a more general way to select network service to be enabled.
         # Enable NetworkManager

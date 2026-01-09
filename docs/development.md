@@ -13,7 +13,7 @@ make create-tarball rpm-build
 Then install the rpm package on your system:
 
 ```sh
-rpm --install /root/rpmbuild/RPMS/x86_64/cryptpilot-*.rpm
+rpm --install /root/rpmbuild/RPMS/x86_64/cryptpilot-[0-9]*.rpm
 ```
 
 ### DEB Package (Debian/Ubuntu)
