@@ -9,7 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::{
-    cli::{BootServiceOptions, ConfigOptions, ConfigSubcommand, ShowOptions},
+    cli::{BootServiceOptions, ConfigOptions, ConfigSubcommand},
     cmd::boot_service::BootServiceCommand,
 };
 use close::CloseCommand;
@@ -31,9 +31,9 @@ pub trait IntoCommand {
 impl IntoCommand for crate::cli::CryptSubcommand {
     fn into_command(self) -> Box<dyn Command> {
         match self {
-            crate::cli::CryptSubcommand::Show(ShowOptions { .. }) => Box::new(ShowCommand {
-                show_options: ShowOptions {},
-            }),
+            crate::cli::CryptSubcommand::Show(show_options) => {
+                Box::new(ShowCommand { show_options })
+            }
             crate::cli::CryptSubcommand::Init(init_options) => {
                 Box::new(InitCommand { init_options })
             }

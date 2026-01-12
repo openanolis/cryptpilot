@@ -70,10 +70,28 @@ mount /dev/mapper/data0 /mnt/data0
 显示所有已配置卷的状态：
 
 ```sh
-cryptpilot-crypt show
+cryptpilot-crypt show [卷名称...] [--json]
 ```
 
-示例输出：
+选项：
+- `卷名称`：可选的卷名称。如果不指定，则显示所有卷。
+- `--json`：以 JSON 格式输出，而非表格格式
+
+示例：
+```sh
+# 显示所有卷
+cryptpilot-crypt show
+
+# 显示指定卷
+cryptpilot-crypt show data0
+cryptpilot-crypt show data0 data1
+
+# JSON 格式输出
+cryptpilot-crypt show --json
+cryptpilot-crypt show data0 --json
+```
+
+表格输出示例：
 ```
 ╭────────┬───────────────────┬─────────────────┬──────────────┬──────────────────┬──────────────┬────────╮
 │ Volume ┆ Volume Path       ┆ Underlay Device ┆ Key Provider ┆ Extra Options    ┆ Initialized  ┆ Opened │
@@ -83,6 +101,38 @@ cryptpilot-crypt show
 │        ┆                   ┆                 ┆              ┆ integrity = true ┆              ┆        │
 ╰────────┴───────────────────┴─────────────────┴──────────────┴──────────────────┴──────────────┴────────╯
 ```
+
+JSON 输出示例：
+```json
+[
+  {
+    "volume": "data0",
+    "volume_path": "/dev/mapper/data0",
+    "underlay_device": "/dev/nvme1n1p1",
+    "device_exists": true,
+    "key_provider": "otp",
+    "extra_options": {
+      "auto_open": true,
+      "makefs": "ext4",
+      "integrity": true
+    },
+    "needs_initialize": false,
+    "initialized": true,
+    "opened": true
+  }
+]
+```
+
+JSON 输出字段说明：
+- `volume`：卷名称
+- `volume_path`：解密后的卷路径（始终显示 mapper 路径）
+- `underlay_device`：底层加密块设备路径
+- `device_exists`：底层设备是否存在
+- `key_provider`：密钥提供者类型（如 `otp`、`kbs`、`kms`、`oidc`、`exec`）
+- `extra_options`：额外的卷配置（序列化失败时为 `null`）
+- `needs_initialize`：卷是否需要初始化（临时卷如 OTP 为 false，持久化卷为 true）
+- `initialized`：LUKS2 是否已初始化（设备不存在或初始化检查失败时为 false，设备存在且卷无需初始化时为 true，持久化卷为实际初始化状态）
+- `opened`：卷当前是否已打开/解密
 
 ### `cryptpilot-crypt init`
 

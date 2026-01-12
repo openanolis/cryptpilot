@@ -40,7 +40,15 @@ pub enum CryptSubcommand {
 }
 
 #[derive(Parser, Debug)]
-pub struct ShowOptions {}
+pub struct ShowOptions {
+    /// Name of the volume(s) to show. If not specified, show all volumes.
+    #[arg(num_args=0..)]
+    pub volume: Vec<String>,
+
+    /// Output as JSON format instead of table
+    #[clap(long)]
+    pub json: bool,
+}
 
 #[derive(Parser, Debug)]
 pub struct InitOptions {

@@ -70,10 +70,28 @@ See [Configuration Guide](docs/configuration.md) for detailed options.
 Display status of all configured volumes:
 
 ```sh
-cryptpilot-crypt show
+cryptpilot-crypt show [volume-name...] [--json]
 ```
 
-Example output:
+Options:
+- `volume-name`: Optional volume name(s) to show. If not specified, show all volumes.
+- `--json`: Output as JSON format instead of table
+
+Examples:
+```sh
+# Show all volumes
+cryptpilot-crypt show
+
+# Show specific volume(s)
+cryptpilot-crypt show data0
+cryptpilot-crypt show data0 data1
+
+# Output as JSON
+cryptpilot-crypt show --json
+cryptpilot-crypt show data0 --json
+```
+
+Example table output:
 ```
 ╭────────┬───────────────────┬─────────────────┬──────────────┬──────────────────┬──────────────┬────────╮
 │ Volume ┆ Volume Path       ┆ Underlay Device ┆ Key Provider ┆ Extra Options    ┆ Initialized  ┆ Opened │
@@ -83,6 +101,38 @@ Example output:
 │        ┆                   ┆                 ┆              ┆ integrity = true ┆              ┆        │
 ╰────────┴───────────────────┴─────────────────┴──────────────┴──────────────────┴──────────────┴────────╯
 ```
+
+Example JSON output:
+```json
+[
+  {
+    "volume": "data0",
+    "volume_path": "/dev/mapper/data0",
+    "underlay_device": "/dev/nvme1n1p1",
+    "device_exists": true,
+    "key_provider": "otp",
+    "extra_options": {
+      "auto_open": true,
+      "makefs": "ext4",
+      "integrity": true
+    },
+    "needs_initialize": false,
+    "initialized": true,
+    "opened": true
+  }
+]
+```
+
+JSON output fields:
+- `volume`: Volume name
+- `volume_path`: Path to the decrypted volume (always shows the mapper path)
+- `underlay_device`: Underlying encrypted block device path
+- `device_exists`: Whether the underlying device exists
+- `key_provider`: Key provider type (e.g., `otp`, `kbs`, `kms`, `oidc`, `exec`)
+- `extra_options`: Additional volume configuration (`null` if serialization fails)
+- `needs_initialize`: Whether the volume needs initialization (false for temporary volumes like OTP, true for persistent volumes)
+- `initialized`: Whether LUKS2 is initialized (false if device doesn't exist or initialization check fails, true if device exists and volume doesn't need initialization, or actual initialization status for persistent volumes)
+- `opened`: Whether the volume is currently opened/decrypted
 
 ### `cryptpilot-crypt init`
 

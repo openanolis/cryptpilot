@@ -20,6 +20,7 @@ lazy_static = {workspace = true}
 rand = {workspace = true}
 scopeguard = {workspace = true}
 serde = {workspace = true}
+serde_json = {workspace = true}
 serde_variant = {workspace = true}
 shadow-rs = {workspace = true}
 tokio = {workspace = true}
