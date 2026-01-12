@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.2.10
+Version: 0.3.0
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -266,6 +266,16 @@ fi
 
 
 %changelog
+* Tue Jan 13 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.0-1
+- feat(cryptpilot-crypt): add JSON output and volume filtering to show command
+- test: support running integration tests without external binaries
+- docs: restructure documentation and add Chinese translations
+- refactor: split monolithic package into cryptpilot-fde and cryptpilot-crypt
+- refactor(cryptpilot): improve tracing and logging for volume setup and blktrace operations
+- build(cryptpilot-verity): split cryptpilot-verity into separate RPM package and improve build/install scripts
+- refactor(verity): split verity subcommand into standalone binary cryptpilot-verity
+- refactor: change project to rust workspace
+
 * Fri Jan 09 2026 Kun Lai <laikun@linux.alibaba.com> - 0.2.10-1
 - fde: Remove the warning print when obtaining the reference value
 - fde: support ubuntu GRUB configuration

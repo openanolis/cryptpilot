@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "cryptpilot"
-version = "0.2.10"
+version = "0.3.0"
 dependencies = [
  "again",
  "anyhow",
@@ -944,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "cryptpilot-crypt"
-version = "0.2.10"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -976,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "cryptpilot-fde"
-version = "0.2.10"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1010,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "cryptpilot-verity"
-version = "0.2.10"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
