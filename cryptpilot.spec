@@ -80,11 +80,11 @@ Requires: util-linux
 Requires: veritysetup
 # Filesystem tools for volume formatting
 # mkfs.vfat
-Requires: dosfstools
+Recommends: dosfstools
 # mkfs.xfs
-Requires: xfsprogs
+Recommends: xfsprogs
 # mkfs.ext4
-Requires: e2fsprogs
+Recommends: e2fsprogs
 # swapon for swap volumes
 Requires: util-linux
 # If not installed, the kbs and kms-oidc keyprovider will not work.
@@ -110,11 +110,11 @@ Requires: coreutils
 Requires: systemd
 # Filesystem tools for volume formatting
 # mkfs.vfat
-Requires: dosfstools
+Recommends: dosfstools
 # mkfs.xfs
-Requires: xfsprogs
+Recommends: xfsprogs
 # mkfs.ext4
-Requires: e2fsprogs
+Recommends: e2fsprogs
 # swapon for swap volumes
 Requires: util-linux
 
