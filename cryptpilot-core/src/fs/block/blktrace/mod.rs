@@ -134,7 +134,7 @@ impl BlkTrace {
             .context("Failed to BLKTRACESETUP")?;
 
         let block_name = CStr::from_bytes_until_nul(unsafe {
-            &*(setup_data.name.as_slice() as *const [i8] as *const [u8])
+            std::slice::from_raw_parts(setup_data.name.as_ptr() as *const u8, setup_data.name.len())
         })
         .context("Block name not vaild")?
         .to_str()

@@ -11,11 +11,8 @@ on:
       - 'master'
 
 jobs:
-  build:
+  create-tarball:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,23 +34,53 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.82.0
 
+      - name: Create tarball
+        run: make create-tarball
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-tarball
+          if-no-files-found: error
+          path: /tmp/cryptpilot-*.tar.gz
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    needs: create-tarball
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      - name: Download tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: source-tarball
+          path: /tmp/
+
       - name: Build RPM package
         run: |
-          make create-tarball
           make rpm-build-in-docker
           mkdir -p $GITHUB_WORKSPACE/rpmbuild
           cp -r ~/rpmbuild/SRPMS/ $GITHUB_WORKSPACE/rpmbuild/
           cp -r ~/rpmbuild/RPMS/ $GITHUB_WORKSPACE/rpmbuild/
-          mkdir -p $GITHUB_WORKSPACE/rpmbuild/SOURCES/
-          cp -r /tmp/cryptpilot-*.tar.gz $GITHUB_WORKSPACE/rpmbuild/SOURCES/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rpm-packages
+          name: rpm-packages-${{ matrix.arch }}
           if-no-files-found: error
           path: |
-            ./rpmbuild/SOURCES/cryptpilot-*.tar.gz
             ./rpmbuild/SRPMS/*.src.rpm
             ./rpmbuild/RPMS/*/*.rpm
 
@@ -61,8 +88,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86_64, aarch64]
         distro: ["alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest", "registry.openanolis.cn/openanolis/anolisos:23"]
-    runs-on: ubuntu-latest
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     defaults:
       run:
         shell: bash
@@ -98,7 +131,8 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./
+          name: rpm-packages-${{ matrix.arch }}
+          path: ./rpm-packages/
           merge-multiple: false
       - name: Install RPM packages
         run: |
@@ -124,17 +158,22 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./
+          path: ./artifacts/
           merge-multiple: false
+      
+      - name: Reorganize artifacts
+        run: |
+          mkdir -p ./release-packages/
+          # Copy tarball from source-tarball artifact
+          find ./artifacts/source-tarball/ -type f -name '*.tar.gz' -exec cp {} ./release-packages/ \;
+          # Copy RPMs from architecture-specific artifacts
+          find ./artifacts/rpm-packages-*/ -type f -name '*.rpm' -exec cp {} ./release-packages/ \;
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
           prerelease: ${{ env.PRE_RELEASE }}
-          files: |
-            ./rpm-packages/SOURCES/cryptpilot-*.tar.gz
-            ./rpm-packages/SRPMS/*.src.rpm
-            ./rpm-packages/RPMS/*/*.rpm
+          files: ./release-packages/*

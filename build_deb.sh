@@ -4,11 +4,11 @@ set -euo pipefail
 PACKAGE_NAME="cryptpilot"
 VERSION="${1:-$(grep '^version' Cargo.toml | awk -F' = ' '{print $2}' | tr -d '\"')}"
 RELEASE_NUM="${2:-1}"
-ARCH="amd64"
+ARCH="${3:-$(dpkg --print-architecture 2>/dev/null || echo "amd64")}"
 BUILD_DIR="$(pwd)/build"
 DIST_DIR="$(pwd)/dist"
 
-TARBALL="/tmp/${PACKAGE_NAME}-${VERSION}.tar.gz"
+TARBALL="/tmp/${PACKAGE_NAME}-${VERSION}-vendored-source.tar.gz"
 USE_TARBALL=1
 
 # prepare workspace

@@ -8,7 +8,7 @@ Summary: Full-disk encryption and data protection tool for confidential computin
 Group: Applications/System
 License: Apache-2.0
 URL: https://www.alibaba.com
-Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}.tar.gz
+Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}-vendored-source.tar.gz
 
 # Shared BuildRequires for all packages
 %{!?with_rustup:%global use_system_rust 1}
@@ -19,7 +19,6 @@ BuildRequires: rust >= 1.82.0
 # cmake is required by flatc crate for building FlatBuffers compiler
 BuildRequires: cmake
 
-ExclusiveArch: x86_64
 
 %define dracut_dst %{_prefix}/lib/dracut/modules.d/91cryptpilot/
 
