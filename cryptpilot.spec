@@ -32,7 +32,6 @@ BuildRequires: clang
 BuildRequires: device-mapper-devel
 
 # Runtime dependencies for cryptpilot (main package)
-# Main package provides wrapper script and shared configuration
 Requires: cryptpilot-fde = %{version}-%{release}
 Requires: cryptpilot-crypt = %{version}-%{release}
 Requires: cryptpilot-verity = %{version}-%{release}
@@ -51,6 +50,8 @@ License: Apache-2.0
 # Runtime dependencies for cryptpilot-verity
 Requires: fuse3-libs
 Requires: fuse3
+
+Obsoletes: cryptpilot < %{version}-%{release}
 
 BuildRequires: fuse3-devel
 
@@ -92,6 +93,8 @@ Suggests: confidential-data-hub
 # If not installed, the AAEL will not work.
 Suggests: attestation-agent
 
+Obsoletes: cryptpilot < %{version}-%{release}
+
 %description -n cryptpilot-fde
 Cryptpilot-fde provides system disk encryption and boot-time processing for full-disk encryption setups.
 Includes cryptpilot-convert for disk image conversion and cryptpilot-enhance for FDE enhancement.
@@ -122,6 +125,8 @@ Requires: util-linux
 Suggests: confidential-data-hub
 # If not installed, the AAEL will not work.
 Suggests: attestation-agent
+
+Obsoletes: cryptpilot < %{version}-%{release}
 
 %description -n cryptpilot-crypt
 Cryptpilot-crypt provides data volume encryption and automatic volume management for confidential computing environments.
