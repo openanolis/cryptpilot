@@ -1,4 +1,6 @@
-# cryptpilot-verity
+# cryptpilot-verity: Userspace Filesystem Integrity Protection
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 `cryptpilot-verity` is a command-line tool for generating, validating, and using fs-verity style integrity metadata for a read-only data directory. It can be seen as a user-space implementation of fs-verity tailored for generic read-only directory trees.
 It computes an integrity "root hash" over the full dataset, stores per-file verification metadata in a FlatBuffers format, and can mount the data directory
