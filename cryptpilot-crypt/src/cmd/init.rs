@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
-use dialoguer::Confirm;
+use dialoguer::{console::Term, Confirm};
 use rand::{distributions::Alphanumeric, Rng as _};
 
 use crate::cli::InitOptions;
@@ -60,16 +60,21 @@ async fn persistent_disk_init(
         bail!("The device {} is already initialized. Use '--force-reinit' to force re-initialize the volume.", volume_config.dev);
     }
 
-    if !init_options.yes
-        && !Confirm::new()
+    if !init_options.yes {
+        if !Term::stderr().is_term() {
+            bail!("Standard error is not a terminal. Please use '--yes' to confirm the operation in non-interactive mode.");
+        }
+
+        if !Confirm::new()
             .with_prompt(format!(
                 "All of the data on {} will be lost. Do you want to continue?",
                 volume_config.dev
             ))
             .default(false)
             .interact()?
-    {
-        bail!("Operation canceled");
+        {
+            bail!("Operation canceled");
+        }
     }
 
     if cryptpilot::fs::luks2::is_dev_in_use(&volume_config.dev).await? {
