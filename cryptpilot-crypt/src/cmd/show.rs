@@ -88,7 +88,7 @@ impl VolumeStatus {
                 .clone()
                 .into_provider()
                 .volume_type(),
-            VolumeType::Temporary
+            VolumeType::Persistent
         );
 
         let initialized = if !dev_exist {
