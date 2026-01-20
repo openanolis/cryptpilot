@@ -4,7 +4,7 @@ use bindgen::RustTarget;
 #[cfg(feature = "provider-kbs")]
 use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
-fn main() -> shadow_rs::SdResult<()> {
+fn main() {
     let Ok(target_version) = RustTarget::stable(82, 0) else {
         panic!("Invalid Rust target version, at least version 1.82 required")
     };
@@ -58,5 +58,4 @@ fn main() -> shadow_rs::SdResult<()> {
         strip_inner_attribute(&aa_dir.join("attestation_agent.rs"));
         strip_inner_attribute(&aa_dir.join("attestation_agent_ttrpc.rs"));
     }
-    shadow_rs::new()
 }

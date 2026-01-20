@@ -45,7 +45,6 @@ serde_json = {workspace = true}
 serde_variant = {workspace = true}
 sha1 = {workspace = true}
 sha2 = {workspace = true}
-shadow-rs = {workspace = true}
 sm3 = {workspace = true}
 strum = {workspace = true}
 tempfile = {workspace = true}
@@ -62,7 +61,6 @@ zeroize = {workspace = true}
 
 [build-dependencies]
 bindgen = {workspace = true}
-shadow-rs = {workspace = true, default-features = true}
 ttrpc-codegen = {workspace = true, optional = true}
 
 [dev-dependencies]

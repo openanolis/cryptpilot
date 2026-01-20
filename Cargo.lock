@@ -924,7 +924,6 @@ dependencies = [
  "serde_variant",
  "sha1",
  "sha2",
- "shadow-rs",
  "sm3",
  "strum",
  "tempfile",

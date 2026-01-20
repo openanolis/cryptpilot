@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use clap::Parser as _;
-use shadow_rs::shadow;
+use cryptpilot_crypt::build;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 mod cli;
@@ -9,8 +9,6 @@ mod config;
 
 use cmd::IntoCommand;
 use config::{cached::CachedVolumeConfigSource, fs::FileSystemConfigSource};
-
-shadow!(build);
 
 #[tokio::main]
 async fn main() -> Result<()> {
