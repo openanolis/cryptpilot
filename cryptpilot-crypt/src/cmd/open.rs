@@ -23,14 +23,14 @@ impl crate::cmd::Command for OpenCommand {
                 .get_volume_config(volume)
                 .await?;
 
-            open_for_specific_volume(&volume_config).await?;
+            open_for_specific_volume(&volume_config, self.open_options.check_fs).await?;
             tracing::info!("The volume {volume} is active now");
         }
         Ok(())
     }
 }
 
-pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()> {
+pub async fn open_for_specific_volume(volume_config: &VolumeConfig, check_fs: bool) -> Result<()> {
     tracing::info!(
         "The key_provider type is \"{}\"",
         serde_variant::to_variant_name(&volume_config.encrypt.key_provider)?
@@ -56,15 +56,16 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
     };
 
     // Check if filesystem is ready
-    if volume_config.extra_config.makefs.is_some()
+    if check_fs
+        && volume_config.extra_config.makefs.is_some()
         && cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?
     {
         // TODO: replace with RAII here
         let _ = cryptpilot::fs::luks2::close(&volume_config.volume).await;
         bail!(
-                "The filesystem on {:?} is not initialized but makefs is set, the volume maybe not fully initialized. Try running `cryptpilot-crypt init` again with `--force-reinit`",
-                volume_config.volume_path()
-            )
+            "The filesystem on {:?} is not initialized but makefs is set, the volume maybe not fully initialized. Try running `cryptpilot-crypt init` again with `--force-reinit`",
+            volume_config.volume_path()
+        )
     }
 
     Ok(())

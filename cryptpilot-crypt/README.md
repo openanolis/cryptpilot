@@ -142,8 +142,6 @@ Initialize a new encrypted volume:
 cryptpilot-crypt init <volume-name>
 ```
 
-Options:
-- `--skip-check-passphrase`: Skip passphrase validation
 
 ### `cryptpilot-crypt open`
 
@@ -154,7 +152,7 @@ cryptpilot-crypt open <volume-name>
 ```
 
 Options:
-- `--skip-check-passphrase`: Skip passphrase validation
+- `--check-fs`: Check if the filesystem is initialized after opening the volume
 
 ### `cryptpilot-crypt close`
 

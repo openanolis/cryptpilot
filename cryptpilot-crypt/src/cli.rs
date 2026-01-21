@@ -73,6 +73,10 @@ pub struct OpenOptions {
     /// Name of the volume to open.
     #[arg(required=true, num_args=1..)]
     pub volume: Vec<String>,
+
+    /// Check if the filesystem is initialized after opening the volume.
+    #[clap(long, default_value = "false")]
+    pub check_fs: bool,
 }
 
 #[derive(Parser, Debug)]

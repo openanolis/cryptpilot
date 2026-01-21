@@ -142,8 +142,6 @@ JSON 输出字段说明：
 cryptpilot-crypt init <卷名称>
 ```
 
-选项：
-- `--skip-check-passphrase`：跳过密码短语验证
 
 ### `cryptpilot-crypt open`
 
@@ -154,7 +152,7 @@ cryptpilot-crypt open <卷名称>
 ```
 
 选项：
-- `--skip-check-passphrase`：跳过密码短语验证
+- `--check-fs`：打开卷后检查文件系统是否已初始化
 
 ### `cryptpilot-crypt close`
 

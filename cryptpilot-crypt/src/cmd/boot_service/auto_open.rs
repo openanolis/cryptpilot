@@ -31,7 +31,7 @@ pub async fn setup_user_provided_volumes(_boot_service_options: &BootServiceOpti
             volume_config.volume,
             volume_config.dev
         );
-        match crate::cmd::open::open_for_specific_volume(volume_config).await {
+        match crate::cmd::open::open_for_specific_volume(volume_config, false).await {
             Ok(_) => {
                 tracing::info!(
                     "The mapping for volume {} is active now",

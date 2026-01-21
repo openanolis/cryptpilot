@@ -67,6 +67,7 @@ where
     OpenCommand {
         open_options: OpenOptions {
             volume: vec![volume_config.volume.clone()],
+            check_fs: false,
         },
     }
     .run()
