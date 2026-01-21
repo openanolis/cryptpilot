@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.3.0
+Version: 0.3.1
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -269,6 +269,15 @@ fi
 
 
 %changelog
+* Wed Jan 15 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.1-1
+- feat(kbs): support both one-shot and daemon modes for CDH
+- refactor(kbs): implement ttrpc client for daemon mode
+- fix(blktrace): fix invalid casting on aarch64
+- build: migrate CI to native aarch64 runners
+- chore: rename source tarball to include vendored-source suffix
+- fix(init): add interactive protection and RAII volume management
+- fix(mkfs): use blkid -p for better empty disk detection
+
 * Tue Jan 13 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.0-1
 - feat(cryptpilot-crypt): add JSON output and volume filtering to show command
 - test: support running integration tests without external binaries
