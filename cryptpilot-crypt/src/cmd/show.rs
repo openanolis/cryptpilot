@@ -58,6 +58,7 @@ struct VolumeStatus {
     underlay_device: String,
     device_exists: bool,
     key_provider: String,
+    key_provider_options: serde_json::Value,
     extra_options: serde_json::Value,
     needs_initialize: bool,
     initialized: bool,
@@ -75,6 +76,9 @@ impl VolumeStatus {
         let key_provider = serde_variant::to_variant_name(&volume_config.encrypt.key_provider)
             .unwrap_or("unknown")
             .to_string();
+
+        let key_provider_options = serde_json::to_value(&volume_config.encrypt.key_provider)
+            .unwrap_or(serde_json::Value::Null);
 
         let extra_options = match serde_json::to_value(&volume_config.extra_config) {
             Ok(v) => v,
@@ -111,6 +115,7 @@ impl VolumeStatus {
             underlay_device: volume_config.dev.clone(),
             device_exists: dev_exist,
             key_provider,
+            key_provider_options,
             extra_options,
             needs_initialize,
             initialized,
