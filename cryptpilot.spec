@@ -74,7 +74,6 @@ Requires: dracut
 Requires: lvm2
 # Used by cryptpilot-convert for disk conversion
 Requires: qemu-img
-Requires: file
 # Used by cryptpilot-enhance for partition manipulation
 Requires: util-linux
 Requires: veritysetup

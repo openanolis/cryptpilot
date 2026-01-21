@@ -15,11 +15,7 @@ install() {
         inst_multiple blkid lsblk findmnt
         inst_multiple dd tail grep sort
         inst_multiple awk sed pvs growpart sfdisk lvm lvextend mountpoint bash
-        # required by 'file' command
-        inst_multiple file
         inst_multiple modprobe
-        inst_simple /usr/share/misc/magic
-        inst_simple /usr/share/misc/magic.mgc
         # For debug only
         # inst_multiple curl nc ip find systemctl journalctl ifconfig lsblk df
         # Install cryptpilot-fde for FDE boot-time decryption

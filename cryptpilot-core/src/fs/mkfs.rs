@@ -52,28 +52,34 @@ impl MakeFs for IntegrityNoWipeMakeFs {
     async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()> {
         let device_path = device_path.as_ref();
         let is_empty_disk = {
-            Command::new("file")
-                .args(["--brief", "--dereference", "--special-files"])
+            Command::new("blkid")
+                .arg("-p")
                 .arg(device_path)
                 .env("LC_ALL", "C")
                 .run_with_status_checker(|code, stdout, _| {
-                    let stdout = String::from_utf8_lossy(&stdout);
-
-                    let is_empty_disk =
-                        if stdout.contains("Input/output error") || stdout.trim() == "data" {
-                            true
-                        } else if stdout.contains("cannot open") {
-                            bail!("Cannot open")
-                        } else if code != 0 {
-                            bail!("Bad exit code")
-                        } else {
-                            false
-                        };
-
-                    Ok(is_empty_disk)
+                    match code {
+                        0 => Ok(false), // Found some signatures
+                        2 => {
+                            let stdout = String::from_utf8_lossy(&stdout);
+                            // Even if blkid returns 2, we check for I/O errors
+                            if stdout.contains("Input/output error") {
+                                Ok(true)
+                            } else {
+                                Ok(true) // No signatures found
+                            }
+                        }
+                        _ => {
+                            let stdout = String::from_utf8_lossy(&stdout);
+                            if stdout.contains("Input/output error") {
+                                Ok(true)
+                            } else {
+                                bail!("blkid failed with exit code {}", code)
+                            }
+                        }
+                    }
                 })
                 .await
-                .context("Failed to detecting filesystem type")?
+                .context("Failed to detect filesystem signatures using blkid")?
         };
 
         if is_empty_disk {
