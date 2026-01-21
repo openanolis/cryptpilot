@@ -752,6 +752,9 @@ step:update_rootfs() {
         fi
 
         log::info "Updating /etc/fstab"
+        # add ro,noload flag / if it is an ext4 partition
+        sed -i '/^[[:space:]]*[^#].*[[:space:]]\+\/[[:space:]]\+ext4[[:space:]]\+/ { /[,[:space:]]ro\([,[:space:]]\|$\)/! s/\([[:space:]]ext4[[:space:]]\+\)\([^[:space:]]\+\)/\1\2,ro/ ; /[,[:space:]]noload\([,[:space:]]\|$\)/! s/\([[:space:]]ext4[[:space:]]\+\)\([^[:space:]]\+\)/\1\2,noload/ }' "${rootfs_mount_point}/etc/fstab"
+
         # Prevent duplicate mounting of efi partitions
         sed -i '/[[:space:]]\/boot\/efi[[:space:]]/ s/defaults,/defaults,auto,nofail,/' "${rootfs_mount_point}/etc/fstab"
 
@@ -944,13 +947,14 @@ if [ "${uki:-false}" = true ]; then
     cmdline=$(echo "${cmdline} ${uki_append_cmdline}" | xargs)
     dracut_args=("${dracut_args[@]}" --kernel-cmdline "$cmdline")
 
-    FINAL_UKI_FILE="/boot/efi/EFI/BOOT/BOOTX64.EFI"
+    # Put UKI to /tmp/ instead of /boot directory since objcopy will create a temporary file in the same directory, which may cause no space left error
     TMP_UKI_FILE="/tmp/BOOTX64.EFI"
+    FINAL_UKI_FILE="/boot/efi/EFI/BOOT/BOOTX64.EFI"
     dracut "${dracut_args[@]}" "$TMP_UKI_FILE"
 
     echo "Patching cmdline in UKI"
     # The generated cmdline will have a leading space, remove it
-    objcopy --dump-section .cmdline="/tmp/cmdline_full.bin" "$TMP_UKI_FILE" /dev/null
+    objcopy --dump-section .cmdline="/tmp/cmdline_full.bin" "$TMP_UKI_FILE"
     cat "/tmp/cmdline_full.bin" | xargs echo -n 2>/dev/null >"/tmp/cmdline_stripped.bin"
     echo -ne "\x00" >>"/tmp/cmdline_stripped.bin"
     objcopy --update-section .cmdline="/tmp/cmdline_stripped.bin" "$TMP_UKI_FILE"
@@ -970,17 +974,22 @@ EOF
 
     }
 
-    # Note that the rootfs.img will not be used any more so mount it without 'ro' flag will not change the hash of rootfs.
+    # Remove read-only flag from rootfs.img
+    tune2fs -O ^read-only "${rootfs_file_path}"
+
+    # Note that the rootfs.img will not be used any more so mount it without '-o ro' flag will not change the hash of rootfs.
     run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline"
 }
 
 step::shrink_and_extract_rootfs_part() {
     local rootfs_orig_part=$1
 
+    # Mark the rootfs partition as read-only
+    tune2fs -O read-only "${rootfs_orig_part}"
+    
+    # Adjust file system content, all move to front
     local before_shrink_size_in_bytes
     before_shrink_size_in_bytes=$(blockdev --getsize64 "${rootfs_orig_part}")
-
-    # Adjust file system content, all move to front
     log::info "Checking and shrinking rootfs filesystem"
 
     if e2fsck -y -f "${rootfs_orig_part}"; then
