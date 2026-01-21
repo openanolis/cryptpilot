@@ -49,7 +49,10 @@ pub enum RwOverlayType {
 #[cfg(test)]
 pub mod tests {
 
-    use cryptpilot::{config::encrypt::KeyProviderConfig, provider::kbs::KbsConfig};
+    use cryptpilot::{
+        config::encrypt::KeyProviderConfig,
+        provider::kbs::{CdhType, KbsConfig},
+    };
 
     #[allow(unused_imports)]
     use super::*;
@@ -95,16 +98,18 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                     rw_overlay: Some(RwOverlayType::Disk),
                     encrypt: Some(EncryptConfig {
                         key_provider: KeyProviderConfig::Kbs(KbsConfig {
-                            kbs_url: "https://1.2.3.4:8080".into(),
-                            key_uri: "kbs:///default/test/rootfs_partition".into(),
-                            kbs_root_cert: Some(
-                                r#"-----BEGIN CERTIFICATE-----
+                            cdh_type: CdhType::OneShot {
+                                kbs_url: "https://1.2.3.4:8080".into(),
+                                kbs_root_cert: Some(
+                                    r#"-----BEGIN CERTIFICATE-----
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 -----END CERTIFICATE-----
 "#
-                                .into()
-                            ),
+                                    .into()
+                                ),
+                            },
+                            key_uri: "kbs:///default/test/rootfs_partition".into(),
                         })
                     })
                 },
@@ -112,16 +117,18 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                     integrity: true,
                     encrypt: EncryptConfig {
                         key_provider: KeyProviderConfig::Kbs(KbsConfig {
-                            kbs_url: "https://1.2.3.4:8080".into(),
-                            key_uri: "kbs:///default/test/data_partition".into(),
-                            kbs_root_cert: Some(
-                                r#"-----BEGIN CERTIFICATE-----
+                            cdh_type: CdhType::OneShot {
+                                kbs_url: "https://1.2.3.4:8080".into(),
+                                kbs_root_cert: Some(
+                                    r#"-----BEGIN CERTIFICATE-----
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 -----END CERTIFICATE-----
 "#
-                                .into()
-                            ),
+                                    .into()
+                                ),
+                            },
+                            key_uri: "kbs:///default/test/data_partition".into(),
                         })
                     }
                 }

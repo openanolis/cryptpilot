@@ -11,14 +11,15 @@ integrity = true
 
 # Key Broker Service
 [encrypt.kbs]
-# The HTTP url of the KBS instance.
+# Configures the way to communicate with the confidential-data-hub: "daemon" or "one-shot" (default: "one-shot").
+cdh_type = "one-shot"
 kbs_url = "https://1.2.3.4:8080"
-# The Resource URI in the KBS instance which refer to the KBS resource that will be used as passphrase. Should be in format `kbs:///<repo>/<type>/<tag>`
-key_uri = "kbs:///default/mykey/volume_data0"
-# The X.509 Root Cert used for HTTPS connection to the KBS instance, in PEM format. If not specified, the native Root CA certificate store in the system will be used.
 kbs_root_cert = """
 -----BEGIN CERTIFICATE-----
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 -----END CERTIFICATE-----
 """
+# The Resource URI pointing to the KBS resource used as a passphrase.
+# Expected format: `kbs:///<repo>/<type>/<tag>`
+key_uri = "kbs:///default/mykey/volume_data0"

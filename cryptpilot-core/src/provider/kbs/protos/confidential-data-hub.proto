@@ -1,0 +1,60 @@
+// Taken from https://github.com/inclavare-containers/guest-components/blob/13aafc9cead42c56a786ac20ce0d1edd0aa65aac/confidential-data-hub/hub/protos/api.proto
+syntax = "proto3";
+
+package api;
+
+option go_package = "github.com/confidential-containers/guest-components/confidential-data-hub/golang/pkg/api/cdhapi";
+
+message UnsealSecretInput {
+    // The input `secret`` is in the following format
+    // `sealed`.`JWS header`.`JWS body (secret content)`.`signature`
+    bytes secret = 1;
+}
+
+message UnsealSecretOutput {
+    bytes plaintext = 1;
+}
+
+message GetResourceRequest {
+    string ResourcePath = 1;
+}
+
+message GetResourceResponse {
+    bytes Resource = 1;
+}
+
+message SecureMountRequest {
+    string volume_type = 1;
+    map<string, string> options = 2;
+    repeated string flags = 3;
+    string mount_point = 4;
+}
+
+message SecureMountResponse {
+    string mount_path = 1;
+}
+
+message ImagePullRequest {
+    string image_url = 1;
+    string bundle_path = 2;
+}
+
+message ImagePullResponse {
+    string manifest_digest = 1;
+}
+
+service SealedSecretService {
+    rpc UnsealSecret(UnsealSecretInput) returns (UnsealSecretOutput) {};
+}
+
+service GetResourceService {
+    rpc GetResource(GetResourceRequest) returns (GetResourceResponse) {};
+}
+
+service SecureMountService {
+    rpc SecureMount(SecureMountRequest) returns (SecureMountResponse) {};
+}
+
+service ImagePullService {
+    rpc PullImage(ImagePullRequest) returns (ImagePullResponse) {};
+}

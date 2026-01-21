@@ -37,10 +37,29 @@ Fetches keys from [Key Broker Service (KBS)](https://github.com/openanolis/trust
 
 **Configuration:**
 
+Two modes are supported (`cdh_type` is optional, defaults to `one-shot`):
+
+**1. One-shot mode (Default)**
+Invokes the `confidential-data-hub` binary to fetch keys.
+
 ```toml
 [encrypt.kbs]
-url = "https://kbs.example.com"
-resource_path = "/secrets/volume-key"
+# cdh_type = "one-shot"
+kbs_url = "https://kbs.example.com"
+key_uri = "kbs:///default/mykey/volume_data0"
+# Optional: HTTPS Root CA certificate (PEM format)
+# kbs_root_cert = "-----BEGIN CERTIFICATE-----..."
+```
+
+**2. Daemon mode**
+Connects to a running CDH daemon via ttrpc.
+
+```toml
+[encrypt.kbs]
+cdh_type = "daemon"
+key_uri = "kbs:///default/mykey/volume_data0"
+# Optional: Custom socket path
+# cdh_socket = "unix:///run/confidential-containers/cdh.sock"
 ```
 
 **Use cases:**

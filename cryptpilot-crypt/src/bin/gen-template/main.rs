@@ -4,7 +4,7 @@ use cryptpilot::{
     config::encrypt::{EncryptConfig, KeyProviderConfig},
     provider::{
         exec::ExecConfig,
-        kbs::KbsConfig,
+        kbs::{CdhType, KbsConfig},
         kms::KmsConfig,
         oidc::{AliyunKmsConfig, Kms, OidcConfig},
         otp::OtpConfig,
@@ -94,16 +94,18 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 .into(),
             }),
             VolumeType::Kbs => KeyProviderConfig::Kbs(KbsConfig {
-                kbs_url: "https://1.2.3.4:8080".into(),
-                key_uri: "kbs:///default/mykey/volume_data0".into(),
-                kbs_root_cert: Some(
-                    r#"-----BEGIN CERTIFICATE-----
+                cdh_type: CdhType::OneShot {
+                    kbs_url: "https://1.2.3.4:8080".into(),
+                    kbs_root_cert: Some(
+                        r#"-----BEGIN CERTIFICATE-----
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 -----END CERTIFICATE-----
 "#
-                    .into(),
-                ),
+                        .into(),
+                    ),
+                },
+                key_uri: "kbs:///default/mykey/volume_data0".into(),
             }),
             VolumeType::Oidc => KeyProviderConfig::Oidc(OidcConfig {
                 kms: Kms::Aliyun(AliyunKmsConfig {

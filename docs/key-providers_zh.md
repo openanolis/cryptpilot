@@ -37,10 +37,29 @@ cryptpilot 通过模块化设计支持多种密钥提供者类型。密钥提供
 
 **配置：**
 
+支持以下两种运行模式（`cdh_type` 字段可选，默认为 `one-shot`）：
+
+**1. One-shot 模式 (默认)**
+调用 `confidential-data-hub` 命令行工具获取密钥。
+
 ```toml
 [encrypt.kbs]
-url = "https://kbs.example.com"
-resource_path = "/secrets/volume-key"
+# cdh_type = "one-shot"
+kbs_url = "https://kbs.example.com"
+key_uri = "kbs:///default/mykey/volume_data0"
+# 可选：HTTPS 根证书（PEM 格式）
+# kbs_root_cert = "-----BEGIN CERTIFICATE-----..."
+```
+
+**2. Daemon 模式**
+通过 ttrpc 接口连接后台运行的 CDH 守护进程。
+
+```toml
+[encrypt.kbs]
+cdh_type = "daemon"
+key_uri = "kbs:///default/mykey/volume_data0"
+# 可选：自定义 socket 路径
+# cdh_socket = "unix:///run/confidential-containers/cdh.sock"
 ```
 
 **使用场景：**

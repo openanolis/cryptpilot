@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{command, Parser};
 use cryptpilot::config::encrypt::{EncryptConfig, KeyProviderConfig};
-use cryptpilot::provider::kbs::KbsConfig;
+use cryptpilot::provider::kbs::{CdhType, KbsConfig};
 use documented::DocumentedFields;
 use serde::{Deserialize, Serialize};
 use shadow_rs::shadow;
@@ -186,16 +186,18 @@ pub fn get_fde_config() -> FdeConfig {
             rw_overlay: Some(RwOverlayType::Disk),
             encrypt: Some(EncryptConfig {
                 key_provider: KeyProviderConfig::Kbs(KbsConfig {
-                    kbs_url: "https://1.2.3.4:8080".into(),
-                    key_uri: "kbs:///default/mykey/rootfs_partition".into(),
-                    kbs_root_cert: Some(
-                        r#"-----BEGIN CERTIFICATE-----
+                    cdh_type: CdhType::OneShot {
+                        kbs_url: "https://1.2.3.4:8080".into(),
+                        kbs_root_cert: Some(
+                            r#"-----BEGIN CERTIFICATE-----
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 -----END CERTIFICATE-----
 "#
-                        .into(),
-                    ),
+                            .into(),
+                        ),
+                    },
+                    key_uri: "kbs:///default/mykey/rootfs_partition".into(),
                 }),
             }),
         },
@@ -203,16 +205,18 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             integrity: true,
             encrypt: EncryptConfig {
                 key_provider: KeyProviderConfig::Kbs(KbsConfig {
-                    kbs_url: "https://1.2.3.4:8080".into(),
-                    key_uri: "kbs:///default/mykey/data_partition".into(),
-                    kbs_root_cert: Some(
-                        r#"-----BEGIN CERTIFICATE-----
+                    cdh_type: CdhType::OneShot {
+                        kbs_url: "https://1.2.3.4:8080".into(),
+                        kbs_root_cert: Some(
+                            r#"-----BEGIN CERTIFICATE-----
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 -----END CERTIFICATE-----
 "#
-                        .into(),
-                    ),
+                            .into(),
+                        ),
+                    },
+                    key_uri: "kbs:///default/mykey/data_partition".into(),
                 }),
             },
         },

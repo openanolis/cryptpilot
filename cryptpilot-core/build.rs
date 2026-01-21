@@ -24,25 +24,7 @@ fn main() {
 
     #[cfg(feature = "provider-kbs")]
     {
-        let aa_dir = out_dir.join("attestation-agent").join("ttrpc_protocol");
-        let _ = std::fs::create_dir_all(&aa_dir); // This will panic below if the directory failed to create
-
-        // Build for connecting AA with ttrpc
-        let protos = vec!["src/measure/attestation_agent/protos/attestation-agent.proto"];
         let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(false);
-
-        Codegen::new()
-            .out_dir(&aa_dir)
-            .inputs(&protos)
-            .include("src/measure/attestation_agent/protos")
-            .rust_protobuf()
-            .customize(Customize {
-                async_all: true,
-                ..Default::default()
-            })
-            .rust_protobuf_customize(protobuf_customized)
-            .run()
-            .expect("Generate ttrpc protocol code failed.");
 
         fn strip_inner_attribute(path: &std::path::Path) {
             let code = std::fs::read_to_string(path).expect("Failed to read generated file");
@@ -55,7 +37,52 @@ fn main() {
             }
         }
 
-        strip_inner_attribute(&aa_dir.join("attestation_agent.rs"));
-        strip_inner_attribute(&aa_dir.join("attestation_agent_ttrpc.rs"));
+        {
+            let aa_dir = out_dir.join("attestation-agent").join("ttrpc_protocol");
+            let _ = std::fs::create_dir_all(&aa_dir); // This will panic below if the directory failed to create
+
+            // Build for connecting AA with ttrpc
+            let protos = vec!["src/measure/attestation_agent/protos/attestation-agent.proto"];
+
+            Codegen::new()
+                .out_dir(&aa_dir)
+                .inputs(&protos)
+                .include("src/measure/attestation_agent/protos")
+                .rust_protobuf()
+                .customize(Customize {
+                    async_all: true,
+                    ..Default::default()
+                })
+                .rust_protobuf_customize(protobuf_customized.clone())
+                .run()
+                .expect("Generate ttrpc protocol code failed.");
+
+            strip_inner_attribute(&aa_dir.join("attestation_agent.rs"));
+            strip_inner_attribute(&aa_dir.join("attestation_agent_ttrpc.rs"));
+        }
+
+        {
+            let aa_dir = out_dir.join("confidential-data-hub").join("ttrpc_protocol");
+            let _ = std::fs::create_dir_all(&aa_dir); // This will panic below if the directory failed to create
+
+            // Build for connecting AA with ttrpc
+            let protos = vec!["src/provider/kbs/protos/confidential-data-hub.proto"];
+
+            Codegen::new()
+                .out_dir(&aa_dir)
+                .inputs(&protos)
+                .include("src/provider/kbs/protos")
+                .rust_protobuf()
+                .customize(Customize {
+                    async_all: true,
+                    ..Default::default()
+                })
+                .rust_protobuf_customize(protobuf_customized.clone())
+                .run()
+                .expect("Generate ttrpc protocol code failed.");
+
+            strip_inner_attribute(&aa_dir.join("confidential_data_hub.rs"));
+            strip_inner_attribute(&aa_dir.join("confidential_data_hub_ttrpc.rs"));
+        }
     }
 }
