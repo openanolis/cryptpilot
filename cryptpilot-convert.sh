@@ -931,7 +931,12 @@ if [[ -f /tmp/cryptpilot/global.toml ]]; then
     dracut_common_args+=(--include /tmp/cryptpilot/global.toml /etc/cryptpilot/global.toml)
 fi
 
-if [ "${uki:-false}" = true ]; then    
+if [ "${uki:-false}" = true ]; then
+    # Remove all existing EFI entries
+    find /boot/efi/EFI -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    # Remove NvVars file
+    rm -f /boot/efi/NvVars
+
     # Generate UKI with dracut
     echo "Generating UKI image"
     dracut_args=("${dracut_common_args[@]}" --uefi --hostonly-cmdline)
@@ -939,23 +944,22 @@ if [ "${uki:-false}" = true ]; then
     cmdline=$(echo "${cmdline} ${uki_append_cmdline}" | xargs)
     dracut_args=("${dracut_args[@]}" --kernel-cmdline "$cmdline")
 
-    UKI_FILE="/boot/efi/EFI/BOOT/BOOTX64.EFI"
-    dracut "${dracut_args[@]}" "$UKI_FILE"
+    FINAL_UKI_FILE="/boot/efi/EFI/BOOT/BOOTX64.EFI"
+    TMP_UKI_FILE="/tmp/BOOTX64.EFI"
+    dracut "${dracut_args[@]}" "$TMP_UKI_FILE"
 
     echo "Patching cmdline in UKI"
     # The generated cmdline will have a leading space, remove it
-    objcopy --dump-section .cmdline="/tmp/cmdline_full.bin" "$UKI_FILE"
+    objcopy --dump-section .cmdline="/tmp/cmdline_full.bin" "$TMP_UKI_FILE" /dev/null
     cat "/tmp/cmdline_full.bin" | xargs echo -n 2>/dev/null >"/tmp/cmdline_stripped.bin"
     echo -ne "\x00" >>"/tmp/cmdline_stripped.bin"
-    objcopy --update-section .cmdline="/tmp/cmdline_stripped.bin" "$UKI_FILE"
+    objcopy --update-section .cmdline="/tmp/cmdline_stripped.bin" "$TMP_UKI_FILE"
+    mkdir -p $(dirname "$FINAL_UKI_FILE")
+    cp "$TMP_UKI_FILE" "$FINAL_UKI_FILE"
 
-    echo "UKI successfully created at $UKI_FILE, the default boot entry is now overwrited"
+    echo "UKI successfully created at $FINAL_UKI_FILE, the default boot entry is now overwrited"
 
-    # Remove all other EFI entries
-    find /boot/efi/EFI -mindepth 1 -maxdepth 1 ! -name BOOT -exec rm -rf {} +
-    find /boot/efi/EFI/BOOT -mindepth 1 -maxdepth 1 ! -name BOOTX64.EFI -exec rm -rf {} +
-    # Remove NvVars file
-    rm -f /boot/efi/NvVars
+
 else
     echo "Generating new initrd image"
     dracut "${dracut_common_args[@]}"
