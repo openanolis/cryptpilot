@@ -1,10 +1,10 @@
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use dialoguer::{console::Term, Confirm};
-use rand::{distributions::Alphanumeric, Rng as _};
 
 use crate::cli::InitOptions;
 use cryptpilot::{
+    fs::luks2::TempLuksVolume,
     provider::{IntoProvider, KeyProvider},
     types::IntegrityType,
 };
@@ -95,33 +95,13 @@ async fn persistent_disk_init(
     cryptpilot::fs::luks2::format(&volume_config.dev, &passphrase, integrity).await?;
 
     if let Some(makefs) = &volume_config.extra_config.makefs {
-        let tmp_volume_name = format!(
-            ".{}-{}",
-            volume_config.volume,
-            rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(20)
-                .map(char::from)
-                .collect::<String>()
-        );
-
-        tracing::info!("Setting up a temporary device-mapper volume {tmp_volume_name}",);
-        cryptpilot::fs::luks2::open_with_check_passphrase(
-            &tmp_volume_name,
-            &volume_config.dev,
-            &passphrase,
-            integrity,
-        )
-        .await?;
+        let tmp_volume = TempLuksVolume::open(&volume_config.dev, &passphrase, integrity).await?;
 
         tracing::info!(
             "Initializing {makefs} fs on volume {}",
             volume_config.volume
         );
-        let mkfs_result =
-            cryptpilot::fs::luks2::makefs_if_empty(&tmp_volume_name, makefs, integrity).await;
-        cryptpilot::fs::luks2::close(&tmp_volume_name).await?;
-        mkfs_result?
+        cryptpilot::fs::mkfs::makefs_if_empty(&tmp_volume.volume_path(), makefs, integrity).await?;
     }
 
     Ok(())

@@ -54,6 +54,19 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig) -> Result<()
             persistent_disk_open(&volume_config, &key_provider).await?;
         }
     };
+
+    // Check if filesystem is ready
+    if volume_config.extra_config.makefs.is_some()
+        && cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?
+    {
+        // TODO: replace with RAII here
+        let _ = cryptpilot::fs::luks2::close(&volume_config.volume).await;
+        bail!(
+                "The filesystem on {:?} is not initialized but makefs is set, the volume maybe not fully initialized. Try running `cryptpilot-crypt init` again with `--force-reinit`",
+                volume_config.volume_path()
+            )
+    }
+
     Ok(())
 }
 
@@ -84,7 +97,8 @@ async fn temporary_disk_open(
     .await?;
 
     if let Some(makefs) = &volume_config.extra_config.makefs {
-        match cryptpilot::fs::luks2::makefs_if_empty(&volume_config.volume, makefs, integrity).await
+        match cryptpilot::fs::mkfs::makefs_if_empty(&volume_config.volume_path(), makefs, integrity)
+            .await
         {
             Ok(_) => (),
             Err(e) => {
@@ -126,5 +140,6 @@ async fn persistent_disk_open(
         integrity,
     )
     .await?;
+
     Ok(())
 }

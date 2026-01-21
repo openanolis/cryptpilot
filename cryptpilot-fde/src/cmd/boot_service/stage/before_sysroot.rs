@@ -6,7 +6,7 @@ use tokio::{fs::File, io::AsyncWriteExt, process::Command};
 use crate::cmd::boot_service::{
     metadata::{load_metadata_from_file, Metadata},
     stage::{
-        DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, ROOTFS_DECRYPTED_LAYER_DEVICE,
+        DATA_LAYER_DEVICE, DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, ROOTFS_DECRYPTED_LAYER_DEVICE,
         ROOTFS_DECRYPTED_LAYER_NAME, ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LAYER_NAME,
         ROOTFS_LOGICAL_VOLUME,
     },
@@ -171,8 +171,12 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
         if recreate_data_lv_content {
             // Create a Ext4 fs on it
             tracing::info!("Creating ext4 fs on data volume");
-            cryptpilot::fs::luks2::makefs_if_empty(DATA_LAYER_NAME, &MakeFsType::Ext4, integrity)
-                .await?;
+            cryptpilot::fs::mkfs::makefs_if_empty(
+                Path::new(DATA_LAYER_DEVICE),
+                &MakeFsType::Ext4,
+                integrity,
+            )
+            .await?;
         }
     }
 

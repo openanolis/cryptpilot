@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use libcryptsetup_rs::{
@@ -8,14 +8,12 @@ use libcryptsetup_rs::{
     },
     CryptInit, CryptParamsLuks2, CryptParamsLuks2Ref,
 };
+use rand::{distributions::Alphanumeric, Rng as _};
 use tokio::fs::OpenOptions;
 
-use crate::types::{IntegrityType, MakeFsType, Passphrase};
+use crate::types::{IntegrityType, Passphrase};
 
-use super::{
-    get_verbose,
-    mkfs::{IntegrityNoWipeMakeFs, MakeFs, NormalMakeFs},
-};
+use super::get_verbose;
 
 const LUKS2_VOLUME_KEY_SIZE_BIT_WITH_INTEGRITY: usize = 768;
 const LUKS2_VOLUME_KEY_SIZE_BIT_WITHOUT_INTEGRITY: usize = 512;
@@ -161,6 +159,10 @@ pub async fn open_with_check_passphrase(
 }
 
 pub async fn is_initialized(dev: &str) -> Result<bool> {
+    is_a_luks2_volume(dev).await
+}
+
+async fn is_a_luks2_volume(dev: &str) -> Result<bool> {
     let verbose = get_verbose().await;
     let device_path = PathBuf::from(&dev);
 
@@ -181,7 +183,7 @@ pub async fn is_initialized(dev: &str) -> Result<bool> {
         Ok::<_, anyhow::Error>(is_luks2)
     })
     .await?
-    .with_context(|| format!("Failed to check initialization status of device {dev}"))
+    .with_context(|| format!("Failed to check luks2 initialization status of device {dev}"))
 }
 
 pub fn is_active(volume: &str) -> bool {
@@ -223,27 +225,38 @@ pub async fn close(volume: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn makefs_if_empty(
-    volume: &str,
-    makefs: &MakeFsType,
-    integrity: IntegrityType,
-) -> Result<()> {
-    let volume = volume.to_owned();
-    let makefs = makefs.to_owned();
+pub struct TempLuksVolume(String);
 
-    let device_path = format!("/dev/mapper/{volume}");
-    tracing::info!(
-        "Initializing {} fs on volume {}, with volume integrity type {:?}",
-        makefs,
-        volume,
-        integrity
-    );
-    match integrity {
-        IntegrityType::None => NormalMakeFs::mkfs(device_path, makefs).await,
-        IntegrityType::Journal | IntegrityType::NoJournal => {
-            IntegrityNoWipeMakeFs::mkfs(device_path, makefs).await
-        }
+impl TempLuksVolume {
+    pub async fn open(
+        dev: &str,
+        passphrase: &Passphrase,
+        integrity: IntegrityType,
+    ) -> Result<Self> {
+        let name = format!(
+            ".cryptpilot-{}",
+            rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(20)
+                .map(char::from)
+                .collect::<String>()
+        );
+        tracing::info!("Setting up a temporary luks volume {name}",);
+        crate::fs::luks2::open_with_check_passphrase(&name, dev, passphrase, integrity).await?;
+        Ok(Self(name))
     }
-    .with_context(|| format!("Failed to initialize {makefs} fs on volume {volume}"))?;
-    Ok(())
+
+    pub fn volume_path(&self) -> PathBuf {
+        Path::new("/dev/mapper").join(&self.0)
+    }
+}
+
+impl Drop for TempLuksVolume {
+    fn drop(&mut self) {
+        let name = self.0.clone();
+        crate::async_defer!(async {
+            tracing::info!("Closing the temporary luks volume {name}");
+            let _ = crate::fs::luks2::close(&name).await;
+        });
+    }
 }

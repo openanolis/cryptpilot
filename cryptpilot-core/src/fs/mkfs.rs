@@ -13,21 +13,47 @@ use tokio::{
 
 use crate::{
     fs::{block::dummy::DummyDevice, cmd::CheckCommandOutput as _},
-    types::MakeFsType,
+    types::{IntegrityType, MakeFsType},
 };
 
 use super::block::blktrace::BlkTrace;
 
 #[async_trait]
 pub trait MakeFs {
-    async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()>;
+    async fn makefs_if_empty(
+        device_path: impl AsRef<Path> + Send + Sync,
+        fs_type: MakeFsType,
+    ) -> Result<()> {
+        let device_path = device_path.as_ref();
+
+        if is_empty_disk(device_path).await? {
+            tracing::info!(
+                "The device {device_path:?} is uninitialized (empty) and is ok to be initialized with mkfs"
+            );
+            Self::mkfs_on_no_wipe_volume(device_path, fs_type).await?
+        } else {
+            tracing::info!(
+                "The device {device_path:?} is not empty and maybe some data on it, so we won't touch it"
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn mkfs_on_no_wipe_volume(
+        device_path: impl AsRef<Path> + Send + Sync,
+        fs_type: MakeFsType,
+    ) -> Result<()>;
 }
 
 pub struct NormalMakeFs;
 
 #[async_trait]
 impl MakeFs for NormalMakeFs {
-    async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()> {
+    async fn mkfs_on_no_wipe_volume(
+        device_path: impl AsRef<Path> + Send + Sync,
+        fs_type: MakeFsType,
+    ) -> Result<()> {
         // Use mkfs commands directly instead of systemd-makefs
         let (mkfs_cmd, force_arg) = match fs_type {
             MakeFsType::Swap => ("mkswap", "-f"), // mkswap uses -f for force
@@ -49,57 +75,8 @@ pub struct IntegrityNoWipeMakeFs;
 
 #[async_trait]
 impl MakeFs for IntegrityNoWipeMakeFs {
-    async fn mkfs(device_path: impl AsRef<Path> + Send + Sync, fs_type: MakeFsType) -> Result<()> {
-        let device_path = device_path.as_ref();
-        let is_empty_disk = {
-            Command::new("blkid")
-                .arg("-p")
-                .arg(device_path)
-                .env("LC_ALL", "C")
-                .run_with_status_checker(|code, stdout, _| {
-                    match code {
-                        0 => Ok(false), // Found some signatures
-                        2 => {
-                            let stdout = String::from_utf8_lossy(&stdout);
-                            // Even if blkid returns 2, we check for I/O errors
-                            if stdout.contains("Input/output error") {
-                                Ok(true)
-                            } else {
-                                Ok(true) // No signatures found
-                            }
-                        }
-                        _ => {
-                            let stdout = String::from_utf8_lossy(&stdout);
-                            if stdout.contains("Input/output error") {
-                                Ok(true)
-                            } else {
-                                bail!("blkid failed with exit code {}", code)
-                            }
-                        }
-                    }
-                })
-                .await
-                .context("Failed to detect filesystem signatures using blkid")?
-        };
-
-        if is_empty_disk {
-            tracing::info!(
-                "The device {device_path:?} is uninitialized (empty) and is ok to be initialized with mkfs"
-            );
-            Self::mkfs_on_no_wipe_volume(device_path, fs_type).await?
-        } else {
-            tracing::info!(
-                "The device {device_path:?} is not empty and maybe some data on it, so we won't touch it"
-            );
-        }
-
-        Ok(())
-    }
-}
-
-impl IntegrityNoWipeMakeFs {
     async fn mkfs_on_no_wipe_volume(
-        device_path: impl AsRef<Path>,
+        device_path: impl AsRef<Path> + Send + Sync,
         fs_type: MakeFsType,
     ) -> Result<()> {
         let (device_size, block_size) = {
@@ -124,7 +101,7 @@ impl IntegrityNoWipeMakeFs {
 
         // Do some operations to the dummy device
         {
-            NormalMakeFs::mkfs(&dummy_device_path, fs_type).await?;
+            NormalMakeFs::makefs_if_empty(&dummy_device_path, fs_type).await?;
 
             // TODO: refact blkid with libblkid-rs crate
             Command::new("blkid")
@@ -208,4 +185,53 @@ impl IntegrityNoWipeMakeFs {
         tracing::info!("Replaying data to the real device finished");
         Ok(())
     }
+}
+
+pub async fn makefs_if_empty(
+    volume_path: &Path,
+    makefs: &MakeFsType,
+    integrity: IntegrityType,
+) -> Result<()> {
+    let volume_path = volume_path.to_owned();
+    let makefs = makefs.to_owned();
+
+    tracing::info!(
+        "Initializing {} fs on volume {:?}, with volume integrity type {:?}",
+        makefs,
+        volume_path,
+        integrity
+    );
+    match integrity {
+        IntegrityType::None => NormalMakeFs::makefs_if_empty(&volume_path, makefs).await,
+        IntegrityType::Journal | IntegrityType::NoJournal => {
+            IntegrityNoWipeMakeFs::makefs_if_empty(&volume_path, makefs).await
+        }
+    }
+    .with_context(|| format!("Failed to initialize {makefs} fs on volume {volume_path:?}"))?;
+    Ok(())
+}
+
+pub async fn is_empty_disk(device_path: &Path) -> Result<bool> {
+    Command::new("blkid")
+        .arg("-p")
+        .arg(device_path)
+        .env("LC_ALL", "C")
+        .run_with_status_checker(|code, stdout, _| {
+            match code {
+                0 => Ok(false), // Found some signatures
+                2 => Ok(true),  // No signatures found
+                _ => {
+                    let stdout = String::from_utf8_lossy(&stdout);
+                    if stdout.contains("Input/output error") {
+                        // If we can't even read the disk, treat it as "uninitialized"
+                        // to allow mkfs to try and fix it (matching original logic).
+                        Ok(true)
+                    } else {
+                        bail!("blkid failed with exit code {}", code)
+                    }
+                }
+            }
+        })
+        .await
+        .context("Failed to detect filesystem signatures using blkid")
 }
