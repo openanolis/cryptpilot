@@ -152,7 +152,8 @@ setup_workdir() {
     log::info "Created working directory: ${WORKDIR}"
 }
 
-# Cleanup function - called on exit
+# Cleanup function - called on exit via trap
+# shellcheck disable=SC2329
 cleanup() {
     local exit_code=$?
     set +e
@@ -521,22 +522,6 @@ run_test_case() {
 
     log::success "Test case passed: ${test_name}"
     return 0
-}
-
-test_uki_encrypted() {
-    run_test_case "uki-encrypted" "true" "true"
-}
-
-test_uki_noenc() {
-    run_test_case "uki-noenc" "true" "false"
-}
-
-test_grub_encrypted() {
-    run_test_case "grub-encrypted" "false" "true"
-}
-
-test_grub_noenc() {
-    run_test_case "grub-noenc" "false" "false"
 }
 
 # ============================================================================

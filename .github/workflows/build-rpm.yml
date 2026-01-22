@@ -187,10 +187,8 @@ jobs:
         run: |
           set -e
           set -x
-          yum install -y ./rpm-packages/RPMS/*/cryptpilot-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-fde-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-crypt-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-verity-[0-9]*.rpm
+          yum install -y make ./rpm-packages/RPMS/*/cryptpilot-fde-[0-9]*.rpm
           cryptpilot-fde --version
-          cryptpilot-crypt --version
-          cryptpilot-verity --version
 
       - name: Checkout repository
         uses: actions/checkout@v4
