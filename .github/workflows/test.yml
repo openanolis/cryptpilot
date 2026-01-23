@@ -51,6 +51,9 @@ jobs:
           # install rpmdevtools
           yum install -y git yum-utils
 
+          # install runtime dependencies for tests (from cryptpilot.spec)
+          yum install -y cryptsetup device-mapper kmod coreutils systemd systemd-udev lvm2 util-linux veritysetup dosfstools xfsprogs e2fsprogs fuse3 fuse3-libs
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.82.0
 
