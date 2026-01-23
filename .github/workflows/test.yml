@@ -1,0 +1,66 @@
+name: Run Tests
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches:
+      - 'master'
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        distro: ["alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest", "registry.openanolis.cn/openanolis/anolisos:23"]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ${{ matrix.distro }}
+      volumes:
+        - /run/udev/control:/run/udev/control
+        - /dev:/dev
+      options: --privileged --ipc=host
+    steps:
+      - name: Update yum mirror
+        run: |
+          set -e
+          set -x
+
+          # replace the mirror
+          sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
+          sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+
+          # update packages
+          yum update -y
+
+          # install development tools
+          yum install -y autoconf automake binutils bison flex gcc gcc-c++ gdb glibc-devel libtool make pkgconf pkgconf-m4 pkgconf-pkg-config rpm-build rpm-sign strace asciidoc byacc ctags diffstat elfutils-libelf-devel git intltool patchutils perl-Fedora-VSP perl-Sys-Syslog perl-generators pesign source-highlight systemtap valgrind valgrind-devel cmake expect rpmdevtools rpmlint perl clang
+
+          # install rpmdevtools
+          yum install -y git yum-utils
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.82.0
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      - name: Install build dependencies
+        run: yum-builddep -y --skip-unavailable ./cryptpilot.spec
+
+      - name: Run test script from repo
+        run: make run-test

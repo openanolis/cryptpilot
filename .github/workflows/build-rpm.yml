@@ -102,10 +102,6 @@ jobs:
     needs: build
     container:
       image: ${{ matrix.distro }}
-      volumes:
-        - /run/udev/control:/run/udev/control
-        - /dev:/dev
-      options: --privileged --ipc=host
     steps:
       - name: Update yum mirror
         run: |
@@ -119,21 +115,13 @@ jobs:
           # update packages
           yum update -y
 
-          # install development tools
-          yum install -y autoconf automake binutils bison flex gcc gcc-c++ gdb glibc-devel libtool make pkgconf pkgconf-m4 pkgconf-pkg-config rpm-build rpm-sign strace asciidoc byacc ctags diffstat elfutils-libelf-devel git intltool patchutils perl-Fedora-VSP perl-Sys-Syslog perl-generators pesign source-highlight systemtap valgrind valgrind-devel cmake expect rpmdevtools rpmlint perl clang
-
-          # install rpmdevtools
-          yum install -y git yum-utils
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.82.0
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: rpm-packages-${{ matrix.arch }}
           path: ./rpm-packages/
           merge-multiple: false
+
       - name: Install RPM packages
         run: |
           set -e
@@ -144,14 +132,6 @@ jobs:
           cryptpilot-fde --version
           cryptpilot-crypt --version
           cryptpilot-verity --version
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: 'true'
-      - name: Install build dependencies
-        run: yum-builddep -y --skip-unavailable ./cryptpilot.spec
-      - name: Run test script from repo
-        run: make run-test
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
