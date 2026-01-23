@@ -103,7 +103,6 @@ Group: Applications/System
 License: Apache-2.0
 
 # Crypt runtime dependencies
-Requires: cryptsetup
 Requires: cryptsetup-libs
 Requires: device-mapper-libs
 Requires: kmod
