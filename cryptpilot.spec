@@ -86,6 +86,9 @@ Recommends: xfsprogs
 Recommends: e2fsprogs
 # swapon for swap volumes
 Requires: util-linux
+# virt-customize
+Requires: libguestfs-tools-c
+
 # If not installed, the kbs keyprovider and AAEL will not work.
 Suggests: confidential-data-hub
 # If not installed, the kbs keyprovider and AAEL will not work.
