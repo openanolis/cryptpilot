@@ -86,9 +86,9 @@ Recommends: xfsprogs
 Recommends: e2fsprogs
 # swapon for swap volumes
 Requires: util-linux
-# If not installed, the kbs and kms-oidc keyprovider will not work.
+# If not installed, the kbs keyprovider and AAEL will not work.
 Suggests: confidential-data-hub
-# If not installed, the AAEL will not work.
+# If not installed, the kbs keyprovider and AAEL will not work.
 Suggests: attestation-agent
 
 Obsoletes: cryptpilot < %{version}-%{release}
@@ -118,10 +118,10 @@ Recommends: e2fsprogs
 # swapon for swap volumes
 Requires: util-linux
 
-# If not installed, the kbs and kms-oidc keyprovider will not work.
-Suggests: confidential-data-hub
-# If not installed, the AAEL will not work.
-Suggests: attestation-agent
+# If not installed, the kbs keyprovider will not work.
+Recommends: confidential-data-hub
+# If not installed, the kbs keyprovider will not work.
+Recommends: attestation-agent
 
 Obsoletes: cryptpilot < %{version}-%{release}
 
