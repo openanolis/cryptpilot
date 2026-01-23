@@ -118,7 +118,8 @@ load_nbd_module() {
     if ! lsmod | grep -q nbd; then
         log::info "Loading nbd kernel module..."
         if ! modprobe nbd max_part=16 2>/dev/null; then
-            log::warn "NBD module not available in this environment"
+            log::error "Failed to load nbd module"
+            log::error "NBD module is required. Ensure nbd is loaded on host system."
             return 1
         fi
     fi
@@ -615,10 +616,7 @@ main() {
     check_tools
     check_disk_space
     if ! load_nbd_module; then
-        log::warn "Skipping test: NBD kernel module is not available in this environment"
-        log::warn "This test requires NBD support. Run on a system with NBD module or use a VM."
-        log::success "Test skipped (environment not supported)"
-        exit 0
+        fatal "NBD module is required but not available. Cannot proceed with tests."
     fi
     check_vg_conflict
 
