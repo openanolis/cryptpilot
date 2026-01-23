@@ -177,7 +177,7 @@ jobs:
             -v /dev:/dev \
             -v /run/udev/control:/run/udev/control \
             -v ${{ github.workspace }}:/workspace \
-            --tmpfs /tmp:exec,size=10G \
+            --tmpfs /tmp:exec,size=20G \
             alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest \
             sleep infinity
 
