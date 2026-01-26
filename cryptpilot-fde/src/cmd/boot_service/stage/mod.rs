@@ -10,7 +10,7 @@ pub const ROOTFS_LOGICAL_VOLUME: &str = "/dev/mapper/system-rootfs";
 pub const ROOTFS_DECRYPTED_LAYER_NAME: &str = "rootfs_decrypted";
 pub const ROOTFS_DECRYPTED_LAYER_DEVICE: &str = "/dev/mapper/rootfs_decrypted";
 // Rootfs dm-verity hash device
-pub const ROOTFS_HASH_LOGICAL_VOLUME: &str = "/dev/mapper/system-rootfs--verity";
+pub const ROOTFS_HASH_LOGICAL_VOLUME: &str = "/dev/mapper/system-rootfs_hash";
 
 // Data partition encryption layer - LUKS2 encrypted device for data partition
 pub const DATA_LAYER_NAME: &str = "data";
