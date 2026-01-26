@@ -1084,7 +1084,8 @@ step::create_lvm_part() {
 
     log::info "Initializing LVM physical volume and volume group"
     proc::exec_subshell_flose_fds pvcreate --force "$lvm_part"
-    proc::exec_subshell_flose_fds vgcreate --force system "$lvm_part"
+    proc::exec_subshell_flose_fds vgcreate --force system "$lvm_part" --setautoactivation n # disable auto activation of LVM volumes to prevent it from being activated unexpectedly
+    proc::exec_subshell_flose_fds vgchange -a y system  # activate the volume group
 }
 
 step::setup_rootfs_lv_with_encrypt() {
