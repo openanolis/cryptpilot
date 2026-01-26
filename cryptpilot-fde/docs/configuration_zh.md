@@ -33,8 +33,9 @@ rootfs 卷存放只读的根分区文件系统。对该文件系统的加密是�
 
 ```toml
 [rootfs]
-# 覆盖层的存储位置："disk" 或 "ram"
-# - "disk": 存储到 data 卷上（重启后保留）
+# 覆盖层的存储位置："disk"、"disk-persist" 或 "ram"
+# - "disk": 存储到 data 卷上但每次启动时清空（默认，推荐用于安全性）
+# - "disk-persist": 存储到 data 卷上（重启后保留，具体持久性取决于 data 卷配置）
 # - "ram": 存储在内存中（重启后清除）
 rw_overlay = "disk"
 
@@ -48,8 +49,9 @@ resource_path = "/secrets/rootfs-key"
 **字段说明：**
 
 - **`rw_overlay`**（可选，默认：`"disk"`）：覆盖层存储位置
-  - `"disk"`：存储到 data 卷（重启后保留）
-  - `"ram"`：存储在内存（重启后清除）
+  - `"disk"`：存储到 data 卷，但每次启动时强制清空（**默认值**，推荐用于提高安全性）
+  - `"disk-persist"`：存储到 data 卷（重启后保留，但持久性取决于 data 卷的配置：如果 data 卷本身是临时卷，重启后仍会丢失）
+  - `"ram"`：存储在内存中（重启后清除，不占用磁盘空间）
 
 - **`encrypt`**（可选）：rootfs 卷的密钥提供者配置
   - 如不指定，根分区不加密（但仍有 dm-verity 完整性保护）

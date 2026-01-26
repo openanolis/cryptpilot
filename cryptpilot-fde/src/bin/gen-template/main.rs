@@ -25,7 +25,7 @@ pub struct FdeConfig {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
 #[serde(deny_unknown_fields)]
 pub struct RootFsConfig {
-    /// The type of read-write overlay layer over the underhood read-only rootfs. Can be "disk" or "ram". Default value is "disk".
+    /// The type of read-write overlay layer over the underhood read-only rootfs. Can be "disk", "disk-persist", or "ram". Default value is "disk".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rw_overlay: Option<RwOverlayType>,
 
@@ -46,12 +46,18 @@ pub struct DataConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "lowercase")]
 #[serde(deny_unknown_fields)]
 pub enum RwOverlayType {
-    /// The overlay will be placed on disk, and be persistent.
+    /// The overlay will be placed on disk but will be cleared on every boot.
+    /// This is the default and recommended option for security.
+    #[serde(rename = "disk")]
     Disk,
-    /// The overlay will be placed on tmpfs (in RAM), and be temporary.
+    /// The overlay will be placed on disk, and be persistent across reboots.
+    /// Note: persistence depends on the data volume configuration.
+    #[serde(rename = "disk-persist")]
+    DiskPersist,
+    /// The overlay will be placed on tmpfs (in RAM), and be cleared on reboot.
+    #[serde(rename = "ram")]
     Ram,
 }
 

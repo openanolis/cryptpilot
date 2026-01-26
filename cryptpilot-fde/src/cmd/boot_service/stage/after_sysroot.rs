@@ -105,9 +105,29 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
 
             Path::new("/ram_overlay")
         }
-        RwOverlayType::Disk => {
-            tracing::info!("Using data-volume:/overlay as rootfs overlay");
+        RwOverlayType::Disk | RwOverlayType::DiskPersist => {
+            let should_clear = matches!(overlay_type, RwOverlayType::Disk);
+            if should_clear {
+                tracing::info!(
+                    "Using data-volume:/overlay as rootfs overlay (ephemeral mode, will be cleared on boot)"
+                );
+            } else {
+                tracing::info!("Using data-volume:/overlay as rootfs overlay (persistent mode)");
+            }
             async {
+                let overlay_path = Path::new("/data_volume/overlay");
+
+                // If disk mode (default), clear the overlay directory on boot
+                if should_clear && overlay_path.exists() {
+                    tracing::info!("Clearing overlay directory for ephemeral mode");
+                    if let Err(e) = tokio::fs::remove_dir_all(overlay_path).await {
+                        tracing::warn!(
+                            "Failed to clear overlay directory: {:#}. Continuing anyway.",
+                            e
+                        );
+                    }
+                }
+
                 tokio::fs::create_dir_all("/data_volume/overlay/upper").await?;
                 tokio::fs::create_dir_all("/data_volume/overlay/work").await?;
 

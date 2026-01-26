@@ -1,6 +1,6 @@
 # Configuration related to the read-only root filesystem.
 [rootfs]
-# The type of read-write overlay layer over the underhood read-only rootfs. Can be "disk" or "ram". Default value is "disk".
+# The type of read-write overlay layer over the underhood read-only rootfs. Can be "disk", "disk-persist", or "ram". Default value is "disk".
 rw_overlay = "disk"
 
 [rootfs.encrypt.kbs]
