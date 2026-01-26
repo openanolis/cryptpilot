@@ -440,7 +440,36 @@ disk::install_rpm_on_rootfs() {
     shift
     local packages=("$@")
 
-    # Define the essential packages
+    local copied_rpms=()  # Will store the local paths inside chroot to the copied .rpm files
+    local user_packages=() # User provided packages to install
+
+    # Step 1: Install user-provided packages first
+    for package in "${packages[@]}"; do
+        if [[ -f "$package" && "$package" == *.rpm ]]; then
+            # This is a valid .rpm file on the host
+            base_name=$(basename "$package")
+            cp "$package" "${rootfs_mount_point}/tmp/" # Copy into rootfs /tmp/
+            copied_rpms+=("/tmp/$base_name")           # Record path inside rootfs
+            user_packages+=("/tmp/$base_name")         # Add to installation list
+        else
+            # Assume this is a regular package name (to be installed via yum)
+            user_packages+=("$package")
+        fi
+    done
+
+    # Install user-provided packages
+    if [ ${#user_packages[@]} -gt 0 ]; then
+        chroot "${rootfs_mount_point}" rpmdb --rebuilddb --dbpath /var/lib/rpm
+        chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+            ${https_proxy:+https_proxy=$https_proxy} \
+            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+            ${all_proxy:+all_proxy=$all_proxy} \
+            ${no_proxy:+no_proxy=$no_proxy} \
+            yum install -y "${user_packages[@]}"
+    fi
+
+    # Step 2: Build essential packages list
     local cryptpilot_fde_version=""
     
     # Try to query the version of cryptpilot-fde from the current system
@@ -450,49 +479,49 @@ disk::install_rpm_on_rootfs() {
         cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde 2>/dev/null || true)
     fi
     
-    local essential_packages=()
+    local essential_packages_with_version=()
+    local essential_package_names=()
+    
     if [ -n "${cryptpilot_fde_version}" ]; then
         log::info "Detected cryptpilot-fde version: ${cryptpilot_fde_version}"
-        essential_packages+=("cryptpilot-fde-${cryptpilot_fde_version}")
+        essential_packages_with_version+=("cryptpilot-fde-${cryptpilot_fde_version}")
     else
         log::warn "Failed to detect cryptpilot-fde version, installing latest version"
-        essential_packages+=("cryptpilot-fde")
+        essential_packages_with_version+=("cryptpilot-fde")
     fi
+    essential_package_names+=("cryptpilot-fde")
     
-    essential_packages+=("yum-plugin-versionlock")
+    essential_packages_with_version+=("yum-plugin-versionlock")
+    essential_package_names+=("yum-plugin-versionlock")
 
-    # Add the essential packages to the installation list
-    packages+=("${essential_packages[@]}")
-
-    local copied_rpms=()  # Will store the local paths inside chroot to the copied .rpm files
-    local all_packages=() # Will be used as arguments to yum install
-
-    # Loop through all items in the packages array
-    for package in "${packages[@]}"; do
-        if [[ -f "$package" && "$package" == *.rpm ]]; then
-            # This is a valid .rpm file on the host
-            base_name=$(basename "$package")
-            cp "$package" "${rootfs_mount_point}/tmp/" # Copy into rootfs /tmp/
-            copied_rpms+=("/tmp/$base_name")           # Record path inside rootfs
-            all_packages+=("/tmp/$base_name")          # Add to installation list
+    # Step 3: Check and install missing essential packages
+    local packages_to_install=()
+    for i in "${!essential_packages_with_version[@]}"; do
+        local pkg_with_version="${essential_packages_with_version[$i]}"
+        local pkg_name="${essential_package_names[$i]}"
+        
+        # Check if package is already installed in chroot
+        if chroot "${rootfs_mount_point}" rpm -q "$pkg_name" >/dev/null 2>&1; then
+            log::info "Package $pkg_name is already installed, skipping"
         else
-            # Assume this is a regular package name (to be installed via yum)
-            all_packages+=("$package")
+            log::info "Package $pkg_name is not installed, will install: $pkg_with_version"
+            packages_to_install+=("$pkg_with_version")
         fi
     done
 
-    # Install all packages using yum inside the chroot
-    chroot "${rootfs_mount_point}" rpmdb --rebuilddb --dbpath /var/lib/rpm
-    chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
-        ${https_proxy:+https_proxy=$https_proxy} \
-        ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
-        ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
-        ${all_proxy:+all_proxy=$all_proxy} \
-        ${no_proxy:+no_proxy=$no_proxy} \
-        yum install -y "${all_packages[@]}"
+    # Install missing essential packages
+    if [ ${#packages_to_install[@]} -gt 0 ]; then
+        chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+            ${https_proxy:+https_proxy=$https_proxy} \
+            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+            ${all_proxy:+all_proxy=$all_proxy} \
+            ${no_proxy:+no_proxy=$no_proxy} \
+            yum install -y "${packages_to_install[@]}"
+    fi
 
-    # Lock all version of the essential packages
-    chroot "${rootfs_mount_point}" yum --cacheonly versionlock "${essential_packages[@]}"
+    # Step 4: Lock version for all essential packages (using base package name)
+    chroot "${rootfs_mount_point}" yum --cacheonly versionlock "${essential_package_names[@]}"
 
     chroot "${rootfs_mount_point}" yum clean all
 
