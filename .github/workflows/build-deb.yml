@@ -1,0 +1,175 @@
+name: Build DEB Package
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches:
+      - 'master'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            deb_arch: amd64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            deb_arch: arm64
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ubuntu:24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update
+          apt-get install -y git
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            debhelper \
+            devscripts \
+            curl \
+            cmake \
+            protobuf-compiler \
+            libcryptsetup-dev \
+            libdevmapper-dev \
+            libfuse3-dev \
+            clang \
+            pkg-config
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.82.0
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Build DEB packages
+        run: |
+          source "$HOME/.cargo/env"
+          dpkg-buildpackage -us -uc -b
+          mkdir -p $GITHUB_WORKSPACE/deb-packages
+          cp ../*.deb $GITHUB_WORKSPACE/deb-packages/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-packages-${{ matrix.arch }}
+          if-no-files-found: error
+          path: ./deb-packages/*.deb
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        distro: ["ubuntu:24.04", "debian:trixie"]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    needs: build
+    container:
+      image: ${{ matrix.distro }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-packages-${{ matrix.arch }}
+          path: ./deb-packages/
+          merge-multiple: false
+
+      - name: Install DEB packages
+        run: |
+          set -e
+          set -x
+
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+
+          # Install DEB packages with automatic dependency resolution
+          apt-get install -y ./deb-packages/*.deb
+
+      - name: Verify installation
+        run: |
+          set -e
+          set -x
+
+          # Check binary versions
+          cryptpilot-fde --version
+          cryptpilot-crypt --version
+          cryptpilot-verity --version
+
+          # Check that binaries exist
+          test -x /usr/bin/cryptpilot-fde
+          test -x /usr/bin/cryptpilot-crypt
+          test -x /usr/bin/cryptpilot-verity
+          test -x /usr/bin/cryptpilot-convert
+          test -x /usr/bin/cryptpilot-enhance
+
+          # Check configuration files
+          test -f /etc/cryptpilot/global.toml.template
+          test -f /etc/cryptpilot/fde.toml.template
+          test -d /etc/cryptpilot/volumes
+          test -f /etc/cryptpilot/volumes/otp.toml.template
+          test -f /etc/cryptpilot/volumes/kbs.toml.template
+
+          # Check dracut module
+          test -d /usr/lib/dracut/modules.d/91cryptpilot
+          test -f /usr/lib/dracut/modules.d/91cryptpilot/module-setup.sh
+
+          # Check systemd service
+          test -f /lib/systemd/system/cryptpilot.service
+
+          # Check udev rules
+          test -f /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+
+          # Check policy file
+          test -f /usr/share/cryptpilot/policy.rego
+
+          echo "All verification checks passed!"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts/
+          merge-multiple: false
+
+      - name: Reorganize artifacts
+        run: |
+          mkdir -p ./release-packages/
+          # Copy DEB packages from architecture-specific artifacts
+          find ./artifacts/deb-packages-*/ -type f -name '*.deb' -exec cp {} ./release-packages/ \;
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: ./release-packages/*.deb

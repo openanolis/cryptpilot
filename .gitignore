@@ -4,3 +4,8 @@ release/
 .vscode/
 *.qcow2
 /build
+
+# Generated DEB packages
+*.deb
+*.buildinfo
+*.changes

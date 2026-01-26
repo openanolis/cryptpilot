@@ -271,7 +271,7 @@ fi
 
 
 %changelog
-* Wed Jan 15 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.1-1
+* Thu Jan 15 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.1-1
 - feat(kbs): support both one-shot and daemon modes for CDH
 - refactor(kbs): implement ttrpc client for daemon mode
 - fix(blktrace): fix invalid casting on aarch64

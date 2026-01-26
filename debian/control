@@ -1,0 +1,81 @@
+Source: cryptpilot
+Section: utils
+Priority: optional
+Maintainer: Kun Lai <laikun@linux.alibaba.com>
+Build-Depends: debhelper-compat (= 13),
+               cmake,
+               protobuf-compiler,
+               libcryptsetup-dev,
+               libdevmapper-dev,
+               libfuse3-dev,
+               clang,
+               pkg-config
+Standards-Version: 4.6.2
+Homepage: https://github.com/openanolis/cryptpilot
+
+Package: cryptpilot
+Architecture: any
+Depends: cryptpilot-fde (= ${binary:Version}),
+         cryptpilot-crypt (= ${binary:Version}),
+         cryptpilot-verity (= ${binary:Version}),
+         ${misc:Depends}
+Description: Full-disk encryption and data protection tool for confidential computing
+ Cryptpilot is a full-disk encryption utility for protecting data at rest
+ in confidential computing environments. This meta-package installs all
+ cryptpilot components: cryptpilot-fde, cryptpilot-crypt, and cryptpilot-verity.
+ .
+ It provides LUKS2-based encryption for rootfs and data volumes, integrates
+ with dracut for early-boot decryption, and supports multiple key providers
+ including TPM2, KBS (Key Broker Service), KMS, OIDC, OTP, and custom exec plugins.
+
+Package: cryptpilot-fde
+Architecture: any
+Depends: dracut,
+         dracut-network,
+         lvm2,
+         cryptsetup-bin,
+         coreutils,
+         systemd,
+         kmod,
+         util-linux,
+         qemu-utils,
+         file,
+         ${shlibs:Depends},
+         ${misc:Depends}
+Recommends: dosfstools,
+            xfsprogs,
+            e2fsprogs,
+            libguestfs-tools
+Suggests: confidential-data-hub,
+          attestation-agent
+Description: Full-disk encryption tooling for system volumes
+ Cryptpilot-fde provides system disk encryption and boot-time processing
+ for full-disk encryption setups. Includes cryptpilot-convert for disk
+ image conversion and cryptpilot-enhance for FDE enhancement.
+
+Package: cryptpilot-crypt
+Architecture: any
+Depends: cryptsetup-bin,
+         coreutils,
+         systemd,
+         kmod,
+         util-linux,
+         ${shlibs:Depends},
+         ${misc:Depends}
+Recommends: dosfstools,
+            xfsprogs,
+            e2fsprogs,
+            confidential-data-hub,
+            attestation-agent
+Description: Data volume encryption tooling
+ Cryptpilot-crypt provides data volume encryption and automatic volume
+ management for confidential computing environments.
+
+Package: cryptpilot-verity
+Architecture: any
+Depends: fuse3,
+         ${shlibs:Depends},
+         ${misc:Depends}
+Description: Integrity measurement tool for directory trees
+ Cryptpilot-verity is an integrity measurement tool for directory trees
+ in confidential computing environments.

@@ -1,0 +1,15 @@
+# Debian packaging build artifacts
+.debhelper/
+.cargo/
+install/
+cryptpilot/
+cryptpilot-fde/
+cryptpilot-crypt/
+cryptpilot-verity/
+*.substvars
+*.debhelper.log
+debhelper-build-stamp
+files
+*.postrm.debhelper
+*.prerm.debhelper
+*.postinst.debhelper

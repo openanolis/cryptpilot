@@ -129,20 +129,17 @@ update-rpm-tree:
 	cp ./cryptpilot.spec ../rpm-tree-cryptpilot/
 
 
-.PHONE: deb-build
+.PHONY: deb-build
 deb-build:
-	bash build_deb.sh $(VERSION) $(RELEASE_NUM) $(DEB_ARCH)
-	@echo "DEB package is: build/cryptpilot_$(VERSION)-$(RELEASE_NUM)_$(DEB_ARCH).deb"
+	dpkg-buildpackage -us -uc -b
+	@echo "DEB packages are in parent directory:"
+	@ls -lh ../cryptpilot*.deb 2>/dev/null || true
 
-.PHONE: deb-build-aarch64
-deb-build-aarch64:
-	bash build_deb.sh $(VERSION) $(RELEASE_NUM) arm64
-	@echo "DEB package is: build/cryptpilot_$(VERSION)-$(RELEASE_NUM)_arm64.deb"
-
-.PHONE: deb-install
+.PHONY: deb-install
 deb-install: deb-build
-	apt-get remove -y cryptpilot || true
-	dpkg -i build/cryptpilot_$(VERSION)-$(RELEASE_NUM)_$(DEB_ARCH).deb
+	apt-get remove -y cryptpilot cryptpilot-fde cryptpilot-crypt cryptpilot-verity || true
+	dpkg -i ../cryptpilot-verity_*.deb ../cryptpilot-fde_*.deb ../cryptpilot-crypt_*.deb ../cryptpilot_*.deb
+	apt-get install -f -y
 
 .PHONE: run-test
 run-test: install-test-depend
@@ -165,3 +162,25 @@ shellcheck:
 .PHONE: clippy
 clippy:
 	cargo clippy --all-targets --all-features -- -D warnings
+
+.PHONY: deb-build-in-docker
+deb-build-in-docker:
+	mkdir -p ~/deb-packages/
+	docker run --rm \
+		-v ~/deb-packages:/root/deb-packages \
+		-v .:/code \
+		--workdir=/code \
+		ubuntu:24.04 \
+		bash -x -c "\
+			apt-get update && \
+			apt-get install -y build-essential debhelper devscripts curl cmake \
+				protobuf-compiler libcryptsetup-dev libdevmapper-dev libfuse3-dev \
+				clang pkg-config && \
+			curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.82.0 && \
+			source \"\$$HOME/.cargo/env\" && \
+			dpkg-buildpackage -us -uc -b && \
+			cp ../*.deb /root/deb-packages/"
+	@echo "DEB packages are in ~/deb-packages/"
+	@ls -lh ~/deb-packages/*.deb 2>/dev/null || true
+
+

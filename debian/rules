@@ -1,0 +1,92 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export CARGO_HOME = $(CURDIR)/debian/.cargo
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Detect if we're building from vendored tarball
+VENDOR_DIR = $(CURDIR)/vendor
+USE_OFFLINE = $(shell test -d $(VENDOR_DIR) && echo "--offline")
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Build cryptpilot-fde
+	cargo install --path $(CURDIR)/cryptpilot-fde --bin cryptpilot-fde \
+		--root $(CURDIR)/debian/install/cryptpilot-fde --locked $(USE_OFFLINE)
+	# Build cryptpilot-crypt
+	cargo install --path $(CURDIR)/cryptpilot-crypt --bin cryptpilot-crypt \
+		--root $(CURDIR)/debian/install/cryptpilot-crypt --locked $(USE_OFFLINE)
+	# Build cryptpilot-verity
+	cargo install --path $(CURDIR)/cryptpilot-verity --bin cryptpilot-verity \
+		--root $(CURDIR)/debian/install/cryptpilot-verity --locked $(USE_OFFLINE)
+
+override_dh_auto_install:
+	# Install cryptpilot-fde
+	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde/bin/cryptpilot-fde \
+		$(CURDIR)/debian/cryptpilot-fde/usr/bin/cryptpilot-fde
+	install -D -m 755 $(CURDIR)/cryptpilot-convert.sh \
+		$(CURDIR)/debian/cryptpilot-fde/usr/bin/cryptpilot-convert
+	install -D -m 755 $(CURDIR)/cryptpilot-enhance.sh \
+		$(CURDIR)/debian/cryptpilot-fde/usr/bin/cryptpilot-enhance
+	# Dracut modules
+	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/module-setup.sh \
+		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/module-setup.sh
+	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-trigger-network-online.sh \
+		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/initrd-trigger-network-online.sh
+	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.sh \
+		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/initrd-wait-network-online.sh
+	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service \
+		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service
+	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service \
+		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service
+	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service \
+		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service
+	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/lvm.conf \
+		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/lvm.conf
+	# FDE config templates
+	install -D -m 600 $(CURDIR)/dist/etc/global.toml.template \
+		$(CURDIR)/debian/cryptpilot-fde/etc/cryptpilot/global.toml.template
+	install -D -m 600 $(CURDIR)/dist/etc/fde.toml.template \
+		$(CURDIR)/debian/cryptpilot-fde/etc/cryptpilot/fde.toml.template
+	# Policy file
+	install -D -m 644 $(CURDIR)/dist/usr/share/cryptpilot/policy.rego \
+		$(CURDIR)/debian/cryptpilot-fde/usr/share/cryptpilot/policy.rego
+	# Udev rules
+	install -D -m 644 $(CURDIR)/dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules \
+		$(CURDIR)/debian/cryptpilot-fde/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+	
+	# Install cryptpilot-crypt
+	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-crypt/bin/cryptpilot-crypt \
+		$(CURDIR)/debian/cryptpilot-crypt/usr/bin/cryptpilot-crypt
+	# Systemd service
+	install -D -m 644 $(CURDIR)/dist/systemd/cryptpilot.service \
+		$(CURDIR)/debian/cryptpilot-crypt/lib/systemd/system/cryptpilot.service
+	# Volume config templates
+	install -D -m 600 $(CURDIR)/dist/etc/volumes/otp.toml.template \
+		$(CURDIR)/debian/cryptpilot-crypt/etc/cryptpilot/volumes/otp.toml.template
+	install -D -m 600 $(CURDIR)/dist/etc/volumes/kbs.toml.template \
+		$(CURDIR)/debian/cryptpilot-crypt/etc/cryptpilot/volumes/kbs.toml.template
+	install -D -m 600 $(CURDIR)/dist/etc/volumes/kms.toml.template \
+		$(CURDIR)/debian/cryptpilot-crypt/etc/cryptpilot/volumes/kms.toml.template
+	install -D -m 600 $(CURDIR)/dist/etc/volumes/oidc.toml.template \
+		$(CURDIR)/debian/cryptpilot-crypt/etc/cryptpilot/volumes/oidc.toml.template
+	install -D -m 600 $(CURDIR)/dist/etc/volumes/exec.toml.template \
+		$(CURDIR)/debian/cryptpilot-crypt/etc/cryptpilot/volumes/exec.toml.template
+	
+	# Install cryptpilot-verity
+	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-verity/bin/cryptpilot-verity \
+		$(CURDIR)/debian/cryptpilot-verity/usr/bin/cryptpilot-verity
+
+override_dh_auto_clean:
+	cargo clean || true
+	rm -rf $(CURDIR)/debian/install
+	rm -rf $(CURDIR)/debian/.cargo
+
+override_dh_auto_test:
+	# Skip tests during package build
+	true
+
+override_dh_shlibdeps:
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
