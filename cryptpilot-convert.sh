@@ -796,9 +796,6 @@ step:update_rootfs() {
         fi
 
         log::info "Updating /etc/fstab"
-        # add ro,noload flag / if it is an ext4 partition
-        sed -i '/^[[:space:]]*[^#].*[[:space:]]\+\/[[:space:]]\+ext4[[:space:]]\+/ { /[,[:space:]]ro\([,[:space:]]\|$\)/! s/\([[:space:]]ext4[[:space:]]\+\)\([^[:space:]]\+\)/\1\2,ro/ ; /[,[:space:]]noload\([,[:space:]]\|$\)/! s/\([[:space:]]ext4[[:space:]]\+\)\([^[:space:]]\+\)/\1\2,noload/ }' "${rootfs_mount_point}/etc/fstab"
-
         # Prevent duplicate mounting of efi partitions
         sed -i '/[[:space:]]\/boot\/efi[[:space:]]/ s/defaults,/defaults,auto,nofail,/' "${rootfs_mount_point}/etc/fstab"
 
