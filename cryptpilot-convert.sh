@@ -441,10 +441,25 @@ disk::install_rpm_on_rootfs() {
     local packages=("$@")
 
     # Define the essential packages
-    local essential_packages=(
-        "yum-plugin-versionlock"
-        "cryptpilot-fde"
-    )
+    local cryptpilot_fde_version=""
+    
+    # Try to query the version of cryptpilot-fde from the current system
+    if command -v rpm >/dev/null 2>&1; then
+        cryptpilot_fde_version=$(rpm -q cryptpilot-fde --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+    elif command -v dpkg-query >/dev/null 2>&1; then
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde 2>/dev/null || true)
+    fi
+    
+    local essential_packages=()
+    if [ -n "${cryptpilot_fde_version}" ]; then
+        log::info "Detected cryptpilot-fde version: ${cryptpilot_fde_version}"
+        essential_packages+=("cryptpilot-fde-${cryptpilot_fde_version}")
+    else
+        log::warn "Failed to detect cryptpilot-fde version, installing latest version"
+        essential_packages+=("cryptpilot-fde")
+    fi
+    
+    essential_packages+=("yum-plugin-versionlock")
 
     # Add the essential packages to the installation list
     packages+=("${essential_packages[@]}")
