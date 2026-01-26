@@ -1335,6 +1335,7 @@ main() {
         log::info "Using device: $device"
     else
         log::info "Using input file: $input_file"
+        qemu-img info "${input_file}"
         device="$(disk::get_available_nbd)" || proc::fatal "no free NBD device"
 
         local work_file="${input_file}.work"
@@ -1348,9 +1349,21 @@ main() {
             fi
         fi
 
-        log::info "Copying ${input_file} to ${work_file}"
+        # Try to detect input file format
+        local input_format
+        input_format=$(qemu-img info "${input_file}" | grep '^file format:' | awk '{print $3}')
+        
+        # Try to create work file with backing file for faster processing
+        log::info "Detected input format: ${input_format}"
         proc::hook_exit "rm -f ${work_file}"
-        cp "${input_file}" "${work_file}"
+        if qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${work_file}" 2>/dev/null; then
+            log::info "Created work file ${work_file} with backing file ${input_file}"
+        else
+            log::warn "Failed to create work file with backing file, falling back to direct copy"
+            log::info "Copying ${input_file} to ${work_file}"
+            cp "${input_file}" "${work_file}"
+        fi
+
         proc::hook_exit "qemu-nbd --disconnect ${device} >/dev/null"
         qemu-nbd --connect="${device}" --discard=on --detect-zeroes=unmap "${work_file}"
         sleep 2
