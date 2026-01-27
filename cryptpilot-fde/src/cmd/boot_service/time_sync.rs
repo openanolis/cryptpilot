@@ -8,9 +8,13 @@ pub async fn sync_time_to_system() -> Result<()> {
     } else {
         tracing::info!("Aliyun ECS instance detected, sync system time now");
 
-        let unix_timetamp_utc = cryptpilot::vendor::aliyun::ntp::get_time_from_ntp()
-            .await
-            .context("Failed to get time from NTP server")?;
+        let unix_timetamp_utc = match cryptpilot::vendor::aliyun::ntp::get_time_from_ntp().await {
+            Ok(time) => time,
+            Err(e) => {
+                tracing::warn!("Failed to get time from NTP server: {:#}", e);
+                return Ok(());
+            }
+        };
         tracing::info!(?unix_timetamp_utc, "Got UNIX timestamp from NTP server");
 
         // Note CAP_SYS_TIME is required to set system time
