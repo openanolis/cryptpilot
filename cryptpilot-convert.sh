@@ -1098,13 +1098,12 @@ step::create_boot_part() {
 
 step::create_lvm_part() {
     local lvm_start_sector=$1
-    local lvm_end_sector=$2
-    local lvm_part_num=$3
+    local lvm_part_num=$2
 
     local lvm_part="${device}p${lvm_part_num}"
     lvm_start_sector=$(disk::align_start_sector "${lvm_start_sector}")
-    log::info "Creating lvm partition as LVM PV ($lvm_start_sector ... $lvm_end_sector END sectors)"
-    parted "$device" --script -- mkpart primary "${lvm_start_sector}s" "${lvm_end_sector}s"
+    log::info "Creating lvm partition as LVM PV ($lvm_start_sector ... last sector)"
+    parted "$device" --script -- mkpart primary "${lvm_start_sector}s" "100%"
     parted "$device" --script -- set "${lvm_part_num}" lvm on
     partprobe "$device"
 
@@ -1414,7 +1413,6 @@ main() {
     [ "${rootfs_orig_part_exist}" = true ] || proc::fatal "Cannot find rootfs partition on $device"
     rootfs_orig_part="${device}p${rootfs_orig_part_num}"
     rootfs_orig_start_sector=$(parted "$device" --script -- unit s print | grep "^ ${rootfs_orig_part_num}" | awk '{print $2}' | sed 's/s//')
-    rootfs_orig_end_sector=$(parted "$device" --script -- unit s print | grep "^ ${rootfs_orig_part_num}" | awk '{print $3}' | sed 's/s//')
 
     local sector_size
     sector_size=$(blockdev --getss "${device}")
@@ -1468,13 +1466,13 @@ main() {
     #
     log::step "[ 6 ] Creating lvm partition"
     if [ "$boot_part_exist" = "true" ]; then
-        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_end_sector" "$rootfs_orig_part_num"
+        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_part_num"
     elif [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
-        step::create_lvm_part "$((boot_part_end_sector + 1))" "$rootfs_orig_end_sector" "$((rootfs_orig_part_num + 1))"
+        step::create_lvm_part "$((boot_part_end_sector + 1))" "$((rootfs_orig_part_num + 1))"
     else
         # In UKI mode with no boot partition, we start right after the EFI partition
         # or at the beginning of the available space
-        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_end_sector" "$rootfs_orig_part_num"
+        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_part_num"
     fi
 
     #
