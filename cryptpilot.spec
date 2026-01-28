@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.3.1
+Version: 0.3.2
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -271,6 +271,26 @@ fi
 
 
 %changelog
+* Wed Jan 28 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.2-1
+- fix: gracefully handle NTP time sync failure in boot service
+- fix: simplify LVM partition creation to use remaining disk space
+- fix(cryptpilot-convert): remove fstab ro mount option modification
+- fix(fde): fix wrong logical volume name introduced by 37ecb7b
+- fix(cryptpilot-convert): prevent version conflict when user provides custom RPM
+- cryptpilot-convert: optimize image conversion with backing file
+- cryptpilot-convert: disable LVM auto-activation for system VG
+- cryptpilot-convert: auto-detect and use current cryptpilot-fde version
+- refactor: adjust rw_overlay configuration behavior and naming
+- feat(deb): add standard Debian packaging support
+- fix(spec): add libguestfs-tools-c as dependencies of cryptpilot-fde
+- fix(spec): correct aa and cdh dependencies of cryptpilot-crypt
+- chore: remove unnecessary cryptsetup rpm dependency
+- ci(test): fix coreutils conflict on anolisos:23
+- ci(test): add runtime dependencies for test execution
+- ci: split test workflow for parallel execution
+- feat(cryptpilot-convert): mark rootfs as read-only
+- fix(convert): avoid "No space left on device" during UKI patching
+
 * Thu Jan 15 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.1-1
 - feat(kbs): support both one-shot and daemon modes for CDH
 - refactor(kbs): implement ttrpc client for daemon mode
