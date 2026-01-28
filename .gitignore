@@ -9,3 +9,15 @@ release/
 *.deb
 *.buildinfo
 *.changes
+
+# Benchmark test directories
+cryptpilot-verity/benchmark/data/
+cryptpilot-verity/benchmark/mount/
+cryptpilot-verity/benchmark/results/
+cryptpilot-verity/benchmark/logs/
+cryptpilot-verity/benchmark/encrypted_data/
+cryptpilot-verity/benchmark/verity_encrypted_data/
+cryptpilot-verity/benchmark/cachefs_mount/
+cryptpilot-verity/benchmark/cachefs_verity_mount/
+cryptpilot-verity/benchmark/verity_on_cachefs_mount/
+cryptpilot-verity/benchmark/verity_source_data/
