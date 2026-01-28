@@ -40,7 +40,7 @@ impl FileSystemConfigSource {
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "toml") {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "toml") {
                 let volume_config = tokio::fs::read_to_string(&path)
                     .await
                     .map_err(Into::into)

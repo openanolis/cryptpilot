@@ -289,7 +289,7 @@ pub(super) trait FdeDiskGrubExt: Disk {
 
         // Step 1: Collect all directories containing 'grubx64.efi'
         while let Some(Ok(entry)) = entries.next().await {
-            if entry.file_type().await.map_or(false, |ft| ft.is_file()) {
+            if entry.file_type().await.is_ok_and(|ft| ft.is_file()) {
                 let file_name = entry.file_name().to_string_lossy().to_lowercase();
                 if file_name == "grubx64.efi" {
                     let parent_dir = entry.path().parent().map(|p| p.to_path_buf());
@@ -315,11 +315,7 @@ pub(super) trait FdeDiskGrubExt: Disk {
             // List all files in this GRUB directory
             let mut dir_entries = WalkDir::new(&dir);
             while let Some(Ok(inner_entry)) = dir_entries.next().await {
-                if !inner_entry
-                    .file_type()
-                    .await
-                    .map_or(false, |ft| ft.is_file())
-                {
+                if !inner_entry.file_type().await.is_ok_and(|ft| ft.is_file()) {
                     continue;
                 }
 

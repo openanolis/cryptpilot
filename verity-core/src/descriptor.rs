@@ -24,12 +24,12 @@ impl<D: InnerHash> FsVerityDescriptor<D> {
         // https://www.kernel.org/doc/html/latest/filesystems/fsverity.html#fs-verity-descriptor
 
         let mut digest: D = salt_to_digest(&self.salt);
-        digest.update(&[self.version as u8]);
-        digest.update(&[self.hash_algorithm as u8]);
-        digest.update(&[self.log_blocksize as u8]);
-        digest.update(&[self.salt.len() as u8]);
+        digest.update([self.version]);
+        digest.update([self.hash_algorithm]);
+        digest.update([self.log_blocksize]);
+        digest.update([self.salt.len() as u8]);
         digest.update_zeroes(4); // __le32 __reserved_0x04;
-        digest.update(&(self.data_size as u64).to_le_bytes());
+        digest.update(self.data_size.to_le_bytes());
         digest.update_padded(&self.root_hash, 64);
         digest.update_padded(&self.salt, 32);
         digest.update_zeroes(144); // __u8 __reserved[144];

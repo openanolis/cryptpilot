@@ -98,7 +98,7 @@ impl<V: FileVerifier> VerityFS<V> {
         // Calculate aligned offset and size for block reading
         let aligned_offset = (requested_offset / block_size) * block_size;
         let end_offset = requested_offset + requested_size;
-        let aligned_end = ((end_offset + block_size - 1) / block_size) * block_size;
+        let aligned_end = end_offset.div_ceil(block_size) * block_size;
         let aligned_size = aligned_end - aligned_offset;
 
         // Calculate starting block index
@@ -324,7 +324,7 @@ impl<V: FileVerifier> fuser::Filesystem for VerityFS<V> {
                 entries.push((ino, FileType::Directory, "..".into()));
             }
 
-            let dir_iter = self.read_dir(&dir_path)?;
+            let dir_iter = self.read_dir(dir_path)?;
 
             dir_iter.flatten().for_each(|entry| {
                 let _ /* just skip and ignore the error */= || -> _ {

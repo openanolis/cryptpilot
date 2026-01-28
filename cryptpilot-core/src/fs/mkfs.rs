@@ -122,7 +122,7 @@ impl MakeFs for IntegrityNoWipeMakeFs {
                 let bytes_start = event.event.sector * 512;
                 let bytes_end = bytes_start + (event.event.bytes as u64);
                 // The range [bytes_start, bytes_end) is touched by the operation
-                for i in (bytes_start / page_size)..((bytes_end + page_size - 1) / page_size) {
+                for i in (bytes_start / page_size)..bytes_end.div_ceil(page_size) {
                     rw_positions.insert(i);
                     if event.is_read() {
                         r_positions.insert(i);

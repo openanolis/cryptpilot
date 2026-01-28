@@ -120,7 +120,7 @@ impl FormatCommand {
                 continue;
             }
 
-            if entry.file_type().await.map_or(false, |ft| ft.is_file()) {
+            if entry.file_type().await.is_ok_and(|ft| ft.is_file()) {
                 files.push(entry.path());
             }
         }

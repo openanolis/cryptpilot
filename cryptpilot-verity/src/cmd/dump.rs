@@ -51,7 +51,7 @@ impl Command for DumpCommand {
                 );
                 println!("    Block Size: {} bytes", info.descriptor.block_size());
                 println!("    Data Size: {} bytes", info.descriptor.data_size);
-                println!("    Root Hash: {}", hex::encode(&info.descriptor.root_hash));
+                println!("    Root Hash: {}", hex::encode(info.descriptor.root_hash));
                 if !info.descriptor.salt.is_empty() {
                     println!("    Salt: {}", hex::encode(&info.descriptor.salt));
                 }

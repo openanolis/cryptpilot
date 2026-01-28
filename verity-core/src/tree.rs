@@ -29,7 +29,7 @@ impl<D: InnerHash> MerkleTree<D> {
     {
         // If there's only one hash, it is the root hash.
         if self.0.len() == 1 {
-            if let Some(hash) = self.0.iter().next() {
+            if let Some(hash) = self.0.first() {
                 return hash.clone();
             }
         }
@@ -58,6 +58,6 @@ impl<D: InnerHash> MerkleTree<D> {
         let mut digest = D::new();
         digest.update_padded(data, block_size);
         let real = digest.finalize();
-        return expected == &real;
+        expected == &real
     }
 }

@@ -61,10 +61,10 @@ pub async fn is_mounted(mount_point: &std::path::Path) -> Result<bool> {
                 // Check if filesystem type is fuse (verity-fuse uses FUSE)
 
                 if let mountinfo2::FsType::Other(fstype) = &mount_point.fstype {
-                    if fstype == "fuse" || fstype == &format!("fuse.{FUSE_SUBTYPE}") {
-                        if mount_point.what == FUSE_FS_NAME {
-                            return Ok(true);
-                        }
+                    if (fstype == "fuse" || fstype == &format!("fuse.{FUSE_SUBTYPE}"))
+                        && mount_point.what == FUSE_FS_NAME
+                    {
+                        return Ok(true);
                     }
                 }
             }

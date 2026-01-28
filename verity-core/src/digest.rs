@@ -35,7 +35,7 @@ pub trait InnerHash: Digest + BlockSizeUser + Clone + Default {
             self.update(&ZEROES[..remainder]);
         }
         for _ in 0..quotient {
-            self.update(&ZEROES);
+            self.update(ZEROES);
         }
     }
 }
@@ -289,12 +289,12 @@ where
                 if keep_space_for_one_digest {
                     // done if there is enough space left in this level for one full digest
                     if level.remaining >= D::OutputSize::USIZE {
-                        assert!(overflow.len() == 0); // if remaining > 0 there can't be overflow
+                        assert!(overflow.is_empty()); // if remaining > 0 there can't be overflow
                         break;
                     }
                 } else {
                     // done if there was no overflow, even if the block is now totally full
-                    if overflow.len() == 0 {
+                    if overflow.is_empty() {
                         break;
                     }
                 }
@@ -315,7 +315,7 @@ where
             }
 
             // if there is still overflow, add a new top level to the Merkle tree
-            if overflow.len() != 0 {
+            if !overflow.is_empty() {
                 // note that this is very unlikely, with default settings you will have to write
                 // more bytes than can be counted with an u64 before hitting this.
                 assert!(self.levels.len() < MAX_LEVELS);
@@ -574,7 +574,7 @@ mod tests {
                 let out = tmp.finalize();
 
                 assert!(
-                    out.as_ref() == &digest,
+                    out.as_ref() == digest,
                     "expected: {} found: {} for file: {:?}",
                     hex::encode(&digest),
                     hex::encode(&out),
@@ -594,7 +594,7 @@ mod tests {
                     out.to_vec() == digest,
                     "expected: {} found: {} for file: {:?}",
                     hex::encode(&digest),
-                    hex::encode(&out),
+                    hex::encode(out),
                     path
                 );
 
@@ -604,8 +604,8 @@ mod tests {
                 assert!(
                     rebuild_root_hash == descriptor.root_hash,
                     "expected(root_hash): {} found: {} for file: {:?}",
-                    hex::encode(&descriptor.root_hash),
-                    hex::encode(&rebuild_root_hash),
+                    hex::encode(descriptor.root_hash),
+                    hex::encode(rebuild_root_hash),
                     path
                 );
 
