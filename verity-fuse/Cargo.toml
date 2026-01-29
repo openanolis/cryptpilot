@@ -11,6 +11,7 @@ clap = {workspace = true}
 fuser = {workspace = true}
 hex = {workspace = true}
 libc = {workspace = true}
+lru = {workspace = true}
 relative-path = {workspace = true}
 sha2 = {workspace = true}
 tracing = {workspace = true}

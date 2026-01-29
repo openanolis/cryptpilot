@@ -1,3 +1,4 @@
+use crate::file_handle_cache::{CachedFileHandle, FileHandleCache};
 use crate::file_verifier::{FileVerifier, VerifiableFile};
 use cap_std::fs::{Dir, Metadata};
 use cap_std::fs::{MetadataExt as _, PermissionsExt};
@@ -5,9 +6,7 @@ use fuser::{FileAttr, FileType, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry
 use libc;
 use relative_path::RelativePath;
 use std::ffi::OsStr;
-use std::io::{Error, ErrorKind};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -15,41 +14,10 @@ use std::time::{Duration, SystemTime};
 const TTL: Duration = Duration::from_secs(1);
 const FS_BLOCK_SIZE: u32 = 4096;
 
-/// Read bytes at offset using pread() - thread-safe, doesn't change file position
-/// Returns the number of bytes actually read (may be less than buf.len() at EOF)
-fn pread_all(file: &cap_std::fs::File, buf: &mut [u8], mut offset: u64) -> std::io::Result<usize> {
-    let fd = file.as_raw_fd();
-    let mut total_read = 0;
-
-    while total_read < buf.len() {
-        let ret = unsafe {
-            libc::pread(
-                fd,
-                buf[total_read..].as_mut_ptr() as *mut libc::c_void,
-                buf.len() - total_read,
-                offset as libc::off_t,
-            )
-        };
-        if ret < 0 {
-            let err = Error::last_os_error();
-            if err.kind() == ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(err);
-        } else if ret == 0 {
-            // EOF reached - return what we have
-            break;
-        } else {
-            total_read += ret as usize;
-            offset += ret as u64;
-        }
-    }
-    Ok(total_read)
-}
-
 pub struct VerityFS<V: FileVerifier> {
     source: Dir,
     verifier: Arc<V>,
+    handle_cache: FileHandleCache,
 }
 
 impl<V: FileVerifier> VerityFS<V> {
@@ -60,6 +28,7 @@ impl<V: FileVerifier> VerityFS<V> {
         Ok(Self {
             source: dir,
             verifier,
+            handle_cache: FileHandleCache::new(),
         })
     }
 
@@ -101,11 +70,15 @@ impl<V: FileVerifier> VerityFS<V> {
         Ok(())
     }
 
-    fn open_file(&self, relative_path: &RelativePath) -> Result<cap_std::fs::File, i32> {
-        self.source
-            .open(relative_path_to_path_in_source_dir(relative_path))
+    fn open_file_cached(&self, file: &V::File) -> Result<Arc<CachedFileHandle>, i32> {
+        self.handle_cache
+            .get_or_open(file.ino(), || {
+                self.source
+                    .open(relative_path_to_path_in_source_dir(file.path()))
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            })
             .map_err(|e| {
-                tracing::error!(?e, ?relative_path, "failed to open file");
+                tracing::error!(?e, path = ?file.path(), "failed to open file");
                 e.raw_os_error().unwrap_or(libc::EIO)
             })
     }
@@ -136,29 +109,25 @@ impl<V: FileVerifier> VerityFS<V> {
         // Calculate starting block index
         let start_block = (aligned_offset / block_size) as usize;
 
-        // Open file and read using pread (no seek needed)
-        let file_handle = self.open_file(file.path())?;
-        let aligned_size = aligned_size as usize;
-        let mut aligned_buf = Vec::with_capacity(aligned_size);
-        unsafe {
-            aligned_buf.set_len(aligned_size);
-        }
-        let bytes_read = pread_all(&file_handle, &mut aligned_buf, aligned_offset).map_err(|e| {
-            tracing::error!(
-                ?e,
-                path = ?file.path(),
-                aligned_offset,
-                aligned_size,
-                "failed to pread file"
-            );
-            e.raw_os_error().unwrap_or(libc::EIO)
-        })?;
-        unsafe {
-            aligned_buf.set_len(bytes_read);
-        }
+        // Get or open cached file handle
+        let cached_file = self.open_file_cached(file)?;
+
+        // Read using pread (no seek needed)
+        let bytes_read = cached_file
+            .pread_file_data(aligned_offset, aligned_size as usize)
+            .map_err(|e| {
+                tracing::error!(
+                    ?e,
+                    path = ?file.path(),
+                    aligned_offset,
+                    aligned_size,
+                    "failed to pread file"
+                );
+                e.raw_os_error().unwrap_or(libc::EIO)
+            })?;
 
         // Verify each block using chunks
-        for (chunk_idx, block_data) in aligned_buf.chunks(block_size as usize).enumerate() {
+        for (chunk_idx, block_data) in bytes_read.chunks(block_size as usize).enumerate() {
             let block_idx = start_block + chunk_idx;
 
             if let Err(e) = file.verify_data_block(block_idx, block_data) {
@@ -176,9 +145,9 @@ impl<V: FileVerifier> VerityFS<V> {
         // Extract the originally requested data range from aligned buffer
         let start_in_buf = (requested_offset - aligned_offset) as usize;
         let end_in_buf = start_in_buf + requested_size as usize;
-        let end_in_buf = end_in_buf.min(aligned_buf.len());
+        let end_in_buf = end_in_buf.min(bytes_read.len());
 
-        Ok(aligned_buf[start_in_buf..end_in_buf].to_vec())
+        Ok(bytes_read[start_in_buf..end_in_buf].to_vec())
     }
     fn read_dir(&self, relative_path: &RelativePath) -> Result<cap_std::fs::ReadDir, i32> {
         self.source
@@ -416,7 +385,7 @@ impl<V: FileVerifier> fuser::Filesystem for VerityFS<V> {
 
         let result = || -> _ {
             let file = self.verifier.lookup_by_ino(ino).ok_or(libc::ENOENT)?;
-            let _ = self.open_file(file.path())?;
+            let _ = self.open_file_cached(file)?;
             Ok(file)
         }();
 
