@@ -1,6 +1,6 @@
 //! File handle cache for verity-fuse
 //!
-//! Provides LRU-based caching for file handles to avoid repeated open/close syscalls.
+//! Provides LRU-based caching for file handles and verified data blocks.
 
 use cap_std::fs::File;
 use lru::LruCache;
@@ -11,6 +11,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex};
 
 const DEFAULT_HANDLE_CACHE_SIZE: usize = 1024;
+const DEFAULT_BLOCK_CACHE_SIZE: usize = 4096; // Cache up to 4096 blocks (16MB at 4KB blocks)
 
 /// Cached file handle wrapper with pread support
 pub struct CachedFileHandle {
@@ -108,6 +109,60 @@ impl FileHandleCache {
 }
 
 impl Default for FileHandleCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Key for block cache: (ino, block_index)
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+pub struct BlockKey {
+    pub ino: u64,
+    pub block_index: usize,
+}
+
+impl BlockKey {
+    pub fn new(ino: u64, block_index: usize) -> Self {
+        Self { ino, block_index }
+    }
+}
+
+/// LRU cache for verified data blocks
+///
+/// Since underlying files are immutable (read-only), once a block passes
+/// verification, it will always pass. This cache is checked BEFORE reading
+/// from the file handle cache.
+pub struct BlockCache {
+    cache: Mutex<LruCache<BlockKey, Arc<[u8]>>>,
+}
+
+impl BlockCache {
+    pub fn new() -> Self {
+        Self::with_capacity(DEFAULT_BLOCK_CACHE_SIZE)
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            cache: Mutex::new(LruCache::new(
+                NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::MIN),
+            )),
+        }
+    }
+
+    /// Get cached block data if exists
+    pub fn get(&self, key: &BlockKey) -> Option<Arc<[u8]>> {
+        let mut cache = self.cache.lock().unwrap();
+        cache.get(key).cloned()
+    }
+
+    /// Store verified block data
+    pub fn put(&self, key: BlockKey, data: Arc<[u8]>) {
+        let mut cache = self.cache.lock().unwrap();
+        cache.put(key, data);
+    }
+}
+
+impl Default for BlockCache {
     fn default() -> Self {
         Self::new()
     }

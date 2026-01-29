@@ -1,4 +1,4 @@
-use crate::file_handle_cache::{CachedFileHandle, FileHandleCache};
+use crate::file_handle_cache::{BlockCache, BlockKey, CachedFileHandle, FileHandleCache};
 use crate::file_verifier::{FileVerifier, VerifiableFile};
 use cap_std::fs::{Dir, Metadata};
 use cap_std::fs::{MetadataExt as _, PermissionsExt};
@@ -17,6 +17,7 @@ const FS_BLOCK_SIZE: u32 = 4096;
 pub struct VerityFS<V: FileVerifier> {
     source: Dir,
     verifier: Arc<V>,
+    block_cache: BlockCache,
     handle_cache: FileHandleCache,
 }
 
@@ -28,6 +29,7 @@ impl<V: FileVerifier> VerityFS<V> {
         Ok(Self {
             source: dir,
             verifier,
+            block_cache: BlockCache::new(),
             handle_cache: FileHandleCache::new(),
         })
     }
@@ -88,67 +90,109 @@ impl<V: FileVerifier> VerityFS<V> {
             tracing::error!(offset, "invalid offset");
             return Err(libc::EINVAL);
         }
+        if size == 0 {
+            return Ok(Vec::new());
+        }
+
         let requested_offset = offset as u64;
         let requested_size = size as u64;
+        let requested_end = requested_offset + requested_size;
 
-        // Get block size from file - only files have block size
+        let path = file.path();
+        let ino = file.ino();
+
+        // Get block size — directories don't have one
         let block_size = file.block_size().ok_or_else(|| {
-            tracing::error!(
-                path = ?file.path(),
-                "Cannot read from directory"
-            );
+            tracing::error!(?path, "Cannot read from directory");
             libc::EISDIR
         })? as u64;
 
-        // Calculate aligned offset and size for block reading
-        let aligned_offset = (requested_offset / block_size) * block_size;
-        let end_offset = requested_offset + requested_size;
-        let aligned_end = end_offset.div_ceil(block_size) * block_size;
-        let aligned_size = aligned_end - aligned_offset;
-
-        // Calculate starting block index
-        let start_block = (aligned_offset / block_size) as usize;
-
-        // Get or open cached file handle
-        let cached_file = self.open_file_cached(file)?;
-
-        // Read using pread (no seek needed)
-        let bytes_read = cached_file
-            .pread_file_data(aligned_offset, aligned_size as usize)
-            .map_err(|e| {
-                tracing::error!(
-                    ?e,
-                    path = ?file.path(),
-                    aligned_offset,
-                    aligned_size,
-                    "failed to pread file"
-                );
-                e.raw_os_error().unwrap_or(libc::EIO)
-            })?;
-
-        // Verify each block using chunks
-        for (chunk_idx, block_data) in bytes_read.chunks(block_size as usize).enumerate() {
-            let block_idx = start_block + chunk_idx;
-
-            if let Err(e) = file.verify_data_block(block_idx, block_data) {
-                tracing::error!(
-                    ino = file.ino(),
-                    path = ?file.path(),
-                    block_idx,
-                    "Data block verification failed: {}",
-                    e
-                );
-                return Err(libc::EIO);
-            }
+        if block_size == 0 {
+            tracing::error!(?path, "Block size is zero");
+            return Err(libc::EINVAL);
         }
 
-        // Extract the originally requested data range from aligned buffer
-        let start_in_buf = (requested_offset - aligned_offset) as usize;
-        let end_in_buf = start_in_buf + requested_size as usize;
-        let end_in_buf = end_in_buf.min(bytes_read.len());
+        // Compute which blocks overlap with the requested range
+        let start_block = (requested_offset / block_size) as usize;
+        let end_block = ((requested_end + block_size - 1) / block_size) as usize; // ceil(requested_end / block_size)
+        let num_blocks = end_block - start_block;
 
-        Ok(bytes_read[start_in_buf..end_in_buf].to_vec())
+        let cached_file = self.open_file_cached(file)?;
+
+        // Pre-allocate output buffer with exact size
+        let mut output = Vec::with_capacity(requested_size as usize);
+
+        for block_idx in start_block..(start_block + num_blocks) {
+            let key = BlockKey::new(ino, block_idx);
+            let block_offset = (block_idx as u64) * block_size;
+            let block_end = block_offset + block_size;
+
+            // Determine overlap between [block_offset, block_end) and [requested_offset, requested_end)
+            let copy_start_in_file = requested_offset.max(block_offset);
+            let copy_end_in_file = requested_end.min(block_end);
+
+            // No overlap? (shouldn't happen due to block range calc, but safe)
+            if copy_start_in_file >= copy_end_in_file {
+                continue;
+            }
+
+            // Get or read the full block (for verification and caching)
+            let block_data = if let Some(cached) = self.block_cache.get(&key) {
+                cached
+            } else {
+                let raw_block = cached_file
+                    .pread_file_data(block_offset, block_size as usize)
+                    .map_err(|e| {
+                        tracing::error!(
+                            error = ?e,
+                            ?path,
+                            block_idx,
+                            "failed to pread block"
+                        );
+                        e.raw_os_error().unwrap_or(libc::EIO)
+                    })?;
+
+                // Verify integrity
+                if let Err(e) = file.verify_data_block(block_idx, &raw_block) {
+                    tracing::error!(
+                        ino,
+                        ?path,
+                        block_idx,
+                        error = %e,
+                        "Data block verification failed"
+                    );
+                    return Err(libc::EIO);
+                }
+
+                let arc_block = Arc::from(raw_block); // Arc<[u8]> is more idiomatic than Arc<Vec<u8>>
+                self.block_cache.put(key, Arc::clone(&arc_block));
+                arc_block
+            };
+
+            // Compute slice within the block to copy
+            let src_start = (copy_start_in_file - block_offset) as usize;
+            let src_end = (copy_end_in_file - block_offset) as usize;
+
+            // Append only the needed part to output
+            output.extend_from_slice(&block_data[src_start..src_end]);
+        }
+
+        // Safety: we should have filled exactly `requested_size` bytes
+        // But be defensive in case of short reads (e.g., file truncated)
+        if output.len() != requested_size as usize {
+            tracing::warn!(
+                ?path,
+                expected = requested_size,
+                actual = output.len(),
+                "Short read: file may be truncated"
+            );
+            // Optionally: pad with zeros or return error?
+            // Here we just return what we got (common in filesystems)
+        }
+
+        Ok(output)
     }
+
     fn read_dir(&self, relative_path: &RelativePath) -> Result<cap_std::fs::ReadDir, i32> {
         self.source
             .read_dir(relative_path_to_path_in_source_dir(relative_path))
