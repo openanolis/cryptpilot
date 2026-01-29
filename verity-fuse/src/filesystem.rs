@@ -5,15 +5,47 @@ use fuser::{FileAttr, FileType, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry
 use libc;
 use relative_path::RelativePath;
 use std::ffi::OsStr;
-use std::io::Read;
-use std::io::{Seek, SeekFrom};
+use std::io::{Error, ErrorKind};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 const TTL: Duration = Duration::from_secs(1);
 const FS_BLOCK_SIZE: u32 = 4096;
+
+/// Read bytes at offset using pread() - thread-safe, doesn't change file position
+/// Returns the number of bytes actually read (may be less than buf.len() at EOF)
+fn pread_all(file: &cap_std::fs::File, buf: &mut [u8], mut offset: u64) -> std::io::Result<usize> {
+    let fd = file.as_raw_fd();
+    let mut total_read = 0;
+
+    while total_read < buf.len() {
+        let ret = unsafe {
+            libc::pread(
+                fd,
+                buf[total_read..].as_mut_ptr() as *mut libc::c_void,
+                buf.len() - total_read,
+                offset as libc::off_t,
+            )
+        };
+        if ret < 0 {
+            let err = Error::last_os_error();
+            if err.kind() == ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(err);
+        } else if ret == 0 {
+            // EOF reached - return what we have
+            break;
+        } else {
+            total_read += ret as usize;
+            offset += ret as u64;
+        }
+    }
+    Ok(total_read)
+}
 
 pub struct VerityFS<V: FileVerifier> {
     source: Dir,
@@ -104,30 +136,26 @@ impl<V: FileVerifier> VerityFS<V> {
         // Calculate starting block index
         let start_block = (aligned_offset / block_size) as usize;
 
-        // Open file and seek to aligned offset
-        let mut file_handle = self.open_file(file.path())?;
-        file_handle
-            .seek(SeekFrom::Start(aligned_offset))
-            .map_err(|e| {
-                tracing::error!(?e, path = ?file.path(), aligned_offset, "failed to seek file");
-                e.raw_os_error().unwrap_or(libc::EIO)
-            })?;
-
-        // Read all aligned blocks
-        let mut aligned_buf = Vec::with_capacity(aligned_size as usize);
-        file_handle
-            .take(aligned_size)
-            .read_to_end(&mut aligned_buf)
-            .map_err(|e| {
-                tracing::error!(
-                    ?e,
-                    path = ?file.path(),
-                    aligned_offset,
-                    aligned_size,
-                    "failed to read file"
-                );
-                e.raw_os_error().unwrap_or(libc::EIO)
-            })?;
+        // Open file and read using pread (no seek needed)
+        let file_handle = self.open_file(file.path())?;
+        let aligned_size = aligned_size as usize;
+        let mut aligned_buf = Vec::with_capacity(aligned_size);
+        unsafe {
+            aligned_buf.set_len(aligned_size);
+        }
+        let bytes_read = pread_all(&file_handle, &mut aligned_buf, aligned_offset).map_err(|e| {
+            tracing::error!(
+                ?e,
+                path = ?file.path(),
+                aligned_offset,
+                aligned_size,
+                "failed to pread file"
+            );
+            e.raw_os_error().unwrap_or(libc::EIO)
+        })?;
+        unsafe {
+            aligned_buf.set_len(bytes_read);
+        }
 
         // Verify each block using chunks
         for (chunk_idx, block_data) in aligned_buf.chunks(block_size as usize).enumerate() {
