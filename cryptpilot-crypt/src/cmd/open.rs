@@ -109,6 +109,11 @@ async fn temporary_disk_open(
             }
         };
     }
+
+    // Mark the volume as fully initialized
+    cryptpilot::fs::luks2::mark_volume_as_initialized(std::path::Path::new(&volume_config.dev))
+        .await?;
+
     Ok(())
 }
 
