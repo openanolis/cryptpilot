@@ -178,6 +178,12 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
             )
             .await?;
         }
+
+        // Mark the volume as fully initialized
+        cryptpilot::fs::luks2::mark_volume_as_initialized(std::path::Path::new(
+            DATA_LOGICAL_VOLUME,
+        ))
+        .await?;
     }
 
     tracing::info!("Both rootfs volume and data volume are ready");

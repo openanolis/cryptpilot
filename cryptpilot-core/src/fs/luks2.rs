@@ -10,6 +10,7 @@ use libcryptsetup_rs::{
 };
 use rand::{distributions::Alphanumeric, Rng as _};
 use tokio::fs::OpenOptions;
+use tokio::io::AsyncReadExt;
 
 use crate::types::{IntegrityType, Passphrase};
 
@@ -18,6 +19,67 @@ use super::get_verbose;
 const LUKS2_VOLUME_KEY_SIZE_BIT_WITH_INTEGRITY: usize = 768;
 const LUKS2_VOLUME_KEY_SIZE_BIT_WITHOUT_INTEGRITY: usize = 512;
 const LUKS2_SECTOR_SIZE: u32 = 4096;
+const LUKS2_SUBSYSTEM_NAME: &str = "cryptpilot";
+
+async fn get_luks2_subsystem(dev: &str) -> Result<Option<String>> {
+    /// LUKS2 header structure according to the specification
+    /// Reference: https://gitlab.com/cryptsetup/cryptsetup/-/blob/24d10f412e2ca1b0a8ed5addb1381507662a9862/lib/luks2/luks2.h
+    #[repr(C, packed)]
+    #[derive(Debug, Clone)]
+    struct Luks2HdrDisk {
+        magic: [u8; 6],
+        version: u16, // big endian
+        hdr_size: u64,
+        seqid: u64,
+        label: [u8; 48],
+        checksum_alg: [u8; 32],
+        salt: [u8; 64],
+        uuid: [u8; 40],
+        subsystem: [u8; 48],
+        hdr_offset: u64,
+        padding: [u8; 184],
+        csum: [u8; 64],
+        padding4096: [u8; 7 * 512],
+    }
+
+    let device_path = PathBuf::from(&dev);
+    let mut file = tokio::fs::File::open(&device_path).await?;
+
+    let mut header_buf = vec![0u8; std::mem::size_of::<Luks2HdrDisk>()];
+    file.read_exact(&mut header_buf).await?;
+    if header_buf.len() < std::mem::size_of::<Luks2HdrDisk>() {
+        return Err(anyhow::anyhow!(
+            "Header buffer size is too small: {} bytes, expected at least {} bytes",
+            header_buf.len(),
+            std::mem::size_of::<Luks2HdrDisk>()
+        ));
+    }
+
+    let header: &Luks2HdrDisk = unsafe { &*(header_buf.as_ptr() as *const Luks2HdrDisk) };
+
+    let magic_bytes = &header.magic;
+    if !(magic_bytes == b"LUKS\xba\xbe" || magic_bytes == b"SKUL\xba\xbe")
+        || u16::from_be(header.version) != 2
+    {
+        return Err(anyhow::anyhow!(
+            "Invalid LUKS2 header: magic='{:?}', version={}",
+            magic_bytes,
+            u16::from_be(header.version)
+        ));
+    }
+
+    let subsystem_str = match header.subsystem.iter().position(|&x| x == 0) {
+        Some(pos) => String::from_utf8_lossy(&header.subsystem[..pos]).to_string(),
+        None => String::from_utf8_lossy(&header.subsystem).to_string(),
+    };
+
+    if !subsystem_str.is_empty() && subsystem_str != "-" {
+        tracing::debug!("Found LUKS2 subsystem in binary header: {}", subsystem_str);
+        Ok(Some(subsystem_str))
+    } else {
+        Ok(None)
+    }
+}
 
 pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType) -> Result<()> {
     let passphrase = passphrase.to_owned();
@@ -76,6 +138,43 @@ pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType
     })
     .await?
     .with_context(|| format!("Failed to format {dev} as LUKS2 volume"))?;
+
+    Ok(())
+}
+
+pub async fn mark_volume_as_initialized(dev: &Path) -> Result<()> {
+    let verbose = get_verbose().await;
+    let dev_path = dev.to_path_buf();
+    let dev_path_for_error = dev_path.clone();
+
+    tokio::task::spawn_blocking(move || {
+        if verbose {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
+        } else {
+            libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
+        }
+
+        let mut device = CryptInit::init(&dev_path)?;
+
+        // Load the device
+        device
+            .context_handle()
+            .load::<()>(Some(EncryptionFormat::Luks2), None)?;
+
+        // Mark the volume as initialized by setting the subsystem to "cryptpilot"
+        device
+            .context_handle()
+            .set_label(None, Some(LUKS2_SUBSYSTEM_NAME))?;
+
+        Ok::<_, anyhow::Error>(())
+    })
+    .await?
+    .with_context(|| {
+        format!(
+            "Failed to mark volume as initialized for {:?}",
+            dev_path_for_error
+        )
+    })?;
 
     Ok(())
 }
@@ -159,14 +258,15 @@ pub async fn open_with_check_passphrase(
 }
 
 pub async fn is_initialized(dev: &str) -> Result<bool> {
-    is_a_luks2_volume(dev).await
+    is_a_cryptpilot_initialized_luks2_volume(dev).await
 }
 
-async fn is_a_luks2_volume(dev: &str) -> Result<bool> {
+async fn is_a_cryptpilot_initialized_luks2_volume(dev: &str) -> Result<bool> {
     let verbose = get_verbose().await;
     let device_path = PathBuf::from(&dev);
 
-    tokio::task::spawn_blocking(move || {
+    // First check if it's a LUKS2 volume using the blocking operation
+    let is_luks2 = tokio::task::spawn_blocking(move || {
         if verbose {
             libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
         } else {
@@ -183,7 +283,20 @@ async fn is_a_luks2_volume(dev: &str) -> Result<bool> {
         Ok::<_, anyhow::Error>(is_luks2)
     })
     .await?
-    .with_context(|| format!("Failed to check luks2 initialization status of device {dev}"))
+    .with_context(|| format!("Failed to check luks2 initialization status of device {dev}"))?;
+
+    if !is_luks2 {
+        return Ok(false);
+    }
+
+    // Check if the subsystem is set to "cryptpilot"
+    let subsystem_is_set = get_luks2_subsystem(dev)
+        .await
+        .with_context(|| format!("Failed to get LUKS2 device subsystem for {dev}"))?
+        .map(|subsystem| subsystem == LUKS2_SUBSYSTEM_NAME)
+        .unwrap_or(false);
+
+    Ok(subsystem_is_set)
 }
 
 pub fn is_active(volume: &str) -> bool {
