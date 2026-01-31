@@ -1125,7 +1125,7 @@ step::setup_rootfs_lv_with_encrypt() {
     proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B system # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
     # Create a encrypted volume
     log::info "Encrypting rootfs logical volume with LUKS2"
-    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 /dev/mapper/system-rootfs --key-file=-
+    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --subsystem cryptpilot /dev/mapper/system-rootfs --key-file=-
     proc::hook_exit "[[ -e /dev/mapper/rootfs ]] && disk::dm_remove_wait_busy rootfs"
 
     log::info "Opening encrypted rootfs volume"

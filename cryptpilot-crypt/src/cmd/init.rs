@@ -104,5 +104,9 @@ async fn persistent_disk_init(
         cryptpilot::fs::mkfs::makefs_if_empty(&tmp_volume.volume_path(), makefs, integrity).await?;
     }
 
+    // Mark the volume as fully initialized
+    cryptpilot::fs::luks2::mark_volume_as_initialized(std::path::Path::new(&volume_config.dev))
+        .await?;
+
     Ok(())
 }
