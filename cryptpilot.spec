@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.3.2
+Version: 0.3.3
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -271,6 +271,9 @@ fi
 
 
 %changelog
+* Mon Feb 02 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.3-1
+- feat(luks2): implement atomic initialization check with subsystem
+
 * Wed Jan 28 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.2-1
 - fix: gracefully handle NTP time sync failure in boot service
 - fix: simplify LVM partition creation to use remaining disk space
