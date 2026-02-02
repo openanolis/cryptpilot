@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.3.3
+Version: 0.3.4
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -271,6 +271,12 @@ fi
 
 
 %changelog
+* Tue Feb 03 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.4-1
+- fix: correct is_empty_disk logic and streamline filesystem creation
+- fix: replace makefs_if_empty with force_mkfs for reliable volume initialization
+- fix: remove redundant filesystem checks relying on LUKS2 initialization status
+- feat: unify volume status reporting with structured enum and description
+
 * Mon Feb 02 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.3-1
 - feat(luks2): implement atomic initialization check with subsystem
 

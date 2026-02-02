@@ -10,7 +10,7 @@ resolver = "2"
 [workspace.package]
 authors = ["Kun Lai <laikun@linux.alibaba.com>"]
 edition = "2021"
-version = "0.3.3"
+version = "0.3.4"
 
 [workspace.dependencies]
 again = "0.1.2"
