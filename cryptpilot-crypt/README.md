@@ -93,46 +93,45 @@ cryptpilot-crypt show data0 --json
 
 Example table output:
 ```
-╭────────┬───────────────────┬─────────────────┬──────────────┬──────────────────┬──────────────┬────────╮
-│ Volume ┆ Volume Path       ┆ Underlay Device ┆ Key Provider ┆ Extra Options    ┆ Initialized  ┆ Opened │
-╞════════╪═══════════════════╪═════════════════╪══════════════╪══════════════════╪══════════════╪════════╡
-│ data0  ┆ /dev/mapper/data0 ┆ /dev/nvme1n1p1  ┆ otp          ┆ auto_open = true ┆ Not Required ┆ True   │
-│        ┆                   ┆                 ┆              ┆ makefs = "ext4"  ┆              ┆        │
-│        ┆                   ┆                 ┆              ┆ integrity = true ┆              ┆        │
-╰────────┴───────────────────┴─────────────────┴──────────────┴──────────────────┴──────────────┴────────╯
+╭────────┬───────────────────┬─────────────────┬──────────────┬──────────────────┬───────────────╮
+│ Volume ┆ Volume Path       ┆ Underlay Device ┆ Key Provider ┆ Extra Options    ┆ Status        │
+╞════════╪═══════════════════╪═════════════════╪══════════════╪══════════════════╪═══════════════╡
+│ data0  ┆ /dev/mapper/data0 ┆ /dev/nvme1n1p1  ┆ otp          ┆ auto_open = true ┆ ReadyToOpen   │
+│        ┆                   ┆                 ┆              ┆ makefs = "ext4"  ┆               │
+│        ┆                   ┆                 ┆              ┆ integrity = true ┆               │
+╰────────┴───────────────────┴─────────────────┴──────────────┴──────────────────┴───────────────╯
 ```
 
 Example JSON output:
 ```json
-[
-  {
-    "volume": "data0",
-    "volume_path": "/dev/mapper/data0",
-    "underlay_device": "/dev/nvme1n1p1",
-    "device_exists": true,
-    "key_provider": "otp",
-    "extra_options": {
-      "auto_open": true,
-      "makefs": "ext4",
-      "integrity": true
-    },
-    "needs_initialize": false,
-    "initialized": true,
-    "opened": true
-  }
-]
+{
+  "volumes": [
+    {
+      "volume": "data0",
+      "volume_path": "/dev/mapper/data0",
+      "underlay_device": "/dev/nvme1n1p1",
+      "key_provider": "otp",
+      "extra_options": {
+        "auto_open": true,
+        "makefs": "ext4",
+        "integrity": true
+      },
+      "status": "ReadyToOpen",
+      "description": "Volume 'data0' uses otp key provider (temporary volume) and is ready to open"
+    }
+  ]
+}
 ```
 
 JSON output fields:
+- `volumes`: Array of volume status objects
 - `volume`: Volume name
 - `volume_path`: Path to the decrypted volume (always shows the mapper path)
 - `underlay_device`: Underlying encrypted block device path
-- `device_exists`: Whether the underlying device exists
 - `key_provider`: Key provider type (e.g., `otp`, `kbs`, `kms`, `oidc`, `exec`)
 - `extra_options`: Additional volume configuration (`null` if serialization fails)
-- `needs_initialize`: Whether the volume needs initialization (false for temporary volumes like OTP, true for persistent volumes)
-- `initialized`: Whether LUKS2 is initialized (false if device doesn't exist or initialization check fails, true if device exists and volume doesn't need initialization, or actual initialization status for persistent volumes)
-- `opened`: Whether the volume is currently opened/decrypted
+- `status`: Current status of the volume (`DeviceNotFound`, `CheckFailed`, `RequiresInit`, `ReadyToOpen`, `Opened`)
+- `description`: Human-readable description of the current status
 
 ### `cryptpilot-crypt init`
 

@@ -12,6 +12,31 @@ use cryptpilot::provider::{IntoProvider, KeyProvider as _, VolumeType};
 
 use crate::config::VolumeConfig;
 
+/// Unified volume status enumeration
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub enum VolumeStatusKind {
+    /// Device does not exist physically
+    DeviceNotFound,
+    /// Device exists but initialization check failed (with error details)
+    CheckFailed,
+    /// Device requires initialization
+    RequiresInit,
+    /// Volume is ready to open (either initialized persistent volume or temporary volume)
+    ReadyToOpen,
+    /// Volume is currently opened/mapped
+    Opened,
+}
+
+/// Detailed status information with human-readable description
+#[derive(Serialize, Clone, Debug)]
+pub struct VolumeStatus {
+    /// Machine-readable status code
+    #[serde(rename = "status")]
+    pub kind: VolumeStatusKind,
+    /// Human-readable detailed description
+    pub description: String,
+}
+
 pub struct ShowCommand {
     #[allow(dead_code)]
     pub show_options: ShowOptions,
@@ -50,27 +75,29 @@ pub trait PrintAsJson {
     async fn print_as_json(&self) -> Result<()>;
 }
 
-/// JSON serializable structure for volume status
+/// Individual volume status information
 #[derive(Serialize)]
-struct VolumeStatus {
+pub struct ShowVolume {
     volume: String,
     volume_path: PathBuf,
     underlay_device: PathBuf,
-    device_exists: bool,
     key_provider: String,
     key_provider_options: serde_json::Value,
     extra_options: serde_json::Value,
-    needs_initialize: bool,
-    initialized: bool,
-    opened: bool,
+    /// Unified status representation (flattened)
+    #[serde(flatten)]
+    status: VolumeStatus,
 }
 
-impl VolumeStatus {
-    /// Build volume status from config
-    async fn from_config(volume_config: &VolumeConfig) -> Result<Self> {
-        let dev_exist = Path::new(&volume_config.dev).exists();
-        let is_open = cryptpilot::fs::luks2::is_active(&volume_config.volume);
+/// Collection of volume statuses for JSON output
+#[derive(Serialize)]
+struct VolumesCollection {
+    volumes: Vec<ShowVolume>,
+}
 
+impl ShowVolume {
+    /// Build volume status from config
+    async fn from_config(volume_config: &VolumeConfig) -> Self {
         let volume_path = volume_config.volume_path();
 
         let key_provider = serde_variant::to_variant_name(&volume_config.encrypt.key_provider)
@@ -85,42 +112,18 @@ impl VolumeStatus {
             Err(_) => serde_json::Value::Null,
         };
 
-        let needs_initialize = matches!(
-            volume_config
-                .encrypt
-                .key_provider
-                .clone()
-                .into_provider()
-                .volume_type(),
-            VolumeType::Persistent
-        );
+        // Determine unified status using VolumeConfig method
+        let status = volume_config.determine_status().await;
 
-        let initialized = if !dev_exist {
-            false
-        } else if !needs_initialize {
-            true
-        } else {
-            match cryptpilot::fs::luks2::is_initialized(&volume_config.dev).await {
-                Ok(initialized) => initialized,
-                Err(e) => {
-                    tracing::warn!("Failed to check initialization status: {e:?}");
-                    false
-                }
-            }
-        };
-
-        Ok(Self {
+        Self {
             volume: volume_config.volume.clone(),
             volume_path,
             underlay_device: volume_config.dev.clone(),
-            device_exists: dev_exist,
             key_provider,
             key_provider_options,
             extra_options,
-            needs_initialize,
-            initialized,
-            opened: is_open,
-        })
+            status,
+        }
     }
 }
 
@@ -145,32 +148,43 @@ impl PrintAsTable for [VolumeConfig] {
                 "Underlay Device",
                 "Key Provider",
                 "Extra Options",
-                "Initialized",
-                "Opened",
+                "Status",
             ]);
 
         for volume_config in self {
-            let status = VolumeStatus::from_config(volume_config).await?;
+            let show_volume = ShowVolume::from_config(volume_config).await;
+
+            // Determine color based on status code
+            let status_color = match show_volume.status.kind {
+                VolumeStatusKind::Opened => Color::Green,
+                VolumeStatusKind::ReadyToOpen => Color::Green,
+                VolumeStatusKind::RequiresInit => Color::Yellow,
+                VolumeStatusKind::CheckFailed => Color::Red,
+                VolumeStatusKind::DeviceNotFound => Color::Red,
+            };
 
             table.add_row(vec![
-                Cell::new(&status.volume),
-                if !status.device_exists {
-                    Cell::new("N/A").fg(Color::Yellow)
-                } else if status.opened {
-                    Cell::new(status.volume_path.to_string_lossy()).fg(Color::Green)
-                } else {
-                    Cell::new("<not opened>").fg(Color::Yellow)
+                Cell::new(&show_volume.volume),
+                match show_volume.status.kind {
+                    VolumeStatusKind::DeviceNotFound => Cell::new("N/A").fg(Color::Yellow),
+                    VolumeStatusKind::Opened => {
+                        Cell::new(show_volume.volume_path.to_string_lossy().as_ref())
+                            .fg(Color::Green)
+                    }
+                    _ => Cell::new("<not opened>").fg(Color::Yellow),
                 },
-                if status.device_exists {
-                    Cell::new(status.underlay_device.to_string_lossy())
-                } else {
-                    tracing::warn!("Device {:?} does not exist", status.underlay_device);
-                    Cell::new(format!("{:?} <not exist>", status.underlay_device)).fg(Color::Red)
+                match show_volume.status.kind {
+                    VolumeStatusKind::DeviceNotFound => {
+                        tracing::warn!("Device {:?} does not exist", show_volume.underlay_device);
+                        Cell::new(format!("{:?} <not exist>", show_volume.underlay_device))
+                            .fg(Color::Red)
+                    }
+                    _ => Cell::new(show_volume.underlay_device.to_string_lossy().as_ref()),
                 },
-                Cell::new(&status.key_provider),
+                Cell::new(&show_volume.key_provider),
                 {
-                    if status.extra_options.is_null()
-                        || status.extra_options == serde_json::json!({})
+                    if show_volume.extra_options.is_null()
+                        || show_volume.extra_options == serde_json::json!({})
                     {
                         Cell::new("<none>").fg(Color::DarkGrey)
                     } else {
@@ -178,20 +192,7 @@ impl PrintAsTable for [VolumeConfig] {
                         Cell::new(s)
                     }
                 },
-                if !status.needs_initialize {
-                    Cell::new("Not Required").fg(Color::Yellow)
-                } else if !status.device_exists {
-                    Cell::new("N/A").fg(Color::Yellow)
-                } else if status.initialized {
-                    Cell::new("True").fg(Color::Green)
-                } else {
-                    Cell::new("False").fg(Color::Yellow)
-                },
-                if status.opened {
-                    Cell::new("True").fg(Color::Green)
-                } else {
-                    Cell::new("False").fg(Color::Yellow)
-                },
+                Cell::new(format!("{:?}", show_volume.status.kind)).fg(status_color),
             ]);
         }
 
@@ -211,15 +212,89 @@ impl PrintAsJson for VolumeConfig {
 #[async_trait]
 impl PrintAsJson for [VolumeConfig] {
     async fn print_as_json(&self) -> Result<()> {
-        let mut statuses = Vec::new();
+        let mut volumes = Vec::new();
 
         for volume_config in self {
-            statuses.push(VolumeStatus::from_config(volume_config).await?);
+            volumes.push(ShowVolume::from_config(volume_config).await);
         }
 
-        let json = serde_json::to_string_pretty(&statuses)?;
+        let volumes_collection = VolumesCollection { volumes };
+        let json = serde_json::to_string_pretty(&volumes_collection)?;
         println!("{}", json);
 
         Ok(())
+    }
+}
+
+// Implementation for VolumeConfig to determine status
+impl VolumeConfig {
+    /// Determine unified volume status with detailed description
+    pub async fn determine_status(&self) -> VolumeStatus {
+        // Check if volume is already opened
+        let is_open = cryptpilot::fs::luks2::is_active(&self.volume);
+        if is_open {
+            return VolumeStatus {
+                kind: VolumeStatusKind::Opened,
+                description: format!(
+                    "Volume '{}' is currently opened and mapped at '{}'",
+                    self.volume,
+                    self.volume_path().display()
+                ),
+            };
+        }
+
+        // Check if device exists
+        let dev_exist = Path::new(&self.dev).exists();
+        if !dev_exist {
+            return VolumeStatus {
+                kind: VolumeStatusKind::DeviceNotFound,
+                description: format!("Device '{:?}' does not exist on filesystem", self.dev),
+            };
+        }
+
+        // Check volume type
+        let key_provider = self.encrypt.key_provider.clone().into_provider();
+        let is_persistent = matches!(key_provider.volume_type(), VolumeType::Persistent);
+
+        // For temporary volumes, they are ready to open without initialization
+        if !is_persistent {
+            return VolumeStatus {
+                kind: VolumeStatusKind::ReadyToOpen,
+                description: format!(
+                    "Volume '{}' uses {} key provider (temporary volume) and is ready to open",
+                    self.volume,
+                    serde_variant::to_variant_name(&self.encrypt.key_provider).unwrap_or("unknown")
+                ),
+            };
+        }
+
+        // For persistent volumes, check initialization status
+        match cryptpilot::fs::luks2::is_initialized(&self.dev).await {
+            Ok(true) => VolumeStatus {
+                kind: VolumeStatusKind::ReadyToOpen,
+                description: format!(
+                    "Device '{:?}' is properly initialized as LUKS2 volume and ready to open",
+                    self.dev
+                ),
+            },
+            Ok(false) => VolumeStatus {
+                kind: VolumeStatusKind::RequiresInit,
+                description: format!(
+                    "Device '{:?}' exists but is not a valid LUKS2 volume - needs initialization",
+                    self.dev
+                ),
+            },
+            Err(e) => {
+                // This is the critical case - check failed
+                let error_msg = format!("{:?}", e);
+                VolumeStatus {
+                    kind: VolumeStatusKind::CheckFailed,
+                    description: format!(
+                        "Failed to check initialization status for device '{:?}': {}",
+                        self.dev, error_msg
+                    ),
+                }
+            }
+        }
     }
 }

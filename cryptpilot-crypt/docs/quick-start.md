@@ -80,13 +80,13 @@ cryptpilot-crypt show
 Example output:
 
 ```
-╭────────┬───────────────────┬─────────────────┬──────────────┬──────────────────┬──────────────┬────────╮
-│ Volume ┆ Volume Path       ┆ Underlay Device ┆ Key Provider ┆ Extra Options    ┆ Initialized  ┆ Opened │
-╞════════╪═══════════════════╪═════════════════╪══════════════╪══════════════════╪══════════════╪════════╡
-│ data0  ┆ /dev/mapper/data0 ┆ /dev/nvme1n1p1  ┆ otp          ┆ auto_open = true ┆ Not Required ┆ True   │
-│        ┆                   ┆                 ┆              ┆ makefs = "ext4"  ┆              ┆        │
-│        ┆                   ┆                 ┆              ┆ integrity = true ┆              ┆        │
-╰────────┴───────────────────┴─────────────────┴──────────────┴──────────────────┴──────────────┴────────╯
+╭────────┬───────────────────┬─────────────────┬──────────────┬──────────────────┬───────────────╮
+│ Volume ┆ Volume Path       ┆ Underlay Device ┆ Key Provider ┆ Extra Options    ┆ Status        │
+╞════════╪═══════════════════╪═════════════════╪══════════════╪══════════════════╪═══════════════╡
+│ data0  ┆ /dev/mapper/data0 ┆ /dev/nvme1n1p1  ┆ otp          ┆ auto_open = true ┆ ReadyToOpen   │
+│        ┆                   ┆                 ┆              ┆ makefs = "ext4"  ┆               │
+│        ┆                   ┆                 ┆              ┆ integrity = true ┆               │
+╰────────┴───────────────────┴─────────────────┴──────────────┴──────────────────┴───────────────╯
 ```
 
 ### Step 6: Mount and Use

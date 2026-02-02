@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use dialoguer::{console::Term, Confirm};
 
-use crate::cli::InitOptions;
+use crate::{cli::InitOptions, cmd::show::VolumeStatusKind};
 use cryptpilot::{
     fs::luks2::TempLuksVolume,
     provider::{IntoProvider, KeyProvider},
@@ -54,12 +54,27 @@ async fn persistent_disk_init(
     volume_config: &VolumeConfig,
     key_provider: &impl KeyProvider,
 ) -> Result<()> {
-    if cryptpilot::fs::luks2::is_initialized(&volume_config.dev).await?
-        && !init_options.force_reinit
-    {
-        bail!("The device {:?} is already initialized. Use '--force-reinit' to force re-initialize the volume.", volume_config.dev);
+    let status = volume_config.determine_status().await;
+    match status.kind {
+        VolumeStatusKind::DeviceNotFound
+        | VolumeStatusKind::CheckFailed
+        | VolumeStatusKind::Opened => {
+            bail!(
+                "The status of device {:?} is incorrect: {:?}({})",
+                volume_config.dev,
+                status.kind,
+                status.description
+            );
+        }
+        VolumeStatusKind::RequiresInit => {
+            // This is expected, continue with initialization
+        }
+        VolumeStatusKind::ReadyToOpen => {
+            if !init_options.force_reinit {
+                bail!("The device {:?} is already initialized. Use '--force-reinit' to force re-initialize the volume.", volume_config.dev);
+            }
+        }
     }
-
     if !init_options.yes {
         if !Term::stderr().is_term() {
             bail!("Standard error is not a terminal. Please use '--yes' to confirm the operation in non-interactive mode.");

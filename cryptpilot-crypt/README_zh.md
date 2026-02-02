@@ -93,46 +93,45 @@ cryptpilot-crypt show data0 --json
 
 表格输出示例：
 ```
-╭────────┬───────────────────┬─────────────────┬──────────────┬──────────────────┬──────────────┬────────╮
-│ Volume ┆ Volume Path       ┆ Underlay Device ┆ Key Provider ┆ Extra Options    ┆ Initialized  ┆ Opened │
-╞════════╪═══════════════════╪═════════════════╪══════════════╪══════════════════╪══════════════╪════════╡
-│ data0  ┆ /dev/mapper/data0 ┆ /dev/nvme1n1p1  ┆ otp          ┆ auto_open = true ┆ Not Required ┆ True   │
-│        ┆                   ┆                 ┆              ┆ makefs = "ext4"  ┆              ┆        │
-│        ┆                   ┆                 ┆              ┆ integrity = true ┆              ┆        │
-╰────────┴───────────────────┴─────────────────┴──────────────┴──────────────────┴──────────────┴────────╯
+╭────────┬───────────────────┬─────────────────┬──────────────┬──────────────────┬───────────────╮
+│ Volume ┆ Volume Path       ┆ Underlay Device ┆ Key Provider ┆ Extra Options    ┆ Status        │
+╞════════╪═══════════════════╪═════════════════╪══════════════╪══════════════════╪═══════════════╡
+│ data0  ┆ /dev/mapper/data0 ┆ /dev/nvme1n1p1  ┆ otp          ┆ auto_open = true ┆ ReadyToOpen   │
+│        ┆                   ┆                 ┆              ┆ makefs = "ext4"  ┆               │
+│        ┆                   ┆                 ┆              ┆ integrity = true ┆               │
+╰────────┴───────────────────┴─────────────────┴──────────────┴──────────────────┴───────────────╯
 ```
 
 JSON 输出示例：
 ```json
-[
-  {
-    "volume": "data0",
-    "volume_path": "/dev/mapper/data0",
-    "underlay_device": "/dev/nvme1n1p1",
-    "device_exists": true,
-    "key_provider": "otp",
-    "extra_options": {
-      "auto_open": true,
-      "makefs": "ext4",
-      "integrity": true
-    },
-    "needs_initialize": false,
-    "initialized": true,
-    "opened": true
-  }
-]
+{
+  "volumes": [
+    {
+      "volume": "data0",
+      "volume_path": "/dev/mapper/data0",
+      "underlay_device": "/dev/nvme1n1p1",
+      "key_provider": "otp",
+      "extra_options": {
+        "auto_open": true,
+        "makefs": "ext4",
+        "integrity": true
+      },
+      "status": "ReadyToOpen",
+      "description": "Volume 'data0' uses otp key provider (temporary volume) and is ready to open"
+    }
+  ]
+}
 ```
 
 JSON 输出字段说明：
+- `volumes`：卷状态对象数组
 - `volume`：卷名称
 - `volume_path`：解密后的卷路径（始终显示 mapper 路径）
 - `underlay_device`：底层加密块设备路径
-- `device_exists`：底层设备是否存在
 - `key_provider`：密钥提供者类型（如 `otp`、`kbs`、`kms`、`oidc`、`exec`）
 - `extra_options`：额外的卷配置（序列化失败时为 `null`）
-- `needs_initialize`：卷是否需要初始化（临时卷如 OTP 为 false，持久化卷为 true）
-- `initialized`：LUKS2 是否已初始化（设备不存在或初始化检查失败时为 false，设备存在且卷无需初始化时为 true，持久化卷为实际初始化状态）
-- `opened`：卷当前是否已打开/解密
+- `status`：卷的当前状态（`DeviceNotFound`、`CheckFailed`、`RequiresInit`、`ReadyToOpen`、`Opened`）
+- `description`：当前状态的人类可读描述
 
 ### `cryptpilot-crypt init`
 
