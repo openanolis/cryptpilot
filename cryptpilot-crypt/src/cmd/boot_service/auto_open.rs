@@ -27,7 +27,7 @@ pub async fn setup_user_provided_volumes(_boot_service_options: &BootServiceOpti
         }
 
         tracing::info!(
-            "Setting up mapping for volume {} from device {}",
+            "Setting up mapping for volume {} from device {:?}",
             volume_config.volume,
             volume_config.dev
         );

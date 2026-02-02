@@ -20,27 +20,7 @@ use super::block::blktrace::BlkTrace;
 
 #[async_trait]
 pub trait MakeFs {
-    async fn makefs_if_empty(
-        device_path: impl AsRef<Path> + Send + Sync,
-        fs_type: MakeFsType,
-    ) -> Result<()> {
-        let device_path = device_path.as_ref();
-
-        if is_empty_disk(device_path).await? {
-            tracing::info!(
-                "The device {device_path:?} is uninitialized (empty) and is ok to be initialized with mkfs"
-            );
-            Self::mkfs_on_no_wipe_volume(device_path, fs_type).await?
-        } else {
-            tracing::info!(
-                "The device {device_path:?} is not empty and maybe some data on it, so we won't touch it"
-            );
-        }
-
-        Ok(())
-    }
-
-    async fn mkfs_on_no_wipe_volume(
+    async fn force_mkfs(
         device_path: impl AsRef<Path> + Send + Sync,
         fs_type: MakeFsType,
     ) -> Result<()>;
@@ -50,7 +30,7 @@ pub struct NormalMakeFs;
 
 #[async_trait]
 impl MakeFs for NormalMakeFs {
-    async fn mkfs_on_no_wipe_volume(
+    async fn force_mkfs(
         device_path: impl AsRef<Path> + Send + Sync,
         fs_type: MakeFsType,
     ) -> Result<()> {
@@ -75,7 +55,7 @@ pub struct IntegrityNoWipeMakeFs;
 
 #[async_trait]
 impl MakeFs for IntegrityNoWipeMakeFs {
-    async fn mkfs_on_no_wipe_volume(
+    async fn force_mkfs(
         device_path: impl AsRef<Path> + Send + Sync,
         fs_type: MakeFsType,
     ) -> Result<()> {
@@ -101,7 +81,7 @@ impl MakeFs for IntegrityNoWipeMakeFs {
 
         // Do some operations to the dummy device
         {
-            NormalMakeFs::makefs_if_empty(&dummy_device_path, fs_type).await?;
+            NormalMakeFs::force_mkfs(&dummy_device_path, fs_type).await?;
 
             // TODO: refact blkid with libblkid-rs crate
             Command::new("blkid")
@@ -187,7 +167,7 @@ impl MakeFs for IntegrityNoWipeMakeFs {
     }
 }
 
-pub async fn makefs_if_empty(
+pub async fn force_mkfs(
     volume_path: &Path,
     makefs: &MakeFsType,
     integrity: IntegrityType,
@@ -202,9 +182,9 @@ pub async fn makefs_if_empty(
         integrity
     );
     match integrity {
-        IntegrityType::None => NormalMakeFs::makefs_if_empty(&volume_path, makefs).await,
+        IntegrityType::None => NormalMakeFs::force_mkfs(&volume_path, makefs).await,
         IntegrityType::Journal | IntegrityType::NoJournal => {
-            IntegrityNoWipeMakeFs::makefs_if_empty(&volume_path, makefs).await
+            IntegrityNoWipeMakeFs::force_mkfs(&volume_path, makefs).await
         }
     }
     .with_context(|| format!("Failed to initialize {makefs} fs on volume {volume_path:?}"))?;
@@ -216,18 +196,33 @@ pub async fn is_empty_disk(device_path: &Path) -> Result<bool> {
         .arg("-p")
         .arg(device_path)
         .env("LC_ALL", "C")
-        .run_with_status_checker(|code, stdout, _| {
+        .run_with_status_checker(|code, stdout, stderr| {
             match code {
-                0 => Ok(false), // Found some signatures
-                2 => Ok(true),  // No signatures found
+                0 => {
+                    // Found signatures, check if they are ext4, xfs, vfat or swap
+                    let output = String::from_utf8_lossy(&stdout);
+                    let has_fs = output.contains("TYPE=\"ext4\"")
+                        || output.contains("TYPE=\"xfs\"")
+                        || output.contains("TYPE=\"vfat\"")
+                        || output.contains("TYPE=\"swap\"");
+                    Ok(!has_fs) // Return true if NOT one of these filesystems (empty or other fs)
+                }
+                2 => Ok(true), // No signatures found
                 _ => {
                     let stdout = String::from_utf8_lossy(&stdout);
-                    if stdout.contains("Input/output error") {
+                    let stderr = String::from_utf8_lossy(&stderr);
+                    if stdout.contains("Input/output error")
+                        || stderr.contains("Input/output error")
+                    {
                         // If we can't even read the disk, treat it as "uninitialized"
-                        // to allow mkfs to try and fix it (matching original logic).
                         Ok(true)
                     } else {
-                        bail!("blkid failed with exit code {}", code)
+                        bail!(
+                            "blkid failed with exit code {}: stdout={}, stderr={}",
+                            code,
+                            stdout,
+                            stderr
+                        )
                     }
                 }
             }

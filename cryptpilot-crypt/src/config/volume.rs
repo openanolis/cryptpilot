@@ -13,7 +13,7 @@ pub struct VolumeConfig {
     pub volume: String,
 
     /// The path to the underlying encrypted device.
-    pub dev: String,
+    pub dev: PathBuf,
 
     /// Extra configuration for the volume.
     #[serde(flatten)]

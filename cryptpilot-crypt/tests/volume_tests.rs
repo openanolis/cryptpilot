@@ -21,7 +21,7 @@ use cryptpilot::{
     types::MakeFsType,
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use block_devs::BlckExt as _;
 use cgroups_rs::{cgroup_builder::CgroupBuilder, Cgroup, CgroupPid};
@@ -141,12 +141,7 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
         DummyDevice::setup_on_tmpfs(100 * 1024 * 1024 * 1024 /* 100G */).await?
     };
 
-    volume_config.dev = dummy_device
-        .path()?
-        .into_os_string()
-        .to_str()
-        .context("Cannot convert dummy device path to str")?
-        .to_owned();
+    volume_config.dev = dummy_device.path()?;
 
     set_volume_config_source(InMemoryVolumeConfigSource {
         volumes: vec![volume_config.clone()],
@@ -165,6 +160,13 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
 
     match &volume_config.extra_config.makefs {
         Some(MakeFsType::Swap) => {
+            // Just Open it and checking
+            open_then(&volume_config, |volume_config| async move {
+                assert!(!cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?);
+                Ok(())
+            })
+            .await?;
+
             // Open and swapon
             open_and_swapon(&volume_config, |volume_config| async move {
                 if use_external_suite {
@@ -211,6 +213,13 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
             .await?;
         }
         Some(_) => {
+            // Just Open it and checking
+            open_then(&volume_config, |volume_config| async move {
+                assert!(!cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?);
+                Ok(())
+            })
+            .await?;
+
             // Open and write file
             open_and_mount(&volume_config, |_, mount_dir: PathBuf| async move {
                 let mut file = File::options()
@@ -268,10 +277,20 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
             }
         }
         None => {
-            // Just Open it and do nothing
-            open_then(&volume_config, |_| async move { Ok(()) }).await?;
+            // Just Open it and do nothing but checking
+            open_then(&volume_config, |volume_config| async move {
+                // Add assertion to check if disk is empty
+                assert!(cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?);
+                Ok(())
+            })
+            .await?;
             // Test again
-            open_then(&volume_config, |_| async move { Ok(()) }).await?;
+            open_then(&volume_config, |volume_config| async move {
+                // Add assertion to check if disk is still empty after re-open
+                assert!(cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?);
+                Ok(())
+            })
+            .await?;
         }
     }
 

@@ -74,7 +74,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
         tracing::info!("Setting up dm-crypt for rootfs volume");
         cryptpilot::fs::luks2::open_with_check_passphrase(
             ROOTFS_DECRYPTED_LAYER_NAME,
-            ROOTFS_LOGICAL_VOLUME,
+            Path::new(ROOTFS_LOGICAL_VOLUME),
             &passphrase,
             IntegrityType::None,
         )
@@ -106,8 +106,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
 
     {
         // Check if the data logical volume exists
-        let create_data_lv = !Path::new(DATA_LOGICAL_VOLUME).exists();
-        if create_data_lv {
+        if !Path::new(DATA_LOGICAL_VOLUME).exists() {
             tracing::info!(
                 "Data logical volume does not exist, assume it is first time boot and create it."
             );
@@ -150,19 +149,20 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
             IntegrityType::None
         };
 
-        let recreate_data_lv_content =
-            create_data_lv || matches!(provider.volume_type(), VolumeType::Temporary);
+        let data_logical_volume_dev = Path::new(DATA_LOGICAL_VOLUME);
+        let recreate_data_lv_content = matches!(provider.volume_type(), VolumeType::Temporary)
+            || !cryptpilot::fs::luks2::is_initialized(data_logical_volume_dev).await?;
         if recreate_data_lv_content {
             // Create a LUKS volume on it
             tracing::info!("Creating LUKS2 on data volume");
-            cryptpilot::fs::luks2::format(DATA_LOGICAL_VOLUME, &passphrase, integrity).await?;
+            cryptpilot::fs::luks2::format(data_logical_volume_dev, &passphrase, integrity).await?;
         }
 
         // TODO: support change size of the LUKS2 volume and inner ext4 file system
         tracing::info!("Opening data volume");
         cryptpilot::fs::luks2::open_with_check_passphrase(
             DATA_LAYER_NAME,
-            DATA_LOGICAL_VOLUME,
+            data_logical_volume_dev,
             &passphrase,
             integrity,
         )
@@ -171,7 +171,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
         if recreate_data_lv_content {
             // Create a Ext4 fs on it
             tracing::info!("Creating ext4 fs on data volume");
-            cryptpilot::fs::mkfs::makefs_if_empty(
+            cryptpilot::fs::mkfs::force_mkfs(
                 Path::new(DATA_LAYER_DEVICE),
                 &MakeFsType::Ext4,
                 integrity,
@@ -180,10 +180,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
         }
 
         // Mark the volume as fully initialized
-        cryptpilot::fs::luks2::mark_volume_as_initialized(std::path::Path::new(
-            DATA_LOGICAL_VOLUME,
-        ))
-        .await?;
+        cryptpilot::fs::luks2::mark_volume_as_initialized(Path::new(DATA_LOGICAL_VOLUME)).await?;
     }
 
     tracing::info!("Both rootfs volume and data volume are ready");

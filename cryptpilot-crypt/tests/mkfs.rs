@@ -23,6 +23,19 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::process::Command;
 
+#[cfg(test)]
+#[ctor::ctor]
+fn init() {
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "debug".into());
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+}
+
 struct InMemoryVolumeConfigSource {
     volumes: Vec<VolumeConfig>,
 }
@@ -47,7 +60,7 @@ async fn test_mkfs_with_integrity() -> Result<()> {
 
     let volume_config = VolumeConfig {
         volume: "mkfs_with_integrity".to_owned(),
-        dev: dummy_device.path().unwrap().to_str().unwrap().to_owned(),
+        dev: dummy_device.path().unwrap(),
         extra_config: ExtraConfig {
             auto_open: Some(true),
             makefs: Some(MakeFsType::Ext4),

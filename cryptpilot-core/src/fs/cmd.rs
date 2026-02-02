@@ -119,7 +119,10 @@ impl CheckCommandOutput for Command {
             let code = output.status.code();
 
             match code {
-                Some(code) => f(code, stdout.clone(), stderr.clone()),
+                Some(code) => {
+                    tracing::trace!(cmd=?self.as_std(), stdout=String::from_utf8_lossy(&stdout).to_string(), stderr=String::from_utf8_lossy(&stderr).to_string(), "cmd exited with code {}", code);
+                    f(code, stdout.clone(), stderr.clone())
+                },
                 None => Err(anyhow!("killed by signal")),
             }
             .with_context(|| {

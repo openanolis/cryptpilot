@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -54,8 +54,8 @@ pub trait PrintAsJson {
 #[derive(Serialize)]
 struct VolumeStatus {
     volume: String,
-    volume_path: String,
-    underlay_device: String,
+    volume_path: PathBuf,
+    underlay_device: PathBuf,
     device_exists: bool,
     key_provider: String,
     key_provider_options: serde_json::Value,
@@ -71,7 +71,7 @@ impl VolumeStatus {
         let dev_exist = Path::new(&volume_config.dev).exists();
         let is_open = cryptpilot::fs::luks2::is_active(&volume_config.volume);
 
-        let volume_path = volume_config.volume_path().display().to_string();
+        let volume_path = volume_config.volume_path();
 
         let key_provider = serde_variant::to_variant_name(&volume_config.encrypt.key_provider)
             .unwrap_or("unknown")
@@ -157,15 +157,15 @@ impl PrintAsTable for [VolumeConfig] {
                 if !status.device_exists {
                     Cell::new("N/A").fg(Color::Yellow)
                 } else if status.opened {
-                    Cell::new(&status.volume_path).fg(Color::Green)
+                    Cell::new(status.volume_path.to_string_lossy()).fg(Color::Green)
                 } else {
                     Cell::new("<not opened>").fg(Color::Yellow)
                 },
                 if status.device_exists {
-                    Cell::new(&status.underlay_device)
+                    Cell::new(status.underlay_device.to_string_lossy())
                 } else {
-                    tracing::warn!("Device {} does not exist", status.underlay_device);
-                    Cell::new(format!("{} <not exist>", status.underlay_device)).fg(Color::Red)
+                    tracing::warn!("Device {:?} does not exist", status.underlay_device);
+                    Cell::new(format!("{:?} <not exist>", status.underlay_device)).fg(Color::Red)
                 },
                 Cell::new(&status.key_provider),
                 {

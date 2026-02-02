@@ -21,7 +21,7 @@ const LUKS2_VOLUME_KEY_SIZE_BIT_WITHOUT_INTEGRITY: usize = 512;
 const LUKS2_SECTOR_SIZE: u32 = 4096;
 const LUKS2_SUBSYSTEM_NAME: &str = "cryptpilot";
 
-async fn get_luks2_subsystem(dev: &str) -> Result<Option<String>> {
+async fn get_luks2_subsystem(dev: &Path) -> Result<Option<String>> {
     /// LUKS2 header structure according to the specification
     /// Reference: https://gitlab.com/cryptsetup/cryptsetup/-/blob/24d10f412e2ca1b0a8ed5addb1381507662a9862/lib/luks2/luks2.h
     #[repr(C, packed)]
@@ -42,8 +42,7 @@ async fn get_luks2_subsystem(dev: &str) -> Result<Option<String>> {
         padding4096: [u8; 7 * 512],
     }
 
-    let device_path = PathBuf::from(&dev);
-    let mut file = tokio::fs::File::open(&device_path).await?;
+    let mut file = tokio::fs::File::open(dev).await?;
 
     let mut header_buf = vec![0u8; std::mem::size_of::<Luks2HdrDisk>()];
     file.read_exact(&mut header_buf).await?;
@@ -81,7 +80,7 @@ async fn get_luks2_subsystem(dev: &str) -> Result<Option<String>> {
     }
 }
 
-pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType) -> Result<()> {
+pub async fn format(dev: &Path, passphrase: &Passphrase, integrity: IntegrityType) -> Result<()> {
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
@@ -137,7 +136,7 @@ pub async fn format(dev: &str, passphrase: &Passphrase, integrity: IntegrityType
         Ok::<_, anyhow::Error>(())
     })
     .await?
-    .with_context(|| format!("Failed to format {dev} as LUKS2 volume"))?;
+    .with_context(|| format!("Failed to format {dev:?} as LUKS2 volume"))?;
 
     Ok(())
 }
@@ -179,7 +178,7 @@ pub async fn mark_volume_as_initialized(dev: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn check_passphrase(dev: &str, passphrase: &Passphrase) -> Result<(), anyhow::Error> {
+pub async fn check_passphrase(dev: &Path, passphrase: &Passphrase) -> Result<(), anyhow::Error> {
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
@@ -207,14 +206,14 @@ pub async fn check_passphrase(dev: &str, passphrase: &Passphrase) -> Result<(), 
         Ok::<_, anyhow::Error>(())
     })
     .await?
-    .with_context(|| format!("Failed to check passphrase for device {dev}"))?;
+    .with_context(|| format!("Failed to check passphrase for device {dev:?}"))?;
 
     Ok(())
 }
 
 pub async fn open_with_check_passphrase(
     volume: &str,
-    dev: &str,
+    dev: &Path,
     passphrase: &Passphrase,
     integrity: IntegrityType,
 ) -> Result<(), anyhow::Error> {
@@ -257,11 +256,11 @@ pub async fn open_with_check_passphrase(
     Ok(())
 }
 
-pub async fn is_initialized(dev: &str) -> Result<bool> {
+pub async fn is_initialized(dev: &Path) -> Result<bool> {
     is_a_cryptpilot_initialized_luks2_volume(dev).await
 }
 
-async fn is_a_cryptpilot_initialized_luks2_volume(dev: &str) -> Result<bool> {
+async fn is_a_cryptpilot_initialized_luks2_volume(dev: &Path) -> Result<bool> {
     let verbose = get_verbose().await;
     let device_path = PathBuf::from(&dev);
 
@@ -283,7 +282,7 @@ async fn is_a_cryptpilot_initialized_luks2_volume(dev: &str) -> Result<bool> {
         Ok::<_, anyhow::Error>(is_luks2)
     })
     .await?
-    .with_context(|| format!("Failed to check luks2 initialization status of device {dev}"))?;
+    .with_context(|| format!("Failed to check luks2 initialization status of device {dev:?}"))?;
 
     if !is_luks2 {
         return Ok(false);
@@ -292,7 +291,7 @@ async fn is_a_cryptpilot_initialized_luks2_volume(dev: &str) -> Result<bool> {
     // Check if the subsystem is set to "cryptpilot"
     let subsystem_is_set = get_luks2_subsystem(dev)
         .await
-        .with_context(|| format!("Failed to get LUKS2 device subsystem for {dev}"))?
+        .with_context(|| format!("Failed to get LUKS2 device subsystem for {dev:?}"))?
         .map(|subsystem| subsystem == LUKS2_SUBSYSTEM_NAME)
         .unwrap_or(false);
 
@@ -303,7 +302,7 @@ pub fn is_active(volume: &str) -> bool {
     PathBuf::from(format!("/dev/mapper/{}", volume)).exists()
 }
 
-pub async fn is_dev_in_use(dev: &str) -> Result<bool> {
+pub async fn is_dev_in_use(dev: &Path) -> Result<bool> {
     let mut options = OpenOptions::new();
     options.read(true);
     options.custom_flags(libc::O_EXCL);
@@ -342,7 +341,7 @@ pub struct TempLuksVolume(String);
 
 impl TempLuksVolume {
     pub async fn open(
-        dev: &str,
+        dev: &Path,
         passphrase: &Passphrase,
         integrity: IntegrityType,
     ) -> Result<Self> {

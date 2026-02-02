@@ -61,7 +61,7 @@ impl super::super::Command for ConfigCheckCommand {
                 // Check if the device exists
                 if !Path::new(&volume.dev).exists() {
                     continue_or_throw!(
-                        "The device \"{}\" for volume \"{}\" does not exist",
+                        "The device {:?} for volume \"{}\" does not exist",
                         volume.dev,
                         volume.volume
                     );
@@ -71,13 +71,13 @@ impl super::super::Command for ConfigCheckCommand {
                         .await
                         .with_context(|| {
                             format!(
-                                "Failed to check if the device \"{}\" is initialized",
+                                "Failed to check if the device {:?} is initialized",
                                 volume.dev
                             )
                         }) {
                         Ok(initialized) => {
                             if volume.extra_config.auto_open == Some(true) && !initialized {
-                                continue_or_throw!("The volume \"{}\" is set to auto open but the device \"{}\" is not initialized", volume.volume, volume.dev);
+                                continue_or_throw!("The volume \"{}\" is set to auto open but the device {:?} is not initialized", volume.volume, volume.dev);
                             }
                             dev_is_initialized = initialized;
                         }

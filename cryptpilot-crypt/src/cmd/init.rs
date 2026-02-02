@@ -57,7 +57,7 @@ async fn persistent_disk_init(
     if cryptpilot::fs::luks2::is_initialized(&volume_config.dev).await?
         && !init_options.force_reinit
     {
-        bail!("The device {} is already initialized. Use '--force-reinit' to force re-initialize the volume.", volume_config.dev);
+        bail!("The device {:?} is already initialized. Use '--force-reinit' to force re-initialize the volume.", volume_config.dev);
     }
 
     if !init_options.yes {
@@ -67,7 +67,7 @@ async fn persistent_disk_init(
 
         if !Confirm::new()
             .with_prompt(format!(
-                "All of the data on {} will be lost. Do you want to continue?",
+                "All of the data on {:?} will be lost. Do you want to continue?",
                 volume_config.dev
             ))
             .default(false)
@@ -78,7 +78,7 @@ async fn persistent_disk_init(
     }
 
     if cryptpilot::fs::luks2::is_dev_in_use(&volume_config.dev).await? {
-        bail!("The device {} is currently in use", volume_config.dev);
+        bail!("The device {:?} is currently in use", volume_config.dev);
     }
 
     tracing::info!("Fetching passphrase for volume {}", volume_config.volume);
@@ -87,7 +87,7 @@ async fn persistent_disk_init(
         .await
         .context("Failed to get passphrase")?;
 
-    tracing::info!("Formatting {} as LUKS2 volume now", volume_config.dev);
+    tracing::info!("Formatting {:?} as LUKS2 volume now", volume_config.dev);
     let integrity = match volume_config.extra_config.integrity {
         Some(true) => IntegrityType::Journal,
         Some(false) | None => IntegrityType::None,
@@ -101,7 +101,7 @@ async fn persistent_disk_init(
             "Initializing {makefs} fs on volume {}",
             volume_config.volume
         );
-        cryptpilot::fs::mkfs::makefs_if_empty(&tmp_volume.volume_path(), makefs, integrity).await?;
+        cryptpilot::fs::mkfs::force_mkfs(&tmp_volume.volume_path(), makefs, integrity).await?;
     }
 
     // Mark the volume as fully initialized

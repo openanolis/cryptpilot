@@ -40,7 +40,7 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig, check_fs: bo
         return Ok(());
     }
     if cryptpilot::fs::luks2::is_dev_in_use(&volume_config.dev).await? {
-        bail!("The device {} is currently in use", volume_config.dev);
+        bail!("The device {:?} is currently in use", volume_config.dev);
     }
 
     let key_provider = volume_config.encrypt.key_provider.clone().into_provider();
@@ -81,7 +81,7 @@ async fn temporary_disk_open(
         .context("Failed to get passphrase")?;
     tracing::info!("The temporary passphrase generated");
 
-    tracing::info!("Formatting {} as LUKS2 volume now", volume_config.dev);
+    tracing::info!("Formatting {:?} as LUKS2 volume now", volume_config.dev);
     let integrity = match volume_config.extra_config.integrity {
         Some(true) => IntegrityType::NoJournal,
         Some(false) | None => IntegrityType::None,
@@ -98,7 +98,7 @@ async fn temporary_disk_open(
     .await?;
 
     if let Some(makefs) = &volume_config.extra_config.makefs {
-        match cryptpilot::fs::mkfs::makefs_if_empty(&volume_config.volume_path(), makefs, integrity)
+        match cryptpilot::fs::mkfs::force_mkfs(&volume_config.volume_path(), makefs, integrity)
             .await
         {
             Ok(_) => (),
@@ -123,7 +123,7 @@ async fn persistent_disk_open(
 ) -> Result<()> {
     if !cryptpilot::fs::luks2::is_initialized(&volume_config.dev).await? {
         bail!(
-            "{} is not a valid LUKS2 volume, should be initialized before opening it",
+            "{:?} is not a valid LUKS2 volume, should be initialized before opening it",
             volume_config.dev
         );
     }
