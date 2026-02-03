@@ -104,27 +104,24 @@ cryptpilot-crypt show data0 --json
 
 JSON 输出示例：
 ```json
-{
-  "volumes": [
-    {
-      "volume": "data0",
-      "volume_path": "/dev/mapper/data0",
-      "underlay_device": "/dev/nvme1n1p1",
-      "key_provider": "otp",
-      "extra_options": {
-        "auto_open": true,
-        "makefs": "ext4",
-        "integrity": true
-      },
-      "status": "ReadyToOpen",
-      "description": "Volume 'data0' uses otp key provider (temporary volume) and is ready to open"
-    }
-  ]
-}
+[
+  {
+    "volume": "data0",
+    "volume_path": "/dev/mapper/data0",
+    "underlay_device": "/dev/nvme1n1p1",
+    "key_provider": "otp",
+    "extra_options": {
+      "auto_open": true,
+      "makefs": "ext4",
+      "integrity": true
+    },
+    "status": "ReadyToOpen",
+    "description": "Volume 'data0' uses otp key provider (temporary volume) and is ready to open"
+  }
+]
 ```
 
 JSON 输出字段说明：
-- `volumes`：卷状态对象数组
 - `volume`：卷名称
 - `volume_path`：解密后的卷路径（始终显示 mapper 路径）
 - `underlay_device`：底层加密块设备路径

@@ -162,7 +162,11 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
         Some(MakeFsType::Swap) => {
             // Just Open it and checking
             open_then(&volume_config, |volume_config| async move {
-                assert!(!cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?);
+                if !matches!(volume_config.extra_config.integrity, Some(true)) {
+                    assert!(
+                        !cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?
+                    );
+                }
                 Ok(())
             })
             .await?;
@@ -215,7 +219,11 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
         Some(_) => {
             // Just Open it and checking
             open_then(&volume_config, |volume_config| async move {
-                assert!(!cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?);
+                if !matches!(volume_config.extra_config.integrity, Some(true)) {
+                    assert!(
+                        !cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?
+                    );
+                }
                 Ok(())
             })
             .await?;

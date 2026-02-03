@@ -89,12 +89,6 @@ pub struct ShowVolume {
     status: VolumeStatus,
 }
 
-/// Collection of volume statuses for JSON output
-#[derive(Serialize)]
-struct VolumesCollection {
-    volumes: Vec<ShowVolume>,
-}
-
 impl ShowVolume {
     /// Build volume status from config
     async fn from_config(volume_config: &VolumeConfig) -> Self {
@@ -218,8 +212,7 @@ impl PrintAsJson for [VolumeConfig] {
             volumes.push(ShowVolume::from_config(volume_config).await);
         }
 
-        let volumes_collection = VolumesCollection { volumes };
-        let json = serde_json::to_string_pretty(&volumes_collection)?;
+        let json = serde_json::to_string_pretty(&volumes)?;
         println!("{}", json);
 
         Ok(())

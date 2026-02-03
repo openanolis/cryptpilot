@@ -104,27 +104,24 @@ Example table output:
 
 Example JSON output:
 ```json
-{
-  "volumes": [
-    {
-      "volume": "data0",
-      "volume_path": "/dev/mapper/data0",
-      "underlay_device": "/dev/nvme1n1p1",
-      "key_provider": "otp",
-      "extra_options": {
-        "auto_open": true,
-        "makefs": "ext4",
-        "integrity": true
-      },
-      "status": "ReadyToOpen",
-      "description": "Volume 'data0' uses otp key provider (temporary volume) and is ready to open"
-    }
-  ]
-}
+[
+  {
+    "volume": "data0",
+    "volume_path": "/dev/mapper/data0",
+    "underlay_device": "/dev/nvme1n1p1",
+    "key_provider": "otp",
+    "extra_options": {
+      "auto_open": true,
+      "makefs": "ext4",
+      "integrity": true
+    },
+    "status": "ReadyToOpen",
+    "description": "Volume 'data0' uses otp key provider (temporary volume) and is ready to open"
+  }
+]
 ```
 
 JSON output fields:
-- `volumes`: Array of volume status objects
 - `volume`: Volume name
 - `volume_path`: Path to the decrypted volume (always shows the mapper path)
 - `underlay_device`: Underlying encrypted block device path
