@@ -133,10 +133,76 @@ jobs:
           cryptpilot-crypt --version
           cryptpilot-verity --version
 
+  # Integration tests for cryptpilot-convert (4 parallel jobs via matrix)
+  test-convert:
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [uki-encrypted, uki-noenc, grub-encrypted, grub-noenc]
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Load NBD kernel module
+        run: |
+          echo "Loading nbd module on host..."
+          sudo modprobe nbd max_part=16
+          lsmod | grep nbd
+
+      - name: Start test container
+        run: |
+          docker run -d \
+            --name test-container \
+            --privileged \
+            --ipc=host \
+            -v /dev:/dev \
+            -v /run/udev/control:/run/udev/control \
+            -v ${{ github.workspace }}:/workspace \
+            --tmpfs /tmp:exec,size=20G \
+            alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest \
+            sleep infinity
+
+      - name: Setup container environment
+        run: |
+          docker exec test-container bash -c "
+            set -e
+            sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+            yum update -y
+            yum install -y git make
+          "
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: rpm-packages-x86_64
+          path: ./rpm-packages/
+
+      - name: Install RPM packages
+        run: |
+          docker exec test-container bash -c "
+            yum install -y /workspace/rpm-packages/RPMS/*/cryptpilot-fde-[0-9]*.rpm
+            cryptpilot-fde --version
+          "
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          path: repo
+
+      - name: Run convert test
+        run: |
+          docker exec -w /workspace/repo test-container bash -c "
+            make run-convert-test-case CASE=${{ matrix.case }}
+          "
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f test-container || true
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, test-convert]
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4

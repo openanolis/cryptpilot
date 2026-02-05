@@ -152,6 +152,18 @@ install-test-depend:
 	which prove || { yum install -y perl-Test-Harness ; }
 	which stress-ng || { yum install -y http://mirrors.openanolis.cn/anolis/8/AppStream/$(ARCH)/os/Packages/stress-ng-0.17.08-2.0.1.an8.$(ARCH).rpm ; }
 
+.PHONY: install-convert-test-depend
+install-convert-test-depend:
+	yum install -y wget qemu-img cryptsetup lvm2 parted e2fsprogs util-linux libguestfs-tools-c
+
+.PHONY: run-convert-test
+run-convert-test: install-convert-test-depend
+	bash tests/test-convert.sh --all
+
+.PHONY: run-convert-test-case
+run-convert-test-case: install-convert-test-depend
+	bash tests/test-convert.sh --case $(CASE)
+
 .PHONE: shellcheck
 shellcheck:
 	@command -v shellcheck >&- || { \
