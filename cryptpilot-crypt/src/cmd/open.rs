@@ -58,7 +58,11 @@ pub async fn open_for_specific_volume(volume_config: &VolumeConfig, check_fs: bo
     // Check if filesystem is ready
     if check_fs
         && volume_config.extra_config.makefs.is_some()
-        && cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?
+        && !cryptpilot::fs::mkfs::has_valuable_data(
+            &volume_config.volume_path(),
+            volume_config.extra_config.makefs,
+        )
+        .await?
     {
         // TODO: replace with RAII here
         let _ = cryptpilot::fs::luks2::close(&volume_config.volume).await;
