@@ -191,7 +191,12 @@ pub async fn force_mkfs(
     Ok(())
 }
 
-pub async fn is_empty_disk(device_path: &Path) -> Result<bool> {
+/// Checks whether the device contains valuable data (i.e., a known filesystem).
+///
+/// - Partition tables (e.g., PTTYPE="atari") are ignored and treated as "no valuable data".
+/// - If `fs_hint` is `Some`, and the expected filesystem is not detected, returns an error.
+/// - If `fs_hint` is `None`, returns `true` if something detected on the device.
+pub async fn has_valuable_data(device_path: &Path, fs_hint: Option<MakeFsType>) -> Result<bool> {
     Command::new("blkid")
         .arg("-p")
         .arg(device_path)
@@ -199,31 +204,54 @@ pub async fn is_empty_disk(device_path: &Path) -> Result<bool> {
         .run_with_status_checker(|code, stdout, stderr| {
             match code {
                 0 => {
-                    // Found signatures, check if they are ext4, xfs, vfat or swap
                     let output = String::from_utf8_lossy(&stdout);
-                    let has_fs = output.contains("TYPE=\"ext4\"")
-                        || output.contains("TYPE=\"xfs\"")
-                        || output.contains("TYPE=\"vfat\"")
-                        || output.contains("TYPE=\"swap\"");
-                    Ok(!has_fs) // Return true if NOT one of these filesystems (empty or other fs)
+
+                    match fs_hint {
+                        Some(expected_fs) => {
+                            let expected_str = match expected_fs {
+                                MakeFsType::Swap => "swap",
+                                MakeFsType::Ext4 => "ext4",
+                                MakeFsType::Xfs => "xfs",
+                                MakeFsType::Vfat => "vfat",
+                            };
+
+                            if output.contains(&format!("TYPE=\"{}\"", expected_str)) {
+                                Ok(true)
+                            } else {
+                                // Something else detected (may have partition table, unknown FS, etc.)
+                                bail!(
+                                    "Something else on {device_path:?} is detected, but expected '{expected_str}', found blkid output '{}'",
+                                    output.trim()
+                                );
+                            }
+                        }
+                        None => {
+                            // Check if it's mistakenly identified as PTTYPE="atari" partition table.
+                            // See: https://bugs.launchpad.net/ubuntu/+source/util-linux/+bug/2015355
+                            if output.contains("PTTYPE=\"atari\"") {
+                                tracing::debug!("Found PTTYPE=\"atari\" partition table on {device_path:?}, treating as no valuable data");
+                                Ok(false)
+                            }else{
+                                // Log which one was found (for debug)
+                                tracing::debug!("Found filesystem signature on {device_path:?}, blkid output: {}", output.trim());
+                                Ok(true)
+                            }
+                        }
+                    }
                 }
-                2 => Ok(true), // No signatures found
+                2 => {
+                    // No signatures found
+                    Ok(false)
+                }
                 _ => {
                     let stdout = String::from_utf8_lossy(&stdout);
                     let stderr = String::from_utf8_lossy(&stderr);
-                    if stdout.contains("Input/output error")
-                        || stderr.contains("Input/output error")
-                    {
-                        // If we can't even read the disk, treat it as "uninitialized"
-                        Ok(true)
-                    } else {
-                        bail!(
-                            "blkid failed with exit code {}: stdout={}, stderr={}",
-                            code,
-                            stdout,
-                            stderr
-                        )
-                    }
+                    bail!(
+                        "blkid failed with exit code {}: stdout='{}', stderr='{}'",
+                        code,
+                        stdout.trim(),
+                        stderr.trim()
+                    );
                 }
             }
         })

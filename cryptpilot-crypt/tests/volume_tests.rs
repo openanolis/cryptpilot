@@ -164,7 +164,11 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
             open_then(&volume_config, |volume_config| async move {
                 if !matches!(volume_config.extra_config.integrity, Some(true)) {
                     assert!(
-                        !cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?
+                        cryptpilot::fs::mkfs::has_valuable_data(
+                            &volume_config.volume_path(),
+                            volume_config.extra_config.makefs
+                        )
+                        .await?
                     );
                 }
                 Ok(())
@@ -221,7 +225,11 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
             open_then(&volume_config, |volume_config| async move {
                 if !matches!(volume_config.extra_config.integrity, Some(true)) {
                     assert!(
-                        !cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?
+                        cryptpilot::fs::mkfs::has_valuable_data(
+                            &volume_config.volume_path(),
+                            volume_config.extra_config.makefs
+                        )
+                        .await?
                     );
                 }
                 Ok(())
@@ -288,14 +296,26 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
             // Just Open it and do nothing but checking
             open_then(&volume_config, |volume_config| async move {
                 // Add assertion to check if disk is empty
-                assert!(cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?);
+                assert!(
+                    !cryptpilot::fs::mkfs::has_valuable_data(
+                        &volume_config.volume_path(),
+                        volume_config.extra_config.makefs
+                    )
+                    .await?
+                );
                 Ok(())
             })
             .await?;
             // Test again
             open_then(&volume_config, |volume_config| async move {
                 // Add assertion to check if disk is still empty after re-open
-                assert!(cryptpilot::fs::mkfs::is_empty_disk(&volume_config.volume_path()).await?);
+                assert!(
+                    !cryptpilot::fs::mkfs::has_valuable_data(
+                        &volume_config.volume_path(),
+                        volume_config.extra_config.makefs
+                    )
+                    .await?
+                );
                 Ok(())
             })
             .await?;
