@@ -1,0 +1,58 @@
+version: 1
+
+container:
+  image: "alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3@sha256:b58b364f952c99f5caa21e24172b1e2786328c4d0f2816b326b227654b623fe3"
+
+inputs:
+  vendored-source:
+    url: "https://github.com/openanolis/cryptpilot/releases/download/${GITHUB_RELEASE}/cryptpilot-${VERSION}-vendored-source.tar.gz"
+    targetPath: "/tmp/cryptpilot-${VERSION}-vendored-source.tar.gz"
+
+environment:
+  systemPackages:
+    - name: "tar"
+      version: "2:1.30-11.0.1.al8"
+    - name: "cmake"
+      version: "3.26.5-2.0.2.al8"
+    - name: "rpm-build"
+      version: "4.14.3-32.0.1.1.al8"
+    - name: "cryptsetup-devel"
+      version: "2.3.7-7.0.1.al8"
+    - name: "device-mapper-devel"
+      version: "8:1.02.181-15.0.1.al8"
+    - name: "perl-IPC-Cmd"
+      version: "2:1.02-1.1.al8"
+    - name: "protobuf-compiler"
+      version: "3.5.0-15.al8"
+    - name: "fuse3-devel"
+      version: "3.3.0-19.1.al8"
+
+  tools:
+    - name: "clang"
+      version: "15.0.7-1.0.3.al8"
+    - name: "clang-libs"
+      version: "15.0.7-1.0.3.al8"
+
+phases:
+  prepare:
+    commands:
+      - mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+      - cp "/tmp/cryptpilot-${VERSION}-vendored-source.tar.gz" /tmp/rpmbuild/SOURCES/
+      - tar -xzf /tmp/cryptpilot-${VERSION}-vendored-source.tar.gz -C /tmp/rpmbuild/SPECS --strip-components=2 cryptpilot-${VERSION}/src/cryptpilot.spec
+      # Prepare rust-1.91.1 toolchain
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
+      - echo '. "$HOME/.cargo/env"' >> ~/.bashrc
+      - rustup toolchain install 1.91.1 --profile minimal --component rustc,cargo
+      - rustup default 1.91.1
+      # Change yum source from Anolis to Alinux
+      - sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+  build:
+    commands:
+      - rpmbuild --define "_topdir /tmp/rpmbuild" -ba /tmp/rpmbuild/SPECS/cryptpilot.spec --define 'with_rustup 1'
+
+outputs:
+  - path: /tmp/rpmbuild/SRPMS/cryptpilot-${VERSION}-${RELEASE}.al8.src.rpm
+  - path: /tmp/rpmbuild/RPMS/aarch64/cryptpilot-${VERSION}-${RELEASE}.al8.aarch64.rpm
+  - path: /tmp/rpmbuild/RPMS/aarch64/cryptpilot-crypt-${VERSION}-${RELEASE}.al8.aarch64.rpm
+  - path: /tmp/rpmbuild/RPMS/aarch64/cryptpilot-fde-${VERSION}-${RELEASE}.al8.aarch64.rpm
+  - path: /tmp/rpmbuild/RPMS/aarch64/cryptpilot-verity-${VERSION}-${RELEASE}.al8.aarch64.rpm
