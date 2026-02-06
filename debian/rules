@@ -9,7 +9,8 @@ VENDOR_DIR = $(CURDIR)/vendor
 USE_OFFLINE = $(shell test -d $(VENDOR_DIR) && echo "--offline")
 
 # Extract version from Cargo.toml
-VERSION = $(shell grep -m 1 '^version =' Cargo.toml | sed 's/version = "//' | sed 's/"//')
+# Use awk to find version under [workspace.package] section
+VERSION = $(shell awk '/\[workspace\.package\]/{f=1} f && /^version = \"/{gsub(/[^0-9.]/, "", $$3); print $$3; exit}' Cargo.toml)
 
 %:
 	dh $@
