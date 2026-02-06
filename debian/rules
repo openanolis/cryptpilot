@@ -8,8 +8,21 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 VENDOR_DIR = $(CURDIR)/vendor
 USE_OFFLINE = $(shell test -d $(VENDOR_DIR) && echo "--offline")
 
+# Extract version from Cargo.toml
+# Use awk to find version under [workspace.package] section
+VERSION = $(shell awk '/\[workspace\.package\]/{f=1} f && /^version = \"/{gsub(/[^0-9.]/, "", $$3); print $$3; exit}' Cargo.toml)
+
 %:
 	dh $@
+
+override_dh_auto_configure:
+	# Auto-generate changelog from Cargo.toml version
+	@echo "Generating changelog for version $$(VERSION)"
+	@echo "cryptpilot ($$(VERSION)-1) unstable; urgency=medium" > debian/changelog
+	@echo "" >> debian/changelog
+	@echo "  * Automated build from Cargo.toml" >> debian/changelog
+	@echo "" >> debian/changelog
+	@echo " -- Auto Builder <auto@builder.example>  $$(date -R)" >> debian/changelog
 
 override_dh_auto_build:
 	# Build cryptpilot-fde
