@@ -137,6 +137,15 @@ VIRT_CMD=(
     -a "$IMAGE"
 )
 
+# Allow extra options to be passed via environment variable CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS
+# Example: CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS="--memsize 4096 --smp 4" cryptpilot-enhance ...
+if [[ -n "${CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS:-}" ]]; then
+    log::info "Appending extra virt-customize options: $CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS"
+    # Use read to safely split the variable into an array
+    read -r -a _extra_opts <<< "$CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS"
+    VIRT_CMD+=("${_extra_opts[@]}")
+fi
+
 # Helper function to append --run-command
 add_run_cmd() {
     VIRT_CMD+=(--run-command "$1")

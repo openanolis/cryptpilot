@@ -92,18 +92,31 @@ cryptpilot-enhance --mode MODE --image IMAGE_PATH [--ssh-key PUBKEY_FILE]
 
 适用于主流 CentOS/RHEL 7/8/9 镜像环境。其他发行版可能需要适配路径或包管理器命令。
 
-默认情况下，`virt-customize` 使用 libvirt 后端，这需要 libvirtd 守护进程正在运行。如果您遇到如下错误：
+## 环境变量
 
-```
-libvirt: XML-RPC error : Failed to connect socket to '/var/run/libvirt/libvirt-sock': No such file or directory
-virt-customize: error: libguestfs error: could not connect to libvirt (URI = qemu:///system): Failed to connect socket to '/var/run/libvirt/libvirt-sock': No such file or directory
-```
+`CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS`  
+    向 `virt-customize` 命令追加额外选项。该变量的值会按空格分割后，附加到基础参数（`--format`、`-a`）之后、加固操作之前。适用于在不修改脚本的情况下调整客户机内存、CPU 或其他后端参数。
 
-可以通过设置环境变量 `LIBGUESTFS_BACKEND=direct` 来解决此问题：
+    示例 — 将客户机内存设为 4 GiB 并使用 4 个 vCPU：
 
-```bash
-LIBGUESTFS_BACKEND=direct ./cryptpilot-enhance --mode partial --image ./server-disk.qcow2
-```
+    ```bash
+    CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS="--memsize 4096 --smp 4" \
+      ./cryptpilot-enhance --mode partial --image ./server-disk.qcow2
+    ```
+
+`LIBGUESTFS_BACKEND`  
+    控制 libguestfs 使用的后端。默认情况下，`virt-customize` 使用 libvirt 后端，这需要 libvirtd 守护进程正在运行。如果您遇到如下错误：
+
+    ```
+    libvirt: XML-RPC error : Failed to connect socket to '/var/run/libvirt/libvirt-sock': No such file or directory
+    virt-customize: error: libguestfs error: could not connect to libvirt (URI = qemu:///system): Failed to connect socket to '/var/run/libvirt/libvirt-sock': No such file or directory
+    ```
+
+    可将其设为 `direct`，直接通过 QEMU 运行而无需 libvirtd（推荐在 CI/容器环境中使用）：
+
+    ```bash
+    LIBGUESTFS_BACKEND=direct ./cryptpilot-enhance --mode partial --image ./server-disk.qcow2
+    ```
 
 ## 安全提示
 

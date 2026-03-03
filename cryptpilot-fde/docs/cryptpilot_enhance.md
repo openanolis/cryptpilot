@@ -93,18 +93,31 @@ Apply partial hardening with SSH key injection:
 
 Tested on CentOS/RHEL 7/8/9 systems. May require adaptation for other distributions.
 
-By default, `virt-customize` uses the libvirt backend which requires a running libvirtd daemon. If you encounter an error like:
+## ENVIRONMENT VARIABLES
 
-```
-libvirt: XML-RPC error : Failed to connect socket to '/var/run/libvirt/libvirt-sock': No such file or directory
-virt-customize: error: libguestfs error: could not connect to libvirt (URI = qemu:///system): Failed to connect socket to '/var/run/libvirt/libvirt-sock': No such file or directory
-```
+`CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS`  
+    Append extra options to the `virt-customize` command. The value is word-split and appended after the base arguments (`--format`, `-a`), before the hardening operations. Useful for tuning guest memory, CPU, or other backend parameters without modifying the script.
 
-You can work around this by setting the environment variable `LIBGUESTFS_BACKEND=direct`:
+    Example — increase guest memory to 4 GiB and use 4 vCPUs:
 
-```bash
-LIBGUESTFS_BACKEND=direct ./cryptpilot-enhance --mode partial --image ./server-disk.qcow2
-```
+    ```bash
+    CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS="--memsize 4096 --smp 4" \
+      ./cryptpilot-enhance --mode partial --image ./server-disk.qcow2
+    ```
+
+`LIBGUESTFS_BACKEND`  
+    Controls the libguestfs backend. By default, `virt-customize` uses the libvirt backend which requires a running libvirtd daemon. If you encounter an error like:
+
+    ```
+    libvirt: XML-RPC error : Failed to connect socket to '/var/run/libvirt/libvirt-sock': No such file or directory
+    virt-customize: error: libguestfs error: could not connect to libvirt (URI = qemu:///system): Failed to connect socket to '/var/run/libvirt/libvirt-sock': No such file or directory
+    ```
+
+    Set it to `direct` to use QEMU directly without libvirtd (recommended for CI/containers):
+
+    ```bash
+    LIBGUESTFS_BACKEND=direct ./cryptpilot-enhance --mode partial --image ./server-disk.qcow2
+    ```
 
 ## SECURITY NOTES
 
