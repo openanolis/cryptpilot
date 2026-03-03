@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.3.4
+Version: 0.4.0
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -273,6 +273,12 @@ fi
 
 
 %changelog
+* Tue Mar 03 2026 Kun Lai <laikun@linux.alibaba.com> - 0.4.0-1
+- feat(fs): replace is_empty_disk with more precise has_valuable_data
+- refactor(ci): add multi-arch RPM build with SLSA provenance support
+- cryptpilot-enhance: support CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS env var
+- spec: add cloud-utils-growpart as dependency for cryptpilot-fde
+
 * Tue Feb 03 2026 Kun Lai <laikun@linux.alibaba.com> - 0.3.4-1
 - fix: correct is_empty_disk logic and streamline filesystem creation
 - fix: replace makefs_if_empty with force_mkfs for reliable volume initialization
