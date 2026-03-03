@@ -88,6 +88,8 @@ Recommends: e2fsprogs
 Requires: util-linux
 # virt-customize
 Requires: libguestfs-tools-c
+# growpart
+Requires: cloud-utils-growpart
 
 # If not installed, the kbs keyprovider and AAEL will not work.
 Suggests: confidential-data-hub
