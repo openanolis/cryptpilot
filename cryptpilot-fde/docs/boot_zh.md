@@ -162,14 +162,14 @@ data卷的初始化在同一阶段完成。服务检查data逻辑卷是否存在
 
 可写层的准备根据配置`rw_overlay`进行。配置为`ram`时使用内存中的tmpfs作为upperdir，数据在重启后丢失。配置为`disk`或`disk-persist`时使用data卷中的overlay目录作为upperdir，`disk`模式在每次启动时清空而`disk-persist`模式保留数据。
 
-overlayfs挂载将lowerdir、upperdir和workdir组合，将联合视图挂载到`/sysroot`覆盖原有的只读挂载。挂载后读取操作透传到dm-verity保护的lowerdir，写入操作重定向到可写的upperdir。
+overlayfs挂载将lowerdir、upperdir和workdir组合，将联合视图挂载到`/sysroot`覆盖原有的只读挂载。挂载后读取操作透传到dm-verity保护的lowerdir，写入操作重定向到可写的upperdir，为用户提供持久化数据存储空间。
 
 对于容器运行时等场景，以下目录会被bind mount到可写层内的独立子目录，首次启动时从lowerdir复制原始内容：
 - `/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/`
 - `/var/lib/containers/`
 - `/var/lib/docker/`
 
-这些目录的bind mount失败不会阻止系统启动，仅记录错误日志。最后将data卷内的data目录暴露到`/sysroot/data`，为用户提供持久化数据存储空间。
+这些目录的bind mount失败不会阻止系统启动，仅记录错误日志。
 
 ## 5. 系统切换阶段
 

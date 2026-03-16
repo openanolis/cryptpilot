@@ -26,7 +26,7 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
     check_sysroot().await?;
 
     // 1. Mount the data volume to filesystem
-    tracing::info!("[ 1/4 ] Mounting data volume");
+    tracing::info!("[ 1/3 ] Mounting data volume");
     async {
         tokio::fs::create_dir_all("/data_volume").await?;
 
@@ -42,7 +42,7 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
     .context("Failed to mount data volume on /data_volume")?;
 
     // 2. Setup the rootfs-overlay. If on ram, create it first. If on disk, just use it to setup overlayfs.
-    tracing::info!("[ 2/4 ] Setting up rootfs overlay");
+    tracing::info!("[ 2/3 ] Setting up rootfs overlay");
 
     // Setup a backup of /sysroot at /sysroot_bak before mount overlay fs on it
     let sysroot_bak = Path::new("/sysroot_bak");
@@ -106,28 +106,7 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
             Path::new("/ram_overlay")
         }
         RwOverlayType::Disk | RwOverlayType::DiskPersist => {
-            let should_clear = matches!(overlay_type, RwOverlayType::Disk);
-            if should_clear {
-                tracing::info!(
-                    "Using data-volume:/overlay as rootfs overlay (ephemeral mode, will be cleared on boot)"
-                );
-            } else {
-                tracing::info!("Using data-volume:/overlay as rootfs overlay (persistent mode)");
-            }
             async {
-                let overlay_path = Path::new("/data_volume/overlay");
-
-                // If disk mode (default), clear the overlay directory on boot
-                if should_clear && overlay_path.exists() {
-                    tracing::info!("Clearing overlay directory for ephemeral mode");
-                    if let Err(e) = tokio::fs::remove_dir_all(overlay_path).await {
-                        tracing::warn!(
-                            "Failed to clear overlay directory: {:#}. Continuing anyway.",
-                            e
-                        );
-                    }
-                }
-
                 tokio::fs::create_dir_all("/data_volume/overlay/upper").await?;
                 tokio::fs::create_dir_all("/data_volume/overlay/work").await?;
 
@@ -153,7 +132,7 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
     };
 
     // Setting up mount bind for some special dirs
-    tracing::info!("[ 3/4 ] Setting up mount bind");
+    tracing::info!("[ 3/3 ] Setting up mount bind");
     let dirs = [
         "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/",
         "/var/lib/containers/",
@@ -224,22 +203,6 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
             tracing::error!("{e:#}");
         }
     }
-
-    // 4. mount --bind the /data folder
-    tracing::info!("[ 4/4 ] Setting up user-data dir: /data");
-    async {
-        tokio::fs::create_dir_all("/data_volume/data").await?;
-        tokio::fs::create_dir_all("/sysroot/data").await?;
-
-        Command::new("mount")
-            .args(["--bind", "/data_volume/data", "/sysroot/data"])
-            .run()
-            .await?;
-
-        Ok::<_, anyhow::Error>(())
-    }
-    .await
-    .context("Failed to setup mount bind on /sysroot/data")?;
 
     Ok(())
 }

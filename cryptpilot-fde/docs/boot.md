@@ -162,14 +162,14 @@ This service executes after `sysroot.mount`, resolving the conflict between dm-v
 
 Writable layer preparation is performed according to the `rw_overlay` configuration. When configured as `ram`, tmpfs in memory is used as upperdir, with data lost after reboot. When configured as `disk` or `disk-persist`, the overlay directory in the data volume is used as upperdir, with `disk` mode clearing on each boot while `disk-persist` mode retains data.
 
-Overlayfs mounting combines lowerdir, upperdir, and workdir, mounting the unified view to `/sysroot` to override the original read-only mount. After mounting, read operations are passed through to the dm-verity protected lowerdir, while write operations are redirected to the writable upperdir.
+Overlayfs mounting combines lowerdir, upperdir, and workdir, mounting the unified view to `/sysroot` to override the original read-only mount. After mounting, read operations are passed through to the dm-verity protected lowerdir, while write operations are redirected to the writable upperdir, providing users with persistent data storage space.
 
 For container runtime scenarios, the following directories are bind mounted to independent subdirectories within the writable layer, with original content copied from lowerdir on first boot:
 - `/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/`
 - `/var/lib/containers/`
 - `/var/lib/docker/`
 
-Failure to bind mount these directories will not prevent system startup, only error logs are recorded. Finally, the data directory within the data volume is exposed to `/sysroot/data`, providing users with persistent data storage space.
+Failure to bind mount these directories will not prevent system startup, only error logs are recorded.
 
 ## 5. System Switch Stage
 

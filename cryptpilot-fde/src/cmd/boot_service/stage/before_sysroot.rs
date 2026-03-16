@@ -3,13 +3,16 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use tokio::{fs::File, io::AsyncWriteExt, process::Command};
 
-use crate::cmd::boot_service::{
-    metadata::{load_metadata_from_file, Metadata},
-    stage::{
-        DATA_LAYER_DEVICE, DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, ROOTFS_DECRYPTED_LAYER_DEVICE,
-        ROOTFS_DECRYPTED_LAYER_NAME, ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LAYER_NAME,
-        ROOTFS_LOGICAL_VOLUME,
+use crate::{
+    cmd::boot_service::{
+        metadata::{load_metadata_from_file, Metadata},
+        stage::{
+            DATA_LAYER_DEVICE, DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, ROOTFS_DECRYPTED_LAYER_DEVICE,
+            ROOTFS_DECRYPTED_LAYER_NAME, ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LAYER_NAME,
+            ROOTFS_LOGICAL_VOLUME,
+        },
     },
+    config::RwOverlayType,
 };
 use cryptpilot::{
     fs::cmd::CheckCommandOutput,
@@ -150,8 +153,35 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
         };
 
         let data_logical_volume_dev = Path::new(DATA_LOGICAL_VOLUME);
-        let recreate_data_lv_content = matches!(provider.volume_type(), VolumeType::Temporary)
-            || !cryptpilot::fs::luks2::is_initialized(data_logical_volume_dev).await?;
+        let overlay_type = fde_config.rootfs.rw_overlay.unwrap_or(RwOverlayType::Disk);
+
+        let recreate_data_lv_content = if matches!(provider.volume_type(), VolumeType::Temporary) {
+            tracing::info!("Key provider is temporary, will recreate data volume content");
+            true
+        } else if !cryptpilot::fs::luks2::is_initialized(data_logical_volume_dev).await? {
+            tracing::info!("Data volume is not initialized, will create new content");
+            true
+        } else if matches!(overlay_type, RwOverlayType::Disk) {
+            tracing::info!(
+                "Overlay type is disk (non-persistent), will recreate data volume content"
+            );
+            true
+        } else {
+            tracing::info!("Data volume is initialized and overlay type is persistent, will reuse existing content");
+            false
+        };
+
+        //     // If disk mode (default), clear the overlay directory on boot
+        //     if should_clear && overlay_path.exists() {
+        //         tracing::info!("Clearing overlay directory for ephemeral mode");
+        //         if let Err(e) = tokio::fs::remove_dir_all(overlay_path).await {
+        //             tracing::warn!(
+        //                 "Failed to clear overlay directory: {:#}. Continuing anyway.",
+        //                 e
+        //             );
+        //         }
+        //     }
+
         if recreate_data_lv_content {
             // Create a LUKS volume on it
             tracing::info!("Creating LUKS2 on data volume");
