@@ -4,6 +4,34 @@
 
 `cryptpilot-fde` 为机密计算环境提供全盘加密（FDE）能力。它加密整个系统磁盘、保护启动完整性，并支持远程证明的安全启动。
 
+其使用方式如下图所示
+
+```mermaid
+graph LR
+    %% 受信任环境
+    subgraph TrustedEnv [受信任环境]
+        User((用户)) -->|1.准备| Trustee[Trustee服务]
+        Trustee -->|2.制作| Image1[机密系统盘镜像]
+    end
+
+    %% 云服务提供商环境
+    subgraph CloudEnv [云服务提供商环境]
+        Image2[机密系统盘镜像] -->|4.创建| Instance[机密计算实例]
+    end
+
+    %% 跨区域动作
+    Image1 -->|3.导入| Image2
+
+    %% 虚线交互逻辑
+    Instance -.->|启动时访问Trustee<br>远程证明并获取解密密钥| Trustee
+
+    %% 样式调整
+    style TrustedEnv fill:#f9f9f9,stroke:#333,stroke-width:1px
+    style CloudEnv fill:#eef3ff,stroke:#333,stroke-width:1px
+    style Instance fill:#fff,stroke:#0277bd,stroke-width:2px
+
+```
+
 ## 功能特性
 
 - **全盘加密**：同时加密 rootfs 和数据分区

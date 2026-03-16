@@ -2,7 +2,35 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`cryptpilot-fde` provides full disk encryption (FDE) capabilities for confidential computing environments. It encrypts the entire system disk, protects boot integrity, and enables secure boot with remote attestation.
+`cryptpilot-fde` provides Full Disk Encryption (FDE) capabilities for confidential computing environments. It encrypts the entire system disk, protects boot integrity, and enables secure boot with remote attestation.
+
+The usage workflow is shown below:
+
+```mermaid
+graph LR
+    %% Trusted Environment
+    subgraph TrustedEnv [Trusted Environment]
+        User((User)) -->|1. Prepare| Trustee[Trustee Service]
+        Trustee -->|2. Create| Image1[Confidential System Disk Image]
+    end
+
+    %% Cloud Service Provider Environment
+    subgraph CloudEnv [Cloud Service Provider Environment]
+        Image2[Confidential System Disk Image] -->|4. Create| Instance[Confidential Computing Instance]
+    end
+
+    %% Cross-region Actions
+    Image1 -->|3. Import| Image2
+
+    %% Dashed Interaction Logic
+    Instance -.->|Access Trustee at boot time<br>Remote attestation and obtain decryption key| Trustee
+
+    %% Style Adjustments
+    style TrustedEnv fill:#f9f9f9,stroke:#333,stroke-width:1px
+    style CloudEnv fill:#eef3ff,stroke:#333,stroke-width:1px
+    style Instance fill:#fff,stroke:#0277bd,stroke-width:2px
+
+```
 
 ## Features
 
@@ -10,7 +38,7 @@
 - **Integrity Protection**: Uses dm-verity to protect read-only rootfs
 - **Measurement & Attestation**: Measures boot artifacts for remote attestation
 - **Flexible Key Management**: Supports KBS, KMS, OIDC, TPM2, and custom exec providers
-- **Overlay File System**: Provides writable overlay on read-only encrypted rootfs
+- **Overlay Filesystem**: Provides writable overlay on read-only encrypted rootfs
 
 ## Installation
 
@@ -34,7 +62,7 @@ cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
 
 📖 [Detailed Quick Start Guide](docs/quick-start.md)
 
-## Commands
+## Configuration
 
 Configuration files are located in `/etc/cryptpilot/`:
 
@@ -43,7 +71,7 @@ Configuration files are located in `/etc/cryptpilot/`:
 
 See [Configuration Guide](docs/configuration.md) for detailed options.
 
-### Configuration Example Templates
+### Configuration Templates
 
 - [fde.toml.template](../dist/etc/fde.toml.template)
 - [global.toml.template](../dist/etc/global.toml.template)
@@ -76,7 +104,7 @@ cryptpilot-fde config dump --disk /dev/sda
 
 ### `cryptpilot-fde boot-service`
 
-Internal command used by systemd during boot (do not call manually):
+Internal commands used by systemd during boot (do not call manually):
 
 ```sh
 cryptpilot-fde boot-service --stage before-sysroot
@@ -95,7 +123,7 @@ cryptpilot-convert --help
 
 ### cryptpilot-enhance
 
-Harden VM disk images before encryption (remove cloud agents, secure SSH):
+Harden VM disk images before encryption (removes cloud agents, protects SSH):
 
 ```sh
 cryptpilot-enhance --mode full --image ./disk.qcow2
@@ -112,11 +140,11 @@ See [cryptpilot-enhance documentation](docs/cryptpilot_enhance.md) for details.
 
 ## How It Works
 
-`cryptpilot-fde` runs in initrd during boot, in two stages:
+`cryptpilot-fde` runs in the initrd and operates in two stages:
 
 1. **Before Sysroot Mount** (`before-sysroot` stage):
    - Decrypts rootfs (if encrypted)
-   - Sets up dm-verity for integrity protection
+   - Sets up dm-verity integrity protection
    - Measures boot artifacts and generates attestation evidence
    - Decrypts and mounts data partition
 
@@ -129,12 +157,12 @@ See [Boot Process Documentation](docs/boot.md) for details.
 
 ## Key Providers
 
-Supports multiple key providers for flexible key management:
+Multiple key providers are supported for flexible key management:
 
 - **KBS**: Key Broker Service with remote attestation
 - **KMS**: Alibaba Cloud Key Management Service
-- **OIDC**: KMS with OpenID Connect authentication
-- **Exec**: Custom executable providing keys
+- **OIDC**: KMS using OpenID Connect authentication
+- **Exec**: Custom executable that provides the key
 
 See [Key Providers](../docs/key-providers.md) for detailed configuration.
 
@@ -150,5 +178,5 @@ Apache-2.0
 ## See Also
 
 - [cryptpilot-crypt](../cryptpilot-crypt/) - Runtime volume encryption
-- [cryptpilot-verity](../cryptpilot-verity/) - dm-verity utilities
+- [cryptpilot-verity](../cryptpilot-verity/) - dm-verity tools
 - [Main Project README](../README.md)
