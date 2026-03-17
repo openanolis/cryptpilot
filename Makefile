@@ -62,7 +62,10 @@ create-tarball:
 
 	# copy source code to src/
 	git clone --no-hardlinks . /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/src/
-	cd /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/src && git clean -xdf
+	# apply uncommitted changes (staged + unstaged) to the cloned copy
+	git diff --binary HEAD | git -C /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/src apply --binary --allow-empty
+	# copy untracked (new) files that are not ignored
+	if [ -n "$(git ls-files --others --exclude-standard)" ] ; then git ls-files --others --exclude-standard -z | xargs -0 tar -c -f - | tar -x -f - -C /tmp/cryptpilot-tarball/cryptpilot-${VERSION}/src/ ; fi
 
 	tar -czf /tmp/cryptpilot-${VERSION}-vendored-source.tar.gz -C /tmp/cryptpilot-tarball/ cryptpilot-${VERSION}
 
