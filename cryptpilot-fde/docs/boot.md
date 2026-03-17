@@ -4,7 +4,7 @@ This document describes the boot process and implementation principles of the Cr
 
 ## 1. Overview
 
-The CryptPilot system disk encryption solution provides boot-time integrity protection and runtime data encryption for Linux systems. It uses dm-verity technology to protect root filesystem integrity, LUKS2 for data encryption, and overlayfs to build a writable runtime environment.
+The CryptPilot system disk encryption solution provides boot-time integrity protection and runtime data encryption for Linux systems. It uses dm-verity technology to protect root filesystem integrity, LUKS2 for data encryption, and a difference layer mechanism (supporting overlayfs file-level overlay or dm-snapshot block-level snapshot) to build a writable runtime environment.
 
 ### 1.1 Technical Principles
 
@@ -65,7 +65,7 @@ The image preparation phase is executed by `cryptpilot-convert` in an offline en
 
 The conversion process first shrinks the original rootfs partition to its minimum size to reduce the storage overhead of the hash tree. Then the dm-verity hash tree is calculated, outputting hash tree data and root_hash values. The hash tree data is stored in a separate logical volume, while root_hash is recorded in the `metadata.toml` file.
 
-The converted disk uses LVM to manage storage layout, creating three logical volumes in a volume group named "system": the rootfs logical volume stores the shrunk rootfs data, the rootfs_hash logical volume stores the dm-verity hash tree, and the data logical volume serves as reserved space for the data volume, used for storing writable layers and user data after startup.
+The converted disk uses LVM to manage storage layout, creating three logical volumes in a volume group named "system": the rootfs logical volume stores the shrunk rootfs data, the rootfs_hash logical volume stores the dm-verity hash tree, and the data logical volume serves as difference layer storage space. When using the overlayfs mechanism, the data volume is mounted as a filesystem to store the writable layer; when using the dm-snapshot mechanism, the data volume is used directly as a block device for COW (Copy-On-Write) storage.
 
 The `metadata.toml` file contains metadata format version and dm-verity root_hash values. This file is embedded into the initrd image during the conversion process and can be accessed in the initrd environment during startup.
 
@@ -148,21 +148,81 @@ This service executes before `initrd-root-device.target` and is the key stage fo
 
 The construction of the rootfs device chain varies depending on encryption configuration. If rootfs encryption is configured, the service first obtains the passphrase through a key provider and opens the LUKS2 encrypted volume, then establishes dm-verity on the decrypted device. If encryption is not configured, dm-verity is established directly on the rootfs logical volume.
 
-Data volume initialization is completed in the same stage. The service checks whether the data logical volume exists, creating it if it does not and occupying all remaining space in the volume group. If the data volume already exists, it is expanded to the remaining space in the volume group. Then the passphrase for the data volume is obtained, determining whether reinitialization is needed, formatting LUKS2 and creating the filesystem.
+#### 4.1.1 Data Volume Initialization and Expansion
 
-Additionally, the service checks whether the disk where the LVM physical volume resides has unallocated space, and if so, extends the partition and expands the physical volume. This mechanism enables the system to automatically adapt to disk expansion scenarios in cloud environments.
+The service first checks whether the disk where the LVM physical volume resides has unallocated space, and if so, extends the partition table and expands the LVM physical volume. This mechanism enables the system to automatically adapt to disk expansion scenarios in cloud environments.
+
+Data volume initialization is also completed at this stage. The service checks whether the data logical volume exists, creating it if it does not and occupying all remaining space in the volume group. If the data volume already exists, it is expanded to the remaining space in the volume group.
+
+**Data Volume Decryption Flow**:
+
+```text
+data_lv → dm-crypt → dm-integrity(optional) → decrypted data volume block device
+```
+
+After the data logical volume is created or expanded, the service obtains the passphrase for the data volume, determines whether reinitialization is needed, formats the LUKS2 volume, and obtains the decrypted data volume block device. The decrypted data volume block device will be used to carry the difference layer data. The system supports two difference layer implementation mechanisms, selected through the `rw_overlay_backend` configuration, with dm-snapshot as the default.
+
+#### 4.1.2 Overlayfs Data Volume Preparation (When Using Overlayfs Mechanism)
+
+When configured with `rw_overlay_backend = "overlayfs"`, the service creates an ext4 filesystem on the decrypted data volume block device for storing overlay upperdir and workdir.
+
+**Device Chain Structure**:
+
+```text
+rootfs_lv → [dm-crypt] → dm-verity ──┬─→ overlayfs ──→ /sysroot
+                                     │
+                               upper layer
+                     (decrypted data volume or tmpfs)
+```
+
+#### 4.1.3 dm-snapshot Device Chain Preparation (When Using dm-snapshot Mechanism)
+
+When configured with `rw_overlay_backend = "dm-snapshot"` (default), the service uses the decrypted data volume block device directly as COW storage. It then continues to build the dm-snapshot device chain, enabling dracut to mount a writable root filesystem directly.
+
+**Device Chain Structure**:
+
+```text
+rootfs_lv → [dm-crypt] → dm-verity ──┬─→ dm-linear ──→ dm-snapshot ──→ /sysroot
+                                     │                      ↑
+                                  dm-zero                   │
+                                     │                   COW device
+                        (size equals COW device)    (decrypted data volume or zram)
+```
+
+The build process is divided into the following steps:
+
+1. **Prepare COW Device**: Prepare copy-on-write storage according to the `rw_overlay` configuration
+   - `rw_overlay_location = "ram"`: Create zram memory block device with size equal to system memory
+   - `rw_overlay_location = "disk"` or `"disk-persist"`: Use data logical volume as COW device
+
+2. **Create dm-zero Device**: Create a dm-zero device of the same size as the COW device to extend the origin device size
+
+3. **Create dm-linear Device**: Linearly concatenate the dm-verity device and dm-zero device to obtain a virtual device larger than the original rootfs
+
+4. **Create dm-snapshot Device**: Establish a snapshot on the dm-linear device, using the COW device to store change data
+
+**Persistence Strategy**:
+
+- `disk` mode: Reinitialize COW device on each boot, discarding all changes
+- `disk-persist` mode: Retain COW device content, restoring changes after reboot
+
+The dm-snapshot mechanism requires no special handling for container runtime directories; all write operations are completed directly at the block layer.
 
 ### 4.2 dracut Mounts Sysroot
 
 After `cryptpilot-fde-before-sysroot` completes, dracut takes over execution. dracut identifies the dm-verity device as the root device and mounts it to `/sysroot`. Due to the nature of dm-verity, this mount is read-only. At this point, `/sysroot` presents the original rootfs content protected by integrity verification.
 
-### 4.3 Overlay Layer Establishment (cryptpilot-fde-after-sysroot)
+### 4.3 Difference Layer Establishment (cryptpilot-fde-after-sysroot)
 
-This service executes after `sysroot.mount`, resolving the conflict between dm-verity read-only restrictions and system runtime write requirements. The service first backs up the read-only `/sysroot`, preserving access paths to the original dm-verity device as the lowerdir for overlayfs.
+This service executes after `sysroot.mount`, resolving the conflict between dm-verity read-only restrictions and system runtime write requirements.
 
-Writable layer preparation is performed according to the `rw_overlay` configuration. When configured as `ram`, tmpfs in memory is used as upperdir, with data lost after reboot. When configured as `disk` or `disk-persist`, the overlay directory in the data volume is used as upperdir, with `disk` mode clearing on each boot while `disk-persist` mode retains data.
+#### 4.3.1 Overlayfs Data Volume Enablement (When Using Overlayfs Mechanism)
 
-Overlayfs mounting combines lowerdir, upperdir, and workdir, mounting the unified view to `/sysroot` to override the original read-only mount. After mounting, read operations are passed through to the dm-verity protected lowerdir, while write operations are redirected to the writable upperdir, providing users with persistent data storage space.
+When configured with `rw_overlay_backend = "overlayfs"`, a file-level overlay mechanism is used. The service uses the directory mounted by the original dm-verity device as the lowerdir for overlayfs.
+
+Writable layer preparation is performed according to the `rw_overlay_location` configuration. When configured as `ram`, tmpfs in memory is used as upperdir, with data lost after reboot. When configured as `disk` or `disk-persist`, the overlay directory in the data volume is used as upperdir, with `disk` mode clearing on each boot while `disk-persist` mode retains data.
+
+Overlayfs mounting combines lowerdir, upperdir, and workdir, mounting the unified view to `/sysroot` to override the original read-only mount. After mounting, read operations are passed through to the dm-verity protected lowerdir, while write operations are redirected to the writable upperdir.
 
 For container runtime scenarios, the following directories are bind mounted to independent subdirectories within the writable layer, with original content copied from lowerdir on first boot:
 - `/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/`
@@ -171,6 +231,12 @@ For container runtime scenarios, the following directories are bind mounted to i
 
 Failure to bind mount these directories will not prevent system startup, only error logs are recorded.
 
+#### 4.3.2 dm-snapshot Data Volume Enablement (When Using dm-snapshot Mechanism)
+
+When configured with `rw_overlay_backend = "dm-snapshot"` (default), the dm-snapshot device chain has already been prepared during the `cryptpilot-fde-before-sysroot` stage. dracut mounts the dm-snapshot device directly to `/sysroot`, and this mount is already writable.
+
+No additional operations are required at this stage; all write operations are handled at the block device layer through the dm-snapshot COW mechanism.
+
 ## 5. System Switch Stage
 
-After `cryptpilot-fde-after-sysroot` completes, the initrd stage ends. dracut performs cleanup work and hands over control to systemd. systemd switches `/sysroot` as the real root filesystem, and the system enters the normal System Manager stage. At this point, the running root filesystem is the overlayfs unified view, protected by dm-verity integrity while supporting normal write operations.
+After `cryptpilot-fde-after-sysroot` completes, the initrd stage ends. dracut performs cleanup work and hands over control to systemd. systemd switches `/sysroot` as the real root filesystem, and the system enters the normal System Manager stage. At this point, the running root filesystem may be either the overlayfs unified view (overlayfs mechanism) or the dm-snapshot device (dm-snapshot mechanism), protected by dm-verity integrity while supporting normal write operations.

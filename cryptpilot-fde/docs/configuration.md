@@ -37,7 +37,7 @@ An overlayfs layer provides write capability on top of the read-only rootfs.
 # - "disk": Stored on data volume but cleared on boot (default, recommended for security)
 # - "disk-persist": Stored on data volume (persistent, but depends on data volume type)
 # - "ram": Stored in memory (cleared on reboot)
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 # Encryption configuration (optional)
 # If omitted, rootfs will not be encrypted (but still protected by dm-verity)
@@ -48,7 +48,7 @@ resource_path = "/secrets/rootfs-key"
 
 **Available fields:**
 
-- **`rw_overlay`** (optional, default: `"disk"`): Overlay storage location
+- **`rw_overlay_location`** (optional, default: `"disk"`): Overlay storage location
   - `"disk"`: Store on data volume but forcibly cleared on boot (**default**, recommended for security)
   - `"disk-persist"`: Store on data volume (persistent across reboots, but depends on data volume configuration: if data volume is temporary, it will still be lost on reboot)
   - `"ram"`: Store in tmpfs (cleared on reboot, no disk space used)

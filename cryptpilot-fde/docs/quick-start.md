@@ -20,7 +20,7 @@ For this demo, we'll use the `exec` key provider with a hardcoded passphrase:
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [rootfs.encrypt.exec]
 command = "echo"
@@ -47,7 +47,7 @@ The configuration directory structure:
 **Configuration Explanation:**
 
 - `[rootfs]`: Root filesystem configuration
-  - `rw_overlay = "disk"`: Store writable overlay on data partition (survives reboot)
+  - `rw_overlay_location = "disk"`: Store writable overlay on data partition (survives reboot)
   - `encrypt.exec`: Use exec provider with passphrase "AAAaaawewe222"
 - `[data]`: Data partition configuration
   - `integrity = true`: Enable dm-integrity for data authenticity
@@ -158,7 +158,7 @@ Create configuration without rootfs encryption:
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 # Note: No encrypt configuration in rootfs section
 
 [data]
@@ -173,7 +173,7 @@ EOF
 **Configuration Explanation:**
 
 - `[rootfs]`: Root filesystem configuration
-  - `rw_overlay = "disk"`: Store writable overlay on data partition
+  - `rw_overlay_location = "disk"`: Store writable overlay on data partition
   - **No `encrypt` configuration**: rootfs is not encrypted, only dm-verity integrity protection
 - `[data]`: Data partition configuration
   - `integrity = true`: Enable dm-integrity
@@ -228,7 +228,7 @@ For production systems, you need to encrypt a real disk.
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [rootfs.encrypt.exec]
 command = "echo"
@@ -269,7 +269,7 @@ For production environments, use Key Broker Service with remote attestation.
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [rootfs.encrypt.kbs]
 url = "https://kbs.example.com"
@@ -316,7 +316,7 @@ For Alibaba Cloud users, use KMS for centralized key management.
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [rootfs.encrypt.kms]
 kms_instance_id = "kst-****"

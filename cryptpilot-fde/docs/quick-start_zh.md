@@ -20,7 +20,7 @@
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [rootfs.encrypt.exec]
 command = "echo"
@@ -47,7 +47,7 @@ tree ./config_dir
 **配置说明：**
 
 - `[rootfs]`：根文件系统配置
-  - `rw_overlay = "disk"`：将可写覆盖层存储在数据分区上（重启后保留）
+  - `rw_overlay_location = "disk"`：将可写覆盖层存储在数据分区上（重启后保留）
   - `encrypt.exec`：使用 exec 提供者，密码为 "AAAaaawewe222"
 - `[data]`：数据分区配置
   - `integrity = true`：启用 dm-integrity 数据完整性保护
@@ -158,7 +158,7 @@ cryptpilot-fde show-reference-value --stage system --disk ./encrypted.qcow2
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 # 注意：rootfs 段不包含 encrypt 配置
 
 [data]
@@ -173,7 +173,7 @@ EOF
 **配置说明：**
 
 - `[rootfs]`：根文件系统配置
-  - `rw_overlay = "disk"`：将可写覆盖层存储在数据分区上
+  - `rw_overlay_location = "disk"`：将可写覆盖层存储在数据分区上
   - **不包含** `encrypt` 配置：rootfs 不加密，仅使用 dm-verity 完整性保护
 - `[data]`：数据分区配置
   - `integrity = true`：启用 dm-integrity
@@ -228,7 +228,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [rootfs.encrypt.exec]
 command = "echo"
@@ -269,7 +269,7 @@ cryptpilot-convert --device /dev/nvme2n1 \
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [rootfs.encrypt.kbs]
 url = "https://kbs.example.com"
@@ -316,7 +316,7 @@ cryptpilot-convert --device /dev/nvme2n1 \
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [rootfs.encrypt.kms]
 kms_instance_id = "kst-****"

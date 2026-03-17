@@ -75,7 +75,7 @@ pub mod tests {
 verbose = true
 
 [fde.rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
 
 [fde.rootfs.encrypt.exec]
 command = "echo"

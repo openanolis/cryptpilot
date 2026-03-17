@@ -10,12 +10,19 @@ install() {
         set -e
         set -u
         # TODO: simplify this
-        inst_multiple veritysetup mkfs.ext4 mkfs.vfat mkfs.xfs mkswap base64
+        inst_multiple veritysetup base64
         inst_multiple vgchange lvcreate
         inst_multiple blkid lsblk findmnt
-        inst_multiple dd tail grep sort
+        inst_multiple tail grep
         inst_multiple awk sed pvs growpart sfdisk lvm lvextend mountpoint bash
         inst_multiple modprobe
+
+        # We need mkfs.ext4 for creating data volume here
+        inst_multiple mkfs.ext4
+
+        # For resize ext4 filesystem
+        inst_multiple tune2fs resize2fs
+        
         # For debug only
         # inst_multiple curl nc ip find systemctl journalctl ifconfig lsblk df
         # Install cryptpilot-fde for FDE boot-time decryption

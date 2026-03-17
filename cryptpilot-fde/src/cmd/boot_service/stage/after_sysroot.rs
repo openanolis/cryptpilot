@@ -6,10 +6,10 @@ use tokio::{
     process::Command,
 };
 
-use crate::cmd::boot_service::stage::{DATA_LAYER_DEVICE, ROOTFS_LAYER_DEVICE};
+use crate::cmd::boot_service::stage::{DATA_DEVICE, ROOTFS_DEVICE};
 use cryptpilot::fs::cmd::CheckCommandOutput;
 
-use crate::config::RwOverlayType;
+use crate::config::{RwOverlayBackend, RwOverlayLocation};
 
 pub async fn setup_mounts_required_by_fde() -> Result<()> {
     tracing::info!("Setting up mounts required by FDE");
@@ -23,15 +23,33 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
         return Ok(());
     };
 
+    let backend = fde_config.rootfs.rw_overlay_backend.unwrap_or_default();
+    tracing::info!("Using overlay backend: {:?}", backend);
+
     check_sysroot().await?;
 
+    match backend {
+        RwOverlayBackend::Overlayfs => {
+            setup_overlayfs_mounts(fde_config).await?;
+        }
+        RwOverlayBackend::DmSnapshot => {
+            tracing::info!(
+                "dm-snapshot device already mounted at /sysroot, no additional setup needed"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn setup_overlayfs_mounts(fde_config: crate::config::FdeConfig) -> Result<()> {
     // 1. Mount the data volume to filesystem
     tracing::info!("[ 1/3 ] Mounting data volume");
     async {
         tokio::fs::create_dir_all("/data_volume").await?;
 
         Command::new("mount")
-            .arg(DATA_LAYER_DEVICE)
+            .arg(DATA_DEVICE)
             .arg("/data_volume")
             .run()
             .await?;
@@ -62,7 +80,10 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
     .await
     .with_context(|| format!("Failed to setup backup of /sysroot at {sysroot_bak:?}"))?;
 
-    let overlay_type = fde_config.rootfs.rw_overlay.unwrap_or(RwOverlayType::Disk);
+    let rw_overlay_location = fde_config
+        .rootfs
+        .rw_overlay_location
+        .unwrap_or(RwOverlayLocation::Disk);
 
     // Load overlay module if not loaded
     Command::new("modprobe")
@@ -71,8 +92,8 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
         .await
         .context("Failed to load kernel module 'overlay'")?;
 
-    let overlay_dir = match overlay_type {
-        RwOverlayType::Ram => {
+    let overlay_dir = match rw_overlay_location {
+        RwOverlayLocation::Ram => {
             tracing::info!("Using tmpfs as rootfs overlay");
             async {
                 tokio::fs::create_dir_all("/ram_overlay").await?;
@@ -88,7 +109,7 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
 
                 Command::new("mount")
                     .args(["-t", "overlay"])
-                    .arg(ROOTFS_LAYER_DEVICE)
+                    .arg(ROOTFS_DEVICE)
                     .args([
                         "-o",
                         "lowerdir=/sysroot,upperdir=/ram_overlay/upper,workdir=/ram_overlay/work",
@@ -105,14 +126,14 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
 
             Path::new("/ram_overlay")
         }
-        RwOverlayType::Disk | RwOverlayType::DiskPersist => {
+        RwOverlayLocation::Disk | RwOverlayLocation::DiskPersist => {
             async {
                 tokio::fs::create_dir_all("/data_volume/overlay/upper").await?;
                 tokio::fs::create_dir_all("/data_volume/overlay/work").await?;
 
                 Command::new("mount")
                     .args(["-t", "overlay"])
-                    .arg(ROOTFS_LAYER_DEVICE)
+                    .arg(ROOTFS_DEVICE)
                     .args([
                         "-o",
                         "lowerdir=/sysroot,upperdir=/data_volume/overlay/upper,workdir=/data_volume/overlay/work",
@@ -208,16 +229,18 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
 }
 
 async fn check_sysroot() -> Result<()> {
+    tracing::info!("Checking mount source of /sysroot");
+
     // The mount of /sysroot is not done by cryptpilot. It is intentional, because we do not want to take over the job of /etc/fstab. So we have to check if sysroot is mounted from ROOTFS_LAYER_DEVICE.
     let mtab_content = fs::read_to_string("/etc/mtab").await?;
     for line in mtab_content.lines() {
         let mut fields = line.split(' ');
         match (fields.next(), fields.next()) {
             (Some(device), Some("/sysroot")) => {
-                if device == ROOTFS_LAYER_DEVICE {
+                if device == ROOTFS_DEVICE {
                     return Ok(());
                 } else {
-                    bail!("Rootfs mounted at /sysroot is not expected and could be a security risk. Expected: {ROOTFS_LAYER_DEVICE}, got: {device}");
+                    bail!("Rootfs mounted at /sysroot is not expected and could be a security risk. Expected: {ROOTFS_DEVICE}, got: {device}");
                 }
             }
             _ => continue,

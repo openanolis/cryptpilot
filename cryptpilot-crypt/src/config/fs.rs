@@ -58,7 +58,7 @@ impl FileSystemConfigSource {
                         volume_names.insert(volume_config.volume.to_owned());
                         Ok(volume_config)
                     })
-                    .with_context(|| format!("Failed to loading volume config file: {}", path.display()))?;
+                    .with_context(|| format!("Failed to loading volume config file: {:?}", path))?;
 
                 volume_configs.push(volume_config);
             }

@@ -2,80 +2,17 @@ use anyhow::{Context, Result};
 use clap::{command, Parser};
 use cryptpilot::config::encrypt::{EncryptConfig, KeyProviderConfig};
 use cryptpilot::provider::kbs::{CdhType, KbsConfig};
+use cryptpilot_fde::config::{
+    BootServiceConfig, DataConfig, FdeConfig, GlobalConfig, RootFsConfig, RwOverlayBackend,
+    RwOverlayLocation,
+};
 use documented::DocumentedFields;
-use serde::{Deserialize, Serialize};
 use shadow_rs::shadow;
 use toml_edit::{Decor, DocumentMut, RawString, Table};
 
 shadow!(build);
 
 use crate::build::CLAP_LONG_VERSION;
-
-// FDE Configuration structures
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
-#[serde(deny_unknown_fields)]
-pub struct FdeConfig {
-    /// Configuration related to the read-only root filesystem.
-    pub rootfs: RootFsConfig,
-
-    /// Configuration related to the data partition.
-    pub data: DataConfig,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
-#[serde(deny_unknown_fields)]
-pub struct RootFsConfig {
-    /// The type of read-write overlay layer over the underhood read-only rootfs. Can be "disk", "disk-persist", or "ram". Default value is "disk".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rw_overlay: Option<RwOverlayType>,
-
-    /// Encryption configuration for root filesystem. If not set, the rootfs partition WOULD NOT be encrypted.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encrypt: Option<EncryptConfig>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
-#[serde(deny_unknown_fields)]
-pub struct DataConfig {
-    /// Whether or not to enable integrity check.
-    #[serde(default = "Default::default")]
-    pub integrity: bool,
-
-    /// Encryption configuration for data partition. If not set, the data partition WOULD NOT be encrypted.
-    pub encrypt: EncryptConfig,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(deny_unknown_fields)]
-pub enum RwOverlayType {
-    /// The overlay will be placed on disk but will be cleared on every boot.
-    /// This is the default and recommended option for security.
-    #[serde(rename = "disk")]
-    Disk,
-    /// The overlay will be placed on disk, and be persistent across reboots.
-    /// Note: persistence depends on the data volume configuration.
-    #[serde(rename = "disk-persist")]
-    DiskPersist,
-    /// The overlay will be placed on tmpfs (in RAM), and be cleared on reboot.
-    #[serde(rename = "ram")]
-    Ram,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
-#[serde(deny_unknown_fields)]
-pub struct GlobalConfig {
-    /// Configuration related to cryptpilot boot service.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub boot: Option<BootServiceConfig>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
-#[serde(deny_unknown_fields)]
-pub struct BootServiceConfig {
-    /// Enable this option if you want to see more log when running cryptpilot boot service in initrd stage and in system stage.
-    #[serde(default = "Default::default")]
-    pub verbose: bool,
-}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -189,7 +126,8 @@ impl AsAnnotatedToml for FdeConfig {
 pub fn get_fde_config() -> FdeConfig {
     FdeConfig {
         rootfs: RootFsConfig {
-            rw_overlay: Some(RwOverlayType::Disk),
+            rw_overlay_location: Some(RwOverlayLocation::Disk),
+            rw_overlay_backend: Some(RwOverlayBackend::DmSnapshot),
             encrypt: Some(EncryptConfig {
                 key_provider: KeyProviderConfig::Kbs(KbsConfig {
                     cdh_type: CdhType::OneShot {

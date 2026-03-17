@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use tokio::{fs::File, io::AsyncWriteExt, process::Command};
@@ -7,13 +7,15 @@ use crate::{
     cmd::boot_service::{
         metadata::{load_metadata_from_file, Metadata},
         stage::{
-            DATA_LAYER_DEVICE, DATA_LAYER_NAME, DATA_LOGICAL_VOLUME, ROOTFS_DECRYPTED_LAYER_DEVICE,
-            ROOTFS_DECRYPTED_LAYER_NAME, ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LAYER_NAME,
-            ROOTFS_LOGICAL_VOLUME,
+            DATA_DEVICE, DATA_LOGICAL_VOLUME, DATA_NAME, ROOTFS_DECRYPTED_LAYER_DEVICE,
+            ROOTFS_DECRYPTED_NAME, ROOTFS_DEVICE, ROOTFS_EXTENDED_DEVICE, ROOTFS_EXTENDED_NAME,
+            ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LOGICAL_VOLUME, ROOTFS_NAME, ROOTFS_VERITY_DEVICE,
+            ROOTFS_VERITY_NAME,
         },
     },
-    config::RwOverlayType,
+    config::{RwOverlayBackend, RwOverlayLocation},
 };
+use block_devs::BlckExt;
 use cryptpilot::{
     fs::cmd::CheckCommandOutput,
     provider::{IntoProvider as _, KeyProvider as _, VolumeType},
@@ -76,7 +78,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
 
         tracing::info!("Setting up dm-crypt for rootfs volume");
         cryptpilot::fs::luks2::open_with_check_passphrase(
-            ROOTFS_DECRYPTED_LAYER_NAME,
+            ROOTFS_DECRYPTED_NAME,
             Path::new(ROOTFS_LOGICAL_VOLUME),
             &passphrase,
             IntegrityType::None,
@@ -87,130 +89,97 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
     }
 
     tracing::info!("Setting up dm-verity for rootfs volume");
+
+    let backend = fde_config.rootfs.rw_overlay_backend.unwrap_or_default();
+
+    let (dm_verity_output_name, dm_verity_output_device) = match backend {
+        RwOverlayBackend::Overlayfs => (ROOTFS_NAME, Path::new(ROOTFS_DEVICE)),
+        RwOverlayBackend::DmSnapshot => (ROOTFS_VERITY_NAME, Path::new(ROOTFS_VERITY_DEVICE)),
+    };
+
     setup_rootfs_dm_verity(
+        dm_verity_output_name,
         &metadata.root_hash,
-        if fde_config.rootfs.encrypt.is_some() {
+        Path::new(if fde_config.rootfs.encrypt.is_some() {
             ROOTFS_DECRYPTED_LAYER_DEVICE
         } else {
             ROOTFS_LOGICAL_VOLUME
-        },
+        }),
     )
     .await?;
-
     // Now we have the rootfs ro part
 
-    // 4. Open the data logical volume with dm-crypt and dm-integrity on it
-    tracing::info!("[ 4/4 ] Setting up data volume");
-
-    tracing::info!("Expanding system PV partition");
-    if let Err(error) = expand_system_pv_partition().await {
-        tracing::warn!(?error, "Failed to expend the system PV partition");
-    }
-
+    // 4. Setup data volume and overlay backend
     {
-        // Check if the data logical volume exists
-        if !Path::new(DATA_LOGICAL_VOLUME).exists() {
-            tracing::info!(
-                "Data logical volume does not exist, assume it is first time boot and create it."
-            );
+        let rw_overlay_location = fde_config
+            .rootfs
+            .rw_overlay_location
+            .unwrap_or(RwOverlayLocation::Disk);
 
-            // Due to there is no udev in initrd, the lvcreate will complain that /dev/system/data not exist. A workaround is to set '--zero n' and zeroing the first 4k of logical volume manually.
-            // See https://serverfault.com/a/1059400
-            async {
-                Command::new("lvcreate")
-                    .args(["-n", "data", "--zero", "n", "-l", "100%FREE", "system"])
-                    .env("LVM_SYSTEM_DIR", CRYPTPILOT_LVM_SYSTEM_DIR)
-                    .run()
-                    .await?;
-                File::options()
-                    .write(true)
-                    .open("/dev/mapper/system-data")
-                    .await?
-                    .write_all(&[0u8; 4096])
-                    .await?;
-                Ok::<_, anyhow::Error>(())
+        tracing::info!(
+            ?backend,
+            ?rw_overlay_location,
+            "[ 4/4 ] Setting up data volume if required"
+        );
+
+        if matches!(
+            rw_overlay_location,
+            RwOverlayLocation::Disk | RwOverlayLocation::DiskPersist
+        ) {
+            tracing::info!("Expanding system PV partition");
+            if let Err(error) = expand_system_pv_partition().await {
+                tracing::warn!(?error, "Failed to expend the system PV partition");
             }
-            .await
-            .context("Failed to create data logical volume")?;
+
+            // Ensure data logical volume exists
+            ensure_data_volume_exist_and_expanded().await?;
+
+            let (recreate, integrity) =
+                setup_data_volume_luks2(&fde_config.data, rw_overlay_location).await?;
+
+            // Setup data volume based on backend type
+            match backend {
+                RwOverlayBackend::Overlayfs => {
+                    let data_device = Path::new(DATA_DEVICE);
+                    if recreate {
+                        tracing::info!("Creating ext4 fs on data volume");
+                        cryptpilot::fs::mkfs::force_mkfs(data_device, &MakeFsType::Ext4, integrity)
+                            .await?;
+                    } else {
+                        // Resize existing filesystem to fill the expanded device
+                        resize_ext4_filesystem(data_device).await?;
+                    }
+                }
+                RwOverlayBackend::DmSnapshot => {
+                    // Build dm-snapshot device chain
+                    setup_dm_snapshot_device_chain(
+                        dm_verity_output_device,
+                        Path::new(DATA_DEVICE),
+                        matches!(rw_overlay_location, RwOverlayLocation::DiskPersist),
+                    )
+                    .await?;
+
+                    // Resize rootfs filesystem to fill the expanded device after building snapshot chain
+                    resize_ext4_filesystem(Path::new(ROOTFS_DEVICE)).await?;
+                }
+            }
         } else {
-            tracing::info!("Expanding data logical volume");
-            if let Err(error) = expand_system_data_lv().await {
-                tracing::warn!(?error, "Failed to expend data logical volume");
+            // No need to set up data volume
+            match backend {
+                RwOverlayBackend::Overlayfs => {
+                    // Nothing to do
+                }
+                RwOverlayBackend::DmSnapshot => {
+                    tracing::info!("Creating zram device for COW storage");
+                    let cow_device = create_zram_cow_device().await?;
+                    // Build dm-snapshot device chain
+                    setup_dm_snapshot_device_chain(dm_verity_output_device, &cow_device, false)
+                        .await?;
+                    // Resize rootfs filesystem to fill the expanded device after building snapshot chain
+                    resize_ext4_filesystem(Path::new(ROOTFS_DEVICE)).await?;
+                }
             }
         }
-
-        tracing::info!("Fetching passphrase for data volume");
-        let provider = fde_config.data.encrypt.key_provider.into_provider();
-        let passphrase = provider
-            .get_key()
-            .await
-            .context("Failed to get passphrase")?;
-
-        let integrity = if fde_config.data.integrity {
-            IntegrityType::Journal // Select Journal mode since it is persistent storage
-        } else {
-            IntegrityType::None
-        };
-
-        let data_logical_volume_dev = Path::new(DATA_LOGICAL_VOLUME);
-        let overlay_type = fde_config.rootfs.rw_overlay.unwrap_or(RwOverlayType::Disk);
-
-        let recreate_data_lv_content = if matches!(provider.volume_type(), VolumeType::Temporary) {
-            tracing::info!("Key provider is temporary, will recreate data volume content");
-            true
-        } else if !cryptpilot::fs::luks2::is_initialized(data_logical_volume_dev).await? {
-            tracing::info!("Data volume is not initialized, will create new content");
-            true
-        } else if matches!(overlay_type, RwOverlayType::Disk) {
-            tracing::info!(
-                "Overlay type is disk (non-persistent), will recreate data volume content"
-            );
-            true
-        } else {
-            tracing::info!("Data volume is initialized and overlay type is persistent, will reuse existing content");
-            false
-        };
-
-        //     // If disk mode (default), clear the overlay directory on boot
-        //     if should_clear && overlay_path.exists() {
-        //         tracing::info!("Clearing overlay directory for ephemeral mode");
-        //         if let Err(e) = tokio::fs::remove_dir_all(overlay_path).await {
-        //             tracing::warn!(
-        //                 "Failed to clear overlay directory: {:#}. Continuing anyway.",
-        //                 e
-        //             );
-        //         }
-        //     }
-
-        if recreate_data_lv_content {
-            // Create a LUKS volume on it
-            tracing::info!("Creating LUKS2 on data volume");
-            cryptpilot::fs::luks2::format(data_logical_volume_dev, &passphrase, integrity).await?;
-        }
-
-        // TODO: support change size of the LUKS2 volume and inner ext4 file system
-        tracing::info!("Opening data volume");
-        cryptpilot::fs::luks2::open_with_check_passphrase(
-            DATA_LAYER_NAME,
-            data_logical_volume_dev,
-            &passphrase,
-            integrity,
-        )
-        .await?;
-
-        if recreate_data_lv_content {
-            // Create a Ext4 fs on it
-            tracing::info!("Creating ext4 fs on data volume");
-            cryptpilot::fs::mkfs::force_mkfs(
-                Path::new(DATA_LAYER_DEVICE),
-                &MakeFsType::Ext4,
-                integrity,
-            )
-            .await?;
-        }
-
-        // Mark the volume as fully initialized
-        cryptpilot::fs::luks2::mark_volume_as_initialized(Path::new(DATA_LOGICAL_VOLUME)).await?;
     }
 
     tracing::info!("Both rootfs volume and data volume are ready");
@@ -218,11 +187,47 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
     Ok(())
 }
 
+async fn ensure_data_volume_exist_and_expanded() -> Result<(), anyhow::Error> {
+    Ok(if !Path::new(DATA_LOGICAL_VOLUME).exists() {
+        tracing::info!(
+            "Data logical volume does not exist, assume it is first time boot and create it."
+        );
+
+        // Due to there is no udev in initrd, the lvcreate will complain that /dev/system/data not exist. A workaround is to set '--zero n' and zeroing the first 4k of logical volume manually.
+        // See https://serverfault.com/a/1059400
+        async {
+            Command::new("lvcreate")
+                .args(["-n", DATA_NAME, "--zero", "n", "-l", "100%FREE", "system"])
+                .env("LVM_SYSTEM_DIR", CRYPTPILOT_LVM_SYSTEM_DIR)
+                .run()
+                .await?;
+            File::options()
+                .write(true)
+                .open(DATA_LOGICAL_VOLUME)
+                .await?
+                .write_all(&[0u8; 4096])
+                .await?;
+            Ok::<_, anyhow::Error>(())
+        }
+        .await
+        .context("Failed to create data logical volume")?;
+    } else {
+        tracing::info!("Expanding data logical volume");
+        if let Err(error) = expand_system_data_lv().await {
+            tracing::warn!(?error, "Failed to expend data logical volume");
+        }
+    })
+}
+
 async fn load_metadata() -> Result<Metadata> {
     load_metadata_from_file(Path::new(METADATA_PATH_IN_INITRD)).await
 }
 
-async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Result<()> {
+async fn setup_rootfs_dm_verity(
+    dm_verity_output_name: &str,
+    root_hash: &str,
+    lower_dm_device: &Path,
+) -> Result<()> {
     async {
         Command::new("modprobe")
             .arg("dm-verity")
@@ -233,7 +238,7 @@ async fn setup_rootfs_dm_verity(root_hash: &str, lower_dm_device: &str) -> Resul
         Command::new("veritysetup")
             .arg("open")
             .arg(lower_dm_device)
-            .arg(ROOTFS_LAYER_NAME)
+            .arg(dm_verity_output_name)
             .arg(ROOTFS_HASH_LOGICAL_VOLUME)
             .arg(root_hash)
             .run()
@@ -323,4 +328,200 @@ async fn expand_system_data_lv() -> Result<()> {
         .await?;
 
     Ok::<_, anyhow::Error>(())
+}
+
+/// Setup data volume LUKS2 encryption and return whether content should be recreated
+async fn setup_data_volume_luks2(
+    data_config: &crate::config::DataConfig,
+    rw_overlay_location: RwOverlayLocation,
+) -> Result<(bool, IntegrityType)> {
+    tracing::info!("Fetching passphrase for data volume");
+    let provider = data_config.encrypt.key_provider.clone().into_provider();
+    let passphrase = provider
+        .get_key()
+        .await
+        .context("Failed to get passphrase")?;
+
+    let integrity = if data_config.integrity {
+        IntegrityType::Journal // Select Journal mode since it is persistent storage
+    } else {
+        IntegrityType::None
+    };
+
+    let data_logical_volume_dev = Path::new(DATA_LOGICAL_VOLUME);
+
+    let recreate = if matches!(provider.volume_type(), VolumeType::Temporary) {
+        tracing::info!("Key provider is temporary, will recreate data volume content");
+        true
+    } else if !cryptpilot::fs::luks2::is_initialized(data_logical_volume_dev).await? {
+        tracing::info!("Data volume is not initialized, will create new content");
+        true
+    } else if matches!(rw_overlay_location, RwOverlayLocation::Disk) {
+        tracing::info!("Overlay type is disk (non-persistent), will recreate data volume content");
+        true
+    } else {
+        tracing::info!("Data volume is initialized and overlay type is persistent, will reuse existing content");
+        false
+    };
+
+    if recreate {
+        // Create a LUKS volume on it
+        tracing::info!("Creating LUKS2 on data volume");
+        cryptpilot::fs::luks2::format(data_logical_volume_dev, &passphrase, integrity).await?;
+    }
+
+    // TODO: support change size of the LUKS2 volume and inner ext4 file system
+    tracing::info!("Opening data volume");
+    cryptpilot::fs::luks2::open_with_check_passphrase(
+        DATA_NAME,
+        data_logical_volume_dev,
+        &passphrase,
+        integrity,
+    )
+    .await?;
+
+    Ok((recreate, integrity))
+}
+
+async fn create_zram_cow_device() -> Result<PathBuf> {
+    // Load zram module
+    if !Path::new("/sys/class/zram-control").exists() {
+        Command::new("modprobe")
+            .arg("zram")
+            .run()
+            .await
+            .context("Failed to load zram module")?;
+    }
+
+    // Get total memory in KB
+    let mem_info = tokio::fs::read_to_string("/proc/meminfo").await?;
+    let mem_total_kb = mem_info
+        .lines()
+        .find(|line| line.starts_with("MemTotal:"))
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|s| s.parse::<u64>().ok())
+        .context("Failed to parse MemTotal from /proc/meminfo")?;
+
+    // Add a zram device
+    let zram_id = tokio::fs::read_to_string("/sys/class/zram-control/hot_add")
+        .await
+        .context("Adding zram device")?
+        .trim_end()
+        .parse::<u64>()
+        .context("Allocate new zram device number")?;
+
+    // Set zram size equal to total memory
+    let zram_size = format!("{}K", mem_total_kb);
+    tokio::fs::write(format!("/sys/block/zram{}/disksize", zram_id), &zram_size)
+        .await
+        .context("Failed to set zram disksize")?;
+    tracing::info!(size = %zram_size, "Created zram{}", zram_id);
+
+    Ok(PathBuf::from(format!("/dev/zram{}", zram_id)))
+}
+
+async fn setup_dm_snapshot_device_chain(
+    rootfs_device: &Path,
+    cow_device: &Path,
+    persistent: bool,
+) -> Result<()> {
+    tracing::info!(
+        ?rootfs_device,
+        ?cow_device,
+        "Building dm-snapshot device chain"
+    );
+
+    // Load required kernel modules
+    Command::new("modprobe")
+        .arg("dm-snapshot")
+        .run()
+        .await
+        .context("Failed to load dm-snapshot module")?;
+
+    // Get device sizes (in sectors, 512 bytes each)
+    let verity_size = get_device_size_bytes(rootfs_device).await? / 512;
+    let cow_size = get_device_size_bytes(cow_device).await? / 512;
+
+    // Create dm-linear device combining dm-verity and zero target
+    // The zero target is used directly in the table, no need to create a separate dm-zero device
+    let linear_size = verity_size + cow_size;
+    tracing::info!(
+        "Creating dm-linear device with {} sectors (verity:{} + zero:{})",
+        linear_size,
+        verity_size,
+        cow_size
+    );
+    Command::new("dmsetup")
+        .arg("create")
+        .arg(ROOTFS_EXTENDED_NAME)
+        .arg("--table")
+        .arg(format!(
+            "0 {} linear {} 0\n{} {} zero",
+            verity_size,
+            rootfs_device.to_string_lossy(),
+            verity_size,
+            cow_size
+        ))
+        .run()
+        .await
+        .context("Failed to create dm-linear device")?;
+
+    // Create dm-snapshot device
+    tracing::info!("Creating dm-snapshot device");
+    Command::new("dmsetup")
+        .arg("create")
+        .arg(ROOTFS_NAME)
+        .arg("--table")
+        .arg(format!(
+            "0 {} snapshot {} {} {} 16", // chunk size is 16 sectors (8KB)
+            linear_size,
+            ROOTFS_EXTENDED_DEVICE,
+            cow_device.to_string_lossy(),
+            if persistent { "PO" } else { "N" }
+        ))
+        .run()
+        .await
+        .context("Failed to create dm-snapshot device")?;
+
+    tracing::info!("dm-snapshot device chain created successfully");
+    Ok(())
+}
+
+async fn get_device_size_bytes(device: &Path) -> Result<u64> {
+    let file = File::open(device)
+        .await
+        .context(format!("Failed to open device {:?}", device))?
+        .into_std()
+        .await;
+
+    file.get_block_device_size().context(format!(
+        "Failed to get block device size in bytes {:?}",
+        device
+    ))
+}
+
+async fn resize_ext4_filesystem(device: &Path) -> Result<()> {
+    tracing::info!(device = %device.display(), "Resizing ext4 filesystem to fill device");
+
+    // Clear the read-only feature flag before resizing
+    Command::new("tune2fs")
+        .args(["-O", "^read-only"])
+        .arg(device)
+        .run()
+        .await
+        .context(format!(
+            "Failed to clear read-only flag on {}",
+            device.display()
+        ))?;
+
+    Command::new("resize2fs")
+        .arg(device)
+        .run()
+        .await
+        .context(format!(
+            "Failed to resize ext4 filesystem on {}",
+            device.display()
+        ))?;
+    tracing::info!("ext4 filesystem resized successfully");
+    Ok(())
 }

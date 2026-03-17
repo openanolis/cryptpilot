@@ -16,9 +16,13 @@ pub struct FdeConfig {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
 #[serde(deny_unknown_fields)]
 pub struct RootFsConfig {
-    /// The type of read-write overlay layer over the underhood read-only rootfs. Can be "disk", "disk-persist", or "ram". Default value is "disk".
+    /// The locaton for the read-write overlay layer over the underhood read-only rootfs. Can be "disk", "disk-persist", or "ram". Default value is "disk".
+    #[serde(skip_serializing_if = "Option::is_none", alias = "rw_overlay")]
+    pub rw_overlay_location: Option<RwOverlayLocation>,
+
+    /// The backend implementation for the read-write overlay layer. Can be "overlayfs" or "dm-snapshot". Default value is "dm-snapshot".
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rw_overlay: Option<RwOverlayType>,
+    pub rw_overlay_backend: Option<RwOverlayBackend>,
 
     /// Encryption configuration for root filesystem. If not set, the rootfs partition WOULD NOT be encrypted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,9 +40,9 @@ pub struct DataConfig {
     pub encrypt: EncryptConfig,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone, Default)]
 #[serde(deny_unknown_fields)]
-pub enum RwOverlayType {
+pub enum RwOverlayLocation {
     /// The overlay will be placed on disk but will be cleared on every boot.
     /// This is the default and recommended option for security.
     #[default]
@@ -51,6 +55,18 @@ pub enum RwOverlayType {
     /// The overlay will be placed on tmpfs (in RAM), and be cleared on reboot.
     #[serde(rename = "ram")]
     Ram,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub enum RwOverlayBackend {
+    /// Use overlayfs for file-level copy-on-write.
+    #[serde(rename = "overlayfs")]
+    Overlayfs,
+    /// Use dm-snapshot for block-level copy-on-write. This is the default.
+    #[default]
+    #[serde(rename = "dm-snapshot")]
+    DmSnapshot,
 }
 
 #[cfg(test)]
@@ -72,7 +88,8 @@ pub mod tests {
 
         let raw = r#"
 [rootfs]
-rw_overlay = "disk"
+rw_overlay_location = "disk"
+rw_overlay_backend = "dm-snapshot"
 
 [rootfs.encrypt.kbs]
 kbs_url = "https://1.2.3.4:8080"
@@ -102,7 +119,8 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             config,
             FdeConfig {
                 rootfs: RootFsConfig {
-                    rw_overlay: Some(RwOverlayType::Disk),
+                    rw_overlay_location: Some(RwOverlayLocation::Disk),
+                    rw_overlay_backend: Some(RwOverlayBackend::DmSnapshot),
                     encrypt: Some(EncryptConfig {
                         key_provider: KeyProviderConfig::Kbs(KbsConfig {
                             cdh_type: CdhType::OneShot {
