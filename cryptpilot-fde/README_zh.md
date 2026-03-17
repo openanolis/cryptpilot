@@ -83,7 +83,7 @@ cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
 显示用于证明的加密参考值：
 
 ```sh
-cryptpilot-fde show-reference-value --stage system --disk /path/to/disk.qcow2
+cryptpilot-fde show-reference-value --disk /path/to/disk.qcow2
 ```
 
 ### `cryptpilot-fde config check`

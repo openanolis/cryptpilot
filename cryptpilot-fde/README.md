@@ -83,7 +83,7 @@ See [Configuration Guide](docs/configuration.md) for detailed options.
 Display cryptographic reference values for attestation:
 
 ```sh
-cryptpilot-fde show-reference-value --stage system --disk /path/to/disk.qcow2
+cryptpilot-fde show-reference-value --disk /path/to/disk.qcow2
 ```
 
 ### `cryptpilot-fde config check`

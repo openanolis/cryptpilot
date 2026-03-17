@@ -131,7 +131,7 @@ wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/seed.img
 为了证明目的，计算加密参考值：
 
 ```sh
-cryptpilot-fde show-reference-value --stage system --disk ./encrypted.qcow2
+cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
 ```
 
 这将输出可上传到[参考值提供服务（RVPS）](https://github.com/confidential-containers/trustee/tree/main/rvps)的度量值。

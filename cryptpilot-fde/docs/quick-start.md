@@ -131,7 +131,7 @@ wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/seed.img
 For attestation purposes, calculate cryptographic reference values:
 
 ```sh
-cryptpilot-fde show-reference-value --stage system --disk ./encrypted.qcow2
+cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
 ```
 
 This outputs measurement values that can be uploaded to [Reference Value Provider Service (RVPS)](https://github.com/confidential-containers/trustee/tree/main/rvps).
