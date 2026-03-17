@@ -213,7 +213,7 @@ proc::print_help_and_exit() {
     echo "      --out <output_file>                                 The output OS image file (vhd or qcow2)."
     echo "  -c, --config-dir <cryptpilot_config_dir>                The directory containing cryptpilot configuration files."
     echo "      --rootfs-passphrase <rootfs_encrypt_passphrase>     The passphrase for rootfs encryption."
-    echo "      --rootfs-no-encryption <rootfs_encrypt_passphrase>  Skip rootfs encryption, but keep the rootfs measuring feature enabled."
+    echo "      --rootfs-no-encryption                              Skip rootfs encryption, but keep the rootfs measuring feature enabled."
     echo "      --rootfs-part-num <rootfs_part_num>                 The partition number of the rootfs partition on the original disk. By default the tool will"
     echo "                                                          search for the rootfs partition by label='root' and fail if not found. You can override this"
     echo "                                                          behavior by specifying the partition number."
