@@ -1,3 +1,22 @@
+cryptpilot (0.5.0) unstable; urgency=medium
+
+  * build: improve version tag detection robustness
+  * ci: upgrade GitHub Actions to v6/v8 for Node.js 24 compatibility
+  * build(makefile): update RPM spec Version field during version bump
+  * ci: add GitHub Release notes generation workflow
+  * build(makefile): filter stable version tags for changelog generation
+  * build(rpm): remove cryptpilot main package from build outputs
+  * build: fix DEB packaging version and add automated version bump targets
+  * refactor(fde): rename volume and configuration concepts
+  * docs(cryptpilot-fde): remove deprecated --stage flag from show-reference-value examples
+  * feat(cryptpilot-fde): add dm-snapshot backend support for writable rootfs
+  * fix(cryptpilot-convert): correct help text for --rootfs-no-encryption option
+  * build: preserve uncommitted changes when creating source tarball
+  * feat(cryptpilot-fde): remove /data directory from encrypted system image and adjust rw_overlay scope
+  * docs(cryptpilot-fde): enhance boot documentation with UKI/GRUB modes and technical details
+
+ -- Kun Lai <laikun@linux.alibaba.com>  Wed, 18 Mar 2026 20:23:19 +0800
+
 cryptpilot (0.3.1-1) unstable; urgency=medium
 
   * feat(kbs): support both one-shot and daemon modes for CDH

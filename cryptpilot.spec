@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.4.0
+Version: 0.5.0
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -273,6 +273,22 @@ fi
 
 
 %changelog
+* Wed Mar 18 2026 Kun Lai <laikun@linux.alibaba.com> - 0.5.0-1
+- build: improve version tag detection robustness
+- ci: upgrade GitHub Actions to v6/v8 for Node.js 24 compatibility
+- build(makefile): update RPM spec Version field during version bump
+- ci: add GitHub Release notes generation workflow
+- build(makefile): filter stable version tags for changelog generation
+- build(rpm): remove cryptpilot main package from build outputs
+- build: fix DEB packaging version and add automated version bump targets
+- refactor(fde): rename volume and configuration concepts
+- docs(cryptpilot-fde): remove deprecated --stage flag from show-reference-value examples
+- feat(cryptpilot-fde): add dm-snapshot backend support for writable rootfs
+- fix(cryptpilot-convert): correct help text for --rootfs-no-encryption option
+- build: preserve uncommitted changes when creating source tarball
+- feat(cryptpilot-fde): remove /data directory from encrypted system image and adjust rw_overlay scope
+- docs(cryptpilot-fde): enhance boot documentation with UKI/GRUB modes and technical details
+
 * Tue Mar 03 2026 Kun Lai <laikun@linux.alibaba.com> - 0.4.0-1
 - feat(fs): replace is_empty_disk with more precise has_valuable_data
 - refactor(ci): add multi-arch RPM build with SLSA provenance support
