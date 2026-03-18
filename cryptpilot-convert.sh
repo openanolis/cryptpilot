@@ -1109,8 +1109,8 @@ step::create_lvm_part() {
 
     log::info "Initializing LVM physical volume and volume group"
     proc::exec_subshell_flose_fds pvcreate --force "$lvm_part"
-    proc::exec_subshell_flose_fds vgcreate --force system "$lvm_part" --setautoactivation n # disable auto activation of LVM volumes to prevent it from being activated unexpectedly
-    proc::exec_subshell_flose_fds vgchange -a y system  # activate the volume group
+    proc::exec_subshell_flose_fds vgcreate --force cryptpilot "$lvm_part" --setautoactivation n # disable auto activation of LVM volumes to prevent it from being activated unexpectedly
+    proc::exec_subshell_flose_fds vgchange -a y cryptpilot  # activate the volume group
 }
 
 step::setup_rootfs_lv_with_encrypt() {
@@ -1121,15 +1121,15 @@ step::setup_rootfs_lv_with_encrypt() {
     rootfs_size_in_byte=$(stat --printf="%s" "${rootfs_file_path}")
     local rootfs_lv_size_in_bytes=$((rootfs_size_in_byte + 16 * 1024 * 1024)) # original rootfs partition size plus LUKS2 header size
     log::info "Creating rootfs logical volume"
-    proc::hook_exit "[[ -e /dev/mapper/system-rootfs ]] && disk::dm_remove_all ${device}"
-    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B system # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
+    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${device}"
+    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B cryptpilot # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
     # Create a encrypted volume
     log::info "Encrypting rootfs logical volume with LUKS2"
-    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --subsystem cryptpilot /dev/mapper/system-rootfs --key-file=-
+    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --subsystem cryptpilot /dev/mapper/cryptpilot-rootfs --key-file=-
     proc::hook_exit "[[ -e /dev/mapper/rootfs ]] && disk::dm_remove_wait_busy rootfs"
 
     log::info "Opening encrypted rootfs volume"
-    echo -n "${rootfs_passphrase}" | cryptsetup open /dev/mapper/system-rootfs rootfs --key-file=-
+    echo -n "${rootfs_passphrase}" | cryptsetup open /dev/mapper/cryptpilot-rootfs rootfs --key-file=-
     # Copy rootfs content to the encrypted volume
     log::info "Copying rootfs content to the encrypted volume"
     dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/rootfs bs=4M
@@ -1143,11 +1143,11 @@ step::setup_rootfs_lv_without_encrypt() {
     rootfs_size_in_byte=$(stat --printf="%s" "${rootfs_file_path}")
     local rootfs_lv_size_in_bytes=$((rootfs_size_in_byte + 16 * 1024 * 1024)) # original rootfs partition size plus LUKS2 header size
     log::info "Creating rootfs logical volume"
-    proc::hook_exit "[[ -e /dev/mapper/system-rootfs ]] && disk::dm_remove_all ${device}"
-    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B system # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
+    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${device}"
+    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B cryptpilot # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
     # Copy rootfs content to the lvm volume
     log::info "Copying rootfs content to the logical volume"
-    dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/system-rootfs bs=4M
+    dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/cryptpilot-rootfs bs=4M
 }
 
 step::setup_rootfs_hash_lv() {
@@ -1161,9 +1161,9 @@ step::setup_rootfs_hash_lv() {
 
     local rootfs_hash_size_in_byte
     rootfs_hash_size_in_byte=$(stat --printf="%s" "${rootfs_hash_file_path}")
-    proc::hook_exit "[[ -e /dev/mapper/system-rootfs_hash ]] && disk::dm_remove_all ${device}"
-    proc::exec_subshell_flose_fds lvcreate -n rootfs_hash --size "${rootfs_hash_size_in_byte}"B system
-    dd status=progress "if=${rootfs_hash_file_path}" of=/dev/mapper/system-rootfs_hash bs=4M
+    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs_hash ]] && disk::dm_remove_all ${device}"
+    proc::exec_subshell_flose_fds lvcreate -n rootfs_hash --size "${rootfs_hash_size_in_byte}"B cryptpilot
+    dd status=progress "if=${rootfs_hash_file_path}" of=/dev/mapper/cryptpilot-rootfs_hash bs=4M
     rm -f "${rootfs_hash_file_path}"
     disk::dm_remove_all "${device}"
 

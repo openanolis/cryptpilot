@@ -17,7 +17,7 @@ install() {
         inst_multiple awk sed pvs growpart sfdisk lvm lvextend mountpoint bash
         inst_multiple modprobe
 
-        # We need mkfs.ext4 for creating data volume here
+        # We need mkfs.ext4 for creating delta volume here
         inst_multiple mkfs.ext4
 
         # For resize ext4 filesystem

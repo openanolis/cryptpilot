@@ -47,9 +47,9 @@ In CryptPilot, data is encrypted in units of volumes. The confidential system di
 
     - Encryption: Encryption of this volume is optional, depending on your business requirements. If you need to encrypt the rootfs volume data, you can configure encryption options during the confidential system disk creation process.
 
-- **data Volume**: The data volume is an encrypted volume composed of the remaining available space on the system disk, containing a read-write Ext4 filesystem.
+- **delta Volume**: The delta volume is an encrypted volume composed of the remaining available space on the system disk, containing a read-write Ext4 filesystem.
 
-    - Encryption: During system startup, this volume is decrypted, and after entering the system, it is mounted to the `/data` location. Any data written to the data volume is encrypted before being written to disk. Users can write their data files here, and the data will not be lost after instance restart.
+    - Encryption: During system startup, this volume is decrypted, and after entering the system, it is mounted to the `/data` location. Any data written to the delta volume is encrypted before being written to disk. Users can write their data files here, and the data will not be lost after instance restart.
 
 ### 1.3 Core Components
 
@@ -65,7 +65,7 @@ The image preparation phase is executed by `cryptpilot-convert` in an offline en
 
 The conversion process first shrinks the original rootfs partition to its minimum size to reduce the storage overhead of the hash tree. Then the dm-verity hash tree is calculated, outputting hash tree data and root_hash values. The hash tree data is stored in a separate logical volume, while root_hash is recorded in the `metadata.toml` file.
 
-The converted disk uses LVM to manage storage layout, creating three logical volumes in a volume group named "system": the rootfs logical volume stores the shrunk rootfs data, the rootfs_hash logical volume stores the dm-verity hash tree, and the data logical volume serves as difference layer storage space. When using the overlayfs mechanism, the data volume is mounted as a filesystem to store the writable layer; when using the dm-snapshot mechanism, the data volume is used directly as a block device for COW (Copy-On-Write) storage.
+The converted disk uses LVM to manage storage layout, creating three logical volumes in a volume group named "cryptpilot": the rootfs logical volume stores the shrunk rootfs data, the rootfs_hash logical volume stores the dm-verity hash tree, and the delta logical volume serves as difference layer storage space. When using the overlayfs mechanism, the delta volume is mounted as a filesystem to store the writable layer; when using the dm-snapshot mechanism, the delta volume is used directly as a block device for COW (Copy-On-Write) storage.
 
 The `metadata.toml` file contains metadata format version and dm-verity root_hash values. This file is embedded into the initrd image during the conversion process and can be accessed in the initrd environment during startup.
 
@@ -83,7 +83,7 @@ GRUB mode uses GRUB2 as the bootloader, suitable for scenarios requiring multi-k
 |-----------|-------------|---------|
 | EFI System Partition | `/boot/efi` | Stores shim, GRUB bootloader |
 | Boot Partition | `/boot` | Stores kernel, initrd, grub.cfg |
-| LVM Physical Volume | - | Contains rootfs, rootfs_hash, data logical volumes |
+| LVM Physical Volume | - | Contains rootfs, rootfs_hash, delta logical volumes |
 
 **Boot Flow**:
 
@@ -109,7 +109,7 @@ UKI mode uses Unified Kernel Image, packaging the kernel, initrd, and kernel com
 | Partition | Mount Point | Purpose |
 |-----------|-------------|---------|
 | EFI System Partition | `/boot/efi` | Stores UKI image (BOOTX64.EFI) |
-| LVM Physical Volume | - | Contains rootfs, rootfs_hash, data logical volumes |
+| LVM Physical Volume | - | Contains rootfs, rootfs_hash, delta logical volumes |
 
 UKI mode does not require an independent boot partition, resulting in a more concise partition layout.
 
@@ -148,23 +148,23 @@ This service executes before `initrd-root-device.target` and is the key stage fo
 
 The construction of the rootfs device chain varies depending on encryption configuration. If rootfs encryption is configured, the service first obtains the passphrase through a key provider and opens the LUKS2 encrypted volume, then establishes dm-verity on the decrypted device. If encryption is not configured, dm-verity is established directly on the rootfs logical volume.
 
-#### 4.1.1 Data Volume Initialization and Expansion
+#### 4.1.1 Delta Volume Initialization and Expansion
 
 The service first checks whether the disk where the LVM physical volume resides has unallocated space, and if so, extends the partition table and expands the LVM physical volume. This mechanism enables the system to automatically adapt to disk expansion scenarios in cloud environments.
 
-Data volume initialization is also completed at this stage. The service checks whether the data logical volume exists, creating it if it does not and occupying all remaining space in the volume group. If the data volume already exists, it is expanded to the remaining space in the volume group.
+Delta volume initialization is also completed at this stage. The service checks whether the delta logical volume exists, creating it if it does not and occupying all remaining space in the volume group. If the delta volume already exists, it is expanded to the remaining space in the volume group.
 
-**Data Volume Decryption Flow**:
+**Delta Volume Decryption Flow**:
 
 ```text
-data_lv → dm-crypt → dm-integrity(optional) → decrypted data volume block device
+delta_lv → dm-crypt → dm-integrity(optional) → decrypted delta volume block device
 ```
 
-After the data logical volume is created or expanded, the service obtains the passphrase for the data volume, determines whether reinitialization is needed, formats the LUKS2 volume, and obtains the decrypted data volume block device. The decrypted data volume block device will be used to carry the difference layer data. The system supports two difference layer implementation mechanisms, selected through the `rw_overlay_backend` configuration, with dm-snapshot as the default.
+After the delta logical volume is created or expanded, the service obtains the passphrase for the delta volume, determines whether reinitialization is needed, formats the LUKS2 volume, and obtains the decrypted delta volume block device. The decrypted delta volume block device will be used to carry the difference layer data. The system supports two difference layer implementation mechanisms, selected through the `delta_backend` configuration, with dm-snapshot as the default.
 
-#### 4.1.2 Overlayfs Data Volume Preparation (When Using Overlayfs Mechanism)
+#### 4.1.2 Overlayfs Delta Volume Preparation (When Using Overlayfs Mechanism)
 
-When configured with `rw_overlay_backend = "overlayfs"`, the service creates an ext4 filesystem on the decrypted data volume block device for storing overlay upperdir and workdir.
+When configured with `delta_backend = "overlayfs"`, the service creates an ext4 filesystem on the decrypted delta volume block device for storing overlay upperdir and workdir.
 
 **Device Chain Structure**:
 
@@ -172,12 +172,12 @@ When configured with `rw_overlay_backend = "overlayfs"`, the service creates an 
 rootfs_lv → [dm-crypt] → dm-verity ──┬─→ overlayfs ──→ /sysroot
                                      │
                                upper layer
-                     (decrypted data volume or tmpfs)
+                     (decrypted delta volume or tmpfs)
 ```
 
 #### 4.1.3 dm-snapshot Device Chain Preparation (When Using dm-snapshot Mechanism)
 
-When configured with `rw_overlay_backend = "dm-snapshot"` (default), the service uses the decrypted data volume block device directly as COW storage. It then continues to build the dm-snapshot device chain, enabling dracut to mount a writable root filesystem directly.
+When configured with `delta_backend = "dm-snapshot"` (default), the service uses the decrypted delta volume block device directly as COW storage. It then continues to build the dm-snapshot device chain, enabling dracut to mount a writable root filesystem directly.
 
 **Device Chain Structure**:
 
@@ -186,14 +186,14 @@ rootfs_lv → [dm-crypt] → dm-verity ──┬─→ dm-linear ──→ dm-sn
                                      │                      ↑
                                   dm-zero                   │
                                      │                   COW device
-                        (size equals COW device)    (decrypted data volume or zram)
+                        (size equals COW device)    (decrypted delta volume or zram)
 ```
 
 The build process is divided into the following steps:
 
-1. **Prepare COW Device**: Prepare copy-on-write storage according to the `rw_overlay` configuration
-   - `rw_overlay_location = "ram"`: Create zram memory block device with size equal to system memory
-   - `rw_overlay_location = "disk"` or `"disk-persist"`: Use data logical volume as COW device
+1. **Prepare COW Device**: Prepare copy-on-write storage according to the `delta_location` configuration
+   - `delta_location = "ram"`: Create zram memory block device with size equal to system memory
+   - `delta_location = "disk"` or `"disk-persist"`: Use delta logical volume as COW device
 
 2. **Create dm-zero Device**: Create a dm-zero device of the same size as the COW device to extend the origin device size
 
@@ -216,11 +216,11 @@ After `cryptpilot-fde-before-sysroot` completes, dracut takes over execution. dr
 
 This service executes after `sysroot.mount`, resolving the conflict between dm-verity read-only restrictions and system runtime write requirements.
 
-#### 4.3.1 Overlayfs Data Volume Enablement (When Using Overlayfs Mechanism)
+#### 4.3.1 Overlayfs Delta Volume Enablement (When Using Overlayfs Mechanism)
 
-When configured with `rw_overlay_backend = "overlayfs"`, a file-level overlay mechanism is used. The service uses the directory mounted by the original dm-verity device as the lowerdir for overlayfs.
+When configured with `delta_backend = "overlayfs"`, a file-level overlay mechanism is used. The service uses the directory mounted by the original dm-verity device as the lowerdir for overlayfs.
 
-Writable layer preparation is performed according to the `rw_overlay_location` configuration. When configured as `ram`, tmpfs in memory is used as upperdir, with data lost after reboot. When configured as `disk` or `disk-persist`, the overlay directory in the data volume is used as upperdir, with `disk` mode clearing on each boot while `disk-persist` mode retains data.
+Writable layer preparation is performed according to the `delta_location` configuration. When configured as `ram`, tmpfs in memory is used as upperdir, with data lost after reboot. When configured as `disk` or `disk-persist`, the overlay directory in the delta volume is used as upperdir, with `disk` mode clearing on each boot while `disk-persist` mode retains data.
 
 Overlayfs mounting combines lowerdir, upperdir, and workdir, mounting the unified view to `/sysroot` to override the original read-only mount. After mounting, read operations are passed through to the dm-verity protected lowerdir, while write operations are redirected to the writable upperdir.
 
@@ -231,9 +231,9 @@ For container runtime scenarios, the following directories are bind mounted to i
 
 Failure to bind mount these directories will not prevent system startup, only error logs are recorded.
 
-#### 4.3.2 dm-snapshot Data Volume Enablement (When Using dm-snapshot Mechanism)
+#### 4.3.2 dm-snapshot Delta Volume Enablement (When Using dm-snapshot Mechanism)
 
-When configured with `rw_overlay_backend = "dm-snapshot"` (default), the dm-snapshot device chain has already been prepared during the `cryptpilot-fde-before-sysroot` stage. dracut mounts the dm-snapshot device directly to `/sysroot`, and this mount is already writable.
+When configured with `delta_backend = "dm-snapshot"` (default), the dm-snapshot device chain has already been prepared during the `cryptpilot-fde-before-sysroot` stage. dracut mounts the dm-snapshot device directly to `/sysroot`, and this mount is already writable.
 
 No additional operations are required at this stage; all write operations are handled at the block device layer through the dm-snapshot COW mechanism.
 

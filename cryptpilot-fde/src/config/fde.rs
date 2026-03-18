@@ -9,20 +9,21 @@ pub struct FdeConfig {
     /// Configuration related to the read-only root filesystem.
     pub rootfs: RootFsConfig,
 
-    /// Configuration related to the data partition.
-    pub data: DataConfig,
+    /// Configuration related to the writeable delta volume on disk.
+    #[serde(alias = "data")]
+    pub delta: DeltaConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
 #[serde(deny_unknown_fields)]
 pub struct RootFsConfig {
-    /// The locaton for the read-write overlay layer over the underhood read-only rootfs. Can be "disk", "disk-persist", or "ram". Default value is "disk".
+    /// The locaton for storing the delta data over the underhood read-only rootfs. Can be "disk", "disk-persist", or "ram". Default value is "disk".
     #[serde(skip_serializing_if = "Option::is_none", alias = "rw_overlay")]
-    pub rw_overlay_location: Option<RwOverlayLocation>,
+    pub delta_location: Option<DeltaLocation>,
 
-    /// The backend implementation for the read-write overlay layer. Can be "overlayfs" or "dm-snapshot". Default value is "dm-snapshot".
+    /// The backend implementation for the delta data layer. Can be "overlayfs" or "dm-snapshot". Default value is "dm-snapshot".
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rw_overlay_backend: Option<RwOverlayBackend>,
+    pub delta_backend: Option<DeltaBackend>,
 
     /// Encryption configuration for root filesystem. If not set, the rootfs partition WOULD NOT be encrypted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,35 +32,35 @@ pub struct RootFsConfig {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, DocumentedFields)]
 #[serde(deny_unknown_fields)]
-pub struct DataConfig {
+pub struct DeltaConfig {
     /// Whether or not to enable integrity check.
     #[serde(default = "Default::default")]
     pub integrity: bool,
 
-    /// Encryption configuration for data partition. If not set, the data partition WOULD NOT be encrypted.
+    /// Encryption configuration for delta partition. If not set, the delta partition WOULD NOT be encrypted.
     pub encrypt: EncryptConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone, Default)]
 #[serde(deny_unknown_fields)]
-pub enum RwOverlayLocation {
-    /// The overlay will be placed on disk but will be cleared on every boot.
+pub enum DeltaLocation {
+    /// The delta data will be placed on disk but will be cleared on every boot.
     /// This is the default and recommended option for security.
     #[default]
     #[serde(rename = "disk")]
     Disk,
-    /// The overlay will be placed on disk, and be persistent across reboots.
-    /// Note: persistence depends on the data volume configuration.
+    /// The delta data will be placed on disk, and be persistent across reboots.
+    /// Note: persistence depends on the delta volume configuration.
     #[serde(rename = "disk-persist")]
     DiskPersist,
-    /// The overlay will be placed on tmpfs (in RAM), and be cleared on reboot.
+    /// The delta data will be placed on tmpfs (in RAM), and be cleared on reboot.
     #[serde(rename = "ram")]
     Ram,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Copy, Clone, Default)]
 #[serde(deny_unknown_fields)]
-pub enum RwOverlayBackend {
+pub enum DeltaBackend {
     /// Use overlayfs for file-level copy-on-write.
     #[serde(rename = "overlayfs")]
     Overlayfs,
@@ -70,7 +71,7 @@ pub enum RwOverlayBackend {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
 
     use cryptpilot::{
         config::encrypt::KeyProviderConfig,
@@ -88,8 +89,8 @@ pub mod tests {
 
         let raw = r#"
 [rootfs]
-rw_overlay_location = "disk"
-rw_overlay_backend = "dm-snapshot"
+delta_location = "disk"
+delta_backend = "dm-snapshot"
 
 [rootfs.encrypt.kbs]
 kbs_url = "https://1.2.3.4:8080"
@@ -101,10 +102,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 -----END CERTIFICATE-----
 """
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.kbs]
+[delta.encrypt.kbs]
 kbs_url = "https://1.2.3.4:8080"
 key_uri = "kbs:///default/test/data_partition"
 kbs_root_cert = """
@@ -119,8 +120,8 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             config,
             FdeConfig {
                 rootfs: RootFsConfig {
-                    rw_overlay_location: Some(RwOverlayLocation::Disk),
-                    rw_overlay_backend: Some(RwOverlayBackend::DmSnapshot),
+                    delta_location: Some(DeltaLocation::Disk),
+                    delta_backend: Some(DeltaBackend::DmSnapshot),
                     encrypt: Some(EncryptConfig {
                         key_provider: KeyProviderConfig::Kbs(KbsConfig {
                             cdh_type: CdhType::OneShot {
@@ -138,7 +139,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                         })
                     })
                 },
-                data: DataConfig {
+                delta: DeltaConfig {
                     integrity: true,
                     encrypt: EncryptConfig {
                         key_provider: KeyProviderConfig::Kbs(KbsConfig {

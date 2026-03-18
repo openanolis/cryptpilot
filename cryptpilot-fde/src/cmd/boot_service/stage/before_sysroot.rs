@@ -7,13 +7,13 @@ use crate::{
     cmd::boot_service::{
         metadata::{load_metadata_from_file, Metadata},
         stage::{
-            DATA_DEVICE, DATA_LOGICAL_VOLUME, DATA_NAME, ROOTFS_DECRYPTED_LAYER_DEVICE,
+            DELTA_DEVICE, DELTA_LOGICAL_VOLUME, DELTA_NAME, ROOTFS_DECRYPTED_LAYER_DEVICE,
             ROOTFS_DECRYPTED_NAME, ROOTFS_DEVICE, ROOTFS_EXTENDED_DEVICE, ROOTFS_EXTENDED_NAME,
             ROOTFS_HASH_LOGICAL_VOLUME, ROOTFS_LOGICAL_VOLUME, ROOTFS_NAME, ROOTFS_VERITY_DEVICE,
-            ROOTFS_VERITY_NAME,
+            ROOTFS_VERITY_NAME, VOLUME_GROUP_NAME,
         },
     },
-    config::{RwOverlayBackend, RwOverlayLocation},
+    config::{DeltaBackend, DeltaLocation},
 };
 use block_devs::BlckExt;
 use cryptpilot::{
@@ -37,13 +37,16 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
 
     tracing::info!("Setting up volumes required by FDE");
 
-    // 1. Checking and activating LVM volume group 'system'
-    tracing::info!("[ 1/4 ] Checking and activating LVM volume group 'system'");
+    // 1. Checking and activating LVM volume group
+    tracing::info!(
+        volume_group_name = VOLUME_GROUP_NAME,
+        "[ 1/4 ] Checking and activating LVM volume group"
+    );
     Command::new("vgchange")
-        .args(["-a", "y", "system"])
+        .args(["-a", "y", VOLUME_GROUP_NAME])
         .run()
         .await
-        .context("Failed to activate LVM volume group 'system'")?;
+        .with_context(|| format!("Failed to activate LVM volume group '{VOLUME_GROUP_NAME}'"))?;
 
     // 2. Load the root-hash and add it to the AAEL
     tracing::info!("[ 2/4 ] Loading root-hash");
@@ -90,11 +93,11 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
 
     tracing::info!("Setting up dm-verity for rootfs volume");
 
-    let backend = fde_config.rootfs.rw_overlay_backend.unwrap_or_default();
+    let backend = fde_config.rootfs.delta_backend.unwrap_or_default();
 
     let (dm_verity_output_name, dm_verity_output_device) = match backend {
-        RwOverlayBackend::Overlayfs => (ROOTFS_NAME, Path::new(ROOTFS_DEVICE)),
-        RwOverlayBackend::DmSnapshot => (ROOTFS_VERITY_NAME, Path::new(ROOTFS_VERITY_DEVICE)),
+        DeltaBackend::Overlayfs => (ROOTFS_NAME, Path::new(ROOTFS_DEVICE)),
+        DeltaBackend::DmSnapshot => (ROOTFS_VERITY_NAME, Path::new(ROOTFS_VERITY_DEVICE)),
     };
 
     setup_rootfs_dm_verity(
@@ -109,53 +112,57 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
     .await?;
     // Now we have the rootfs ro part
 
-    // 4. Setup data volume and overlay backend
+    // 4. Setup delta volume and overlay backend
     {
-        let rw_overlay_location = fde_config
+        let delta_location = fde_config
             .rootfs
-            .rw_overlay_location
-            .unwrap_or(RwOverlayLocation::Disk);
+            .delta_location
+            .unwrap_or(DeltaLocation::Disk);
 
         tracing::info!(
             ?backend,
-            ?rw_overlay_location,
-            "[ 4/4 ] Setting up data volume if required"
+            ?delta_location,
+            "[ 4/4 ] Setting up delta volume if required"
         );
 
         if matches!(
-            rw_overlay_location,
-            RwOverlayLocation::Disk | RwOverlayLocation::DiskPersist
+            delta_location,
+            DeltaLocation::Disk | DeltaLocation::DiskPersist
         ) {
             tracing::info!("Expanding system PV partition");
             if let Err(error) = expand_system_pv_partition().await {
                 tracing::warn!(?error, "Failed to expend the system PV partition");
             }
 
-            // Ensure data logical volume exists
-            ensure_data_volume_exist_and_expanded().await?;
+            // Ensure delta logical volume exists
+            ensure_delta_volume_exist_and_expanded().await?;
 
             let (recreate, integrity) =
-                setup_data_volume_luks2(&fde_config.data, rw_overlay_location).await?;
+                setup_delta_volume_luks2(&fde_config.delta, delta_location).await?;
 
-            // Setup data volume based on backend type
+            // Setup delta volume based on backend type
             match backend {
-                RwOverlayBackend::Overlayfs => {
-                    let data_device = Path::new(DATA_DEVICE);
+                DeltaBackend::Overlayfs => {
+                    let delta_device = Path::new(DELTA_DEVICE);
                     if recreate {
-                        tracing::info!("Creating ext4 fs on data volume");
-                        cryptpilot::fs::mkfs::force_mkfs(data_device, &MakeFsType::Ext4, integrity)
-                            .await?;
+                        tracing::info!("Creating ext4 fs on delta volume");
+                        cryptpilot::fs::mkfs::force_mkfs(
+                            delta_device,
+                            &MakeFsType::Ext4,
+                            integrity,
+                        )
+                        .await?;
                     } else {
                         // Resize existing filesystem to fill the expanded device
-                        resize_ext4_filesystem(data_device).await?;
+                        resize_ext4_filesystem(delta_device).await?;
                     }
                 }
-                RwOverlayBackend::DmSnapshot => {
+                DeltaBackend::DmSnapshot => {
                     // Build dm-snapshot device chain
                     setup_dm_snapshot_device_chain(
                         dm_verity_output_device,
-                        Path::new(DATA_DEVICE),
-                        matches!(rw_overlay_location, RwOverlayLocation::DiskPersist),
+                        Path::new(DELTA_DEVICE),
+                        matches!(delta_location, DeltaLocation::DiskPersist),
                     )
                     .await?;
 
@@ -164,12 +171,12 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
                 }
             }
         } else {
-            // No need to set up data volume
+            // No need to set up delta volume
             match backend {
-                RwOverlayBackend::Overlayfs => {
+                DeltaBackend::Overlayfs => {
                     // Nothing to do
                 }
-                RwOverlayBackend::DmSnapshot => {
+                DeltaBackend::DmSnapshot => {
                     tracing::info!("Creating zram device for COW storage");
                     let cow_device = create_zram_cow_device().await?;
                     // Build dm-snapshot device chain
@@ -182,41 +189,50 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
         }
     }
 
-    tracing::info!("Both rootfs volume and data volume are ready");
+    tracing::info!("Both rootfs volume and delta volume are ready");
 
     Ok(())
 }
 
-async fn ensure_data_volume_exist_and_expanded() -> Result<(), anyhow::Error> {
-    Ok(if !Path::new(DATA_LOGICAL_VOLUME).exists() {
+async fn ensure_delta_volume_exist_and_expanded() -> Result<(), anyhow::Error> {
+    if !Path::new(DELTA_LOGICAL_VOLUME).exists() {
         tracing::info!(
-            "Data logical volume does not exist, assume it is first time boot and create it."
+            "Delta logical volume does not exist, assume it is first time boot and create it."
         );
 
-        // Due to there is no udev in initrd, the lvcreate will complain that /dev/system/data not exist. A workaround is to set '--zero n' and zeroing the first 4k of logical volume manually.
+        // Due to there is no udev in initrd, the lvcreate will complain that /dev/cryptpilot/delta not exist. A workaround is to set '--zero n' and zeroing the first 4k of logical volume manually.
         // See https://serverfault.com/a/1059400
         async {
             Command::new("lvcreate")
-                .args(["-n", DATA_NAME, "--zero", "n", "-l", "100%FREE", "system"])
+                .args([
+                    "-n",
+                    DELTA_NAME,
+                    "--zero",
+                    "n",
+                    "-l",
+                    "100%FREE",
+                    "cryptpilot",
+                ])
                 .env("LVM_SYSTEM_DIR", CRYPTPILOT_LVM_SYSTEM_DIR)
                 .run()
                 .await?;
             File::options()
                 .write(true)
-                .open(DATA_LOGICAL_VOLUME)
+                .open(DELTA_LOGICAL_VOLUME)
                 .await?
                 .write_all(&[0u8; 4096])
                 .await?;
             Ok::<_, anyhow::Error>(())
         }
         .await
-        .context("Failed to create data logical volume")?;
+        .context("Failed to create delta logical volume")?;
     } else {
-        tracing::info!("Expanding data logical volume");
-        if let Err(error) = expand_system_data_lv().await {
-            tracing::warn!(?error, "Failed to expend data logical volume");
+        tracing::info!("Expanding delta logical volume");
+        if let Err(error) = expand_system_delta_lv().await {
+            tracing::warn!(?error, "Failed to expend delta logical volume");
         }
-    })
+    }
+    Ok(())
 }
 
 async fn load_metadata() -> Result<Metadata> {
@@ -257,7 +273,7 @@ async fn expand_system_pv_partition() -> Result<()> {
             r#"
 set -euo pipefail
 
-VG_NAME="system"
+VG_NAME="cryptpilot"
 
 # Find any PV belonging to the volume group
 PV_DEV=$(pvs --noheadings -o pv_name,vg_name | awk "\$2==\"$VG_NAME\" {print \$1; exit}")
@@ -294,7 +310,7 @@ echo "Last partition number: $LAST_PART_NUM"
 
 echo "Expanding partition and physical volume ..."
 if growpart "$DISK_PATH" "$LAST_PART_NUM"; then
-    # the growpart command fill also call lvm pvresize to resize the related data volume
+    # the growpart command fill also call lvm pvresize to resize the related delta volume
     echo "Physical volume resized successfully"
 
 elif [[ $? -eq 1 ]]; then
@@ -313,11 +329,11 @@ fi
     Ok::<_, anyhow::Error>(())
 }
 
-async fn expand_system_data_lv() -> Result<()> {
+async fn expand_system_delta_lv() -> Result<()> {
     Command::new("lvextend")
         .arg("-l")
         .arg("+100%FREE")
-        .arg(DATA_LOGICAL_VOLUME)
+        .arg(DELTA_LOGICAL_VOLUME)
         .env("LVM_SYSTEM_DIR", CRYPTPILOT_LVM_SYSTEM_DIR)
         .run_with_status_checker(|code, _, _| match code {
             0 | 5 => Ok(()),
@@ -330,51 +346,51 @@ async fn expand_system_data_lv() -> Result<()> {
     Ok::<_, anyhow::Error>(())
 }
 
-/// Setup data volume LUKS2 encryption and return whether content should be recreated
-async fn setup_data_volume_luks2(
-    data_config: &crate::config::DataConfig,
-    rw_overlay_location: RwOverlayLocation,
+/// Setup delta volume LUKS2 encryption and return whether content should be recreated
+async fn setup_delta_volume_luks2(
+    delta_config: &crate::config::DeltaConfig,
+    delta_location: DeltaLocation,
 ) -> Result<(bool, IntegrityType)> {
-    tracing::info!("Fetching passphrase for data volume");
-    let provider = data_config.encrypt.key_provider.clone().into_provider();
+    tracing::info!("Fetching passphrase for delta volume");
+    let provider = delta_config.encrypt.key_provider.clone().into_provider();
     let passphrase = provider
         .get_key()
         .await
         .context("Failed to get passphrase")?;
 
-    let integrity = if data_config.integrity {
+    let integrity = if delta_config.integrity {
         IntegrityType::Journal // Select Journal mode since it is persistent storage
     } else {
         IntegrityType::None
     };
 
-    let data_logical_volume_dev = Path::new(DATA_LOGICAL_VOLUME);
+    let delta_logical_volume_dev = Path::new(DELTA_LOGICAL_VOLUME);
 
     let recreate = if matches!(provider.volume_type(), VolumeType::Temporary) {
-        tracing::info!("Key provider is temporary, will recreate data volume content");
+        tracing::info!("Key provider is temporary, will recreate delta volume content");
         true
-    } else if !cryptpilot::fs::luks2::is_initialized(data_logical_volume_dev).await? {
-        tracing::info!("Data volume is not initialized, will create new content");
+    } else if !cryptpilot::fs::luks2::is_initialized(delta_logical_volume_dev).await? {
+        tracing::info!("Delta volume is not initialized, will create new content");
         true
-    } else if matches!(rw_overlay_location, RwOverlayLocation::Disk) {
-        tracing::info!("Overlay type is disk (non-persistent), will recreate data volume content");
+    } else if matches!(delta_location, DeltaLocation::Disk) {
+        tracing::info!("Overlay type is disk (non-persistent), will recreate delta volume content");
         true
     } else {
-        tracing::info!("Data volume is initialized and overlay type is persistent, will reuse existing content");
+        tracing::info!("Delta volume is initialized and overlay type is persistent, will reuse existing content");
         false
     };
 
     if recreate {
         // Create a LUKS volume on it
-        tracing::info!("Creating LUKS2 on data volume");
-        cryptpilot::fs::luks2::format(data_logical_volume_dev, &passphrase, integrity).await?;
+        tracing::info!("Creating LUKS2 on delta volume");
+        cryptpilot::fs::luks2::format(delta_logical_volume_dev, &passphrase, integrity).await?;
     }
 
     // TODO: support change size of the LUKS2 volume and inner ext4 file system
-    tracing::info!("Opening data volume");
+    tracing::info!("Opening delta volume");
     cryptpilot::fs::luks2::open_with_check_passphrase(
-        DATA_NAME,
-        data_logical_volume_dev,
+        DELTA_NAME,
+        delta_logical_volume_dev,
         &passphrase,
         integrity,
     )

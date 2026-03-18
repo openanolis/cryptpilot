@@ -6,8 +6,8 @@
 # The following are used when rootfs encryption is not enabled
 #
 
-# Prevent /dev/system/rootfs from creating /dev/disk/by-uuid/... symlinks
-ENV{DM_VG_NAME}=="system", ENV{DM_LV_NAME}=="rootfs", \
+# Prevent /dev/cryptpilot/rootfs from creating /dev/disk/by-uuid/... symlinks
+ENV{DM_VG_NAME}=="cryptpilot", ENV{DM_LV_NAME}=="rootfs", \
     ENV{UDISKS_IGNORE}="1", \
     ENV{DM_UDEV_DISABLE_DISK_RULES_FLAG}="1", \
     ENV{DM_UDEV_DISABLE_OTHER_RULES_FLAG}="1"

@@ -75,16 +75,16 @@ pub mod tests {
 verbose = true
 
 [fde.rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [fde.rootfs.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 
-[fde.data]
+[fde.delta]
 integrity = true
 
-[fde.data.encrypt.exec]
+[fde.delta.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]"#,
         )?;

@@ -20,16 +20,16 @@ For this demo, we'll use the `exec` key provider with a hardcoded passphrase:
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [rootfs.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.exec]
+[delta.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 EOF
@@ -47,9 +47,9 @@ The configuration directory structure:
 **Configuration Explanation:**
 
 - `[rootfs]`: Root filesystem configuration
-  - `rw_overlay_location = "disk"`: Store writable overlay on data partition (survives reboot)
+  - `delta_location = "disk"`: Store writable overlay on delta partition (survives reboot)
   - `encrypt.exec`: Use exec provider with passphrase "AAAaaawewe222"
-- `[data]`: Data partition configuration
+- `[delta]`: Delta partition configuration
   - `integrity = true`: Enable dm-integrity for data authenticity
   - `encrypt.exec`: Use exec provider with passphrase "AAAaaawewe222"
 
@@ -88,7 +88,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 
 1. Reads the original disk image
 2. Creates encrypted rootfs partition with dm-verity
-3. Creates encrypted data partition with dm-integrity
+3. Creates encrypted delta partition with dm-integrity
 4. Installs cryptpilot-fde into initrd
 5. Configures boot loader for encrypted boot
 6. Writes the encrypted disk to output file
@@ -158,13 +158,13 @@ Create configuration without rootfs encryption:
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 # Note: No encrypt configuration in rootfs section
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.exec]
+[delta.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 EOF
@@ -173,13 +173,13 @@ EOF
 **Configuration Explanation:**
 
 - `[rootfs]`: Root filesystem configuration
-  - `rw_overlay_location = "disk"`: Store writable overlay on data partition
+  - `delta_location = "disk"`: Store writable overlay on delta partition
   - **No `encrypt` configuration**: rootfs is not encrypted, only dm-verity integrity protection
-- `[data]`: Data partition configuration
+- `[delta]`: Delta partition configuration
   - `integrity = true`: Enable dm-integrity
-  - `encrypt.exec`: Data partition is still encrypted
+  - `encrypt.exec`: Delta partition is still encrypted
 
-### Encrypt Data Partition (rootfs Not Encrypted)
+### Encrypt Delta Partition (rootfs Not Encrypted)
 
 Use the `--rootfs-no-encryption` parameter:
 
@@ -193,7 +193,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 **What happens:**
 
 1. rootfs uses dm-verity for integrity protection (not encrypted)
-2. Data partition is encrypted normally
+2. Delta partition is encrypted normally
 3. System still performs measurement and attestation during boot
 4. rootfs is mounted read-only with writable overlay layer
 
@@ -228,16 +228,16 @@ For production systems, you need to encrypt a real disk.
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [rootfs.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.exec]
+[delta.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 EOF
@@ -269,16 +269,16 @@ For production environments, use Key Broker Service with remote attestation.
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [rootfs.encrypt.kbs]
 url = "https://kbs.example.com"
 resource_path = "/secrets/rootfs-key"
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.kbs]
+[delta.encrypt.kbs]
 url = "https://kbs.example.com"
 resource_path = "/secrets/data-key"
 EOF
@@ -316,17 +316,17 @@ For Alibaba Cloud users, use KMS for centralized key management.
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [rootfs.encrypt.kms]
 kms_instance_id = "kst-****"
 client_key_id = "LTAI****"
 client_key_password_from_kms = "alias/ClientKey_****"
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.kms]
+[delta.encrypt.kms]
 kms_instance_id = "kst-****"
 client_key_id = "LTAI****"
 client_key_password_from_kms = "alias/ClientKey_****"
@@ -406,7 +406,7 @@ If `cryptpilot-convert` fails:
 1. **Check disk format**: Only qcow2 images are supported for disk images
 2. **Check disk size**: Ensure enough space for encryption overhead
 3. **For real disks**: Ensure the disk is unmounted and not in use
-4. **Device already exists error**: If you see errors like `/dev/system: already exists in filesystem`, it may be leftover from a previous failed convert. Try `dmsetup remove_all` to clean up
+4. **Device already exists error**: If you see errors like `/dev/cryptpilot: already exists in filesystem`, it may be leftover from a previous failed convert. Try `dmsetup remove_all` to clean up
 5. **Check logs**: The last convert's detailed log is saved at `/tmp/.cryptpilot-convert.log`
 
 ### Boot Failed
@@ -426,5 +426,5 @@ If the encrypted system fails to boot:
 
 ## See Also
 
-- [cryptpilot-crypt Quick Start](../../cryptpilot-crypt/docs/quick-start.md) - Encrypt data volumes
+- [cryptpilot-crypt Quick Start](../../cryptpilot-crypt/docs/quick-start.md) - Encrypt delta volumes
 - [Development Guide](../../docs/development.md) - Build and test instructions

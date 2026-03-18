@@ -38,7 +38,7 @@ graph LR
 - **完整性保护**：使用 dm-verity 保护只读 rootfs
 - **度量与证明**：度量启动工件用于远程证明
 - **灵活的密钥管理**：支持 KBS、KMS、OIDC、TPM2 和自定义 exec 提供者
-- **覆盖文件系统**：在只读加密 rootfs 上提供可写覆盖层
+- **差异层机制**：在只读加密 rootfs 上提供可写差异层（支持 overlayfs 或 dm-snapshot）
 
 ## 安装
 
@@ -149,8 +149,8 @@ cryptpilot-enhance --mode full --image ./disk.qcow2
    - 解密并挂载数据分区
 
 2. **Sysroot 挂载后**（`after-sysroot` 阶段）：
-   - 在只读 rootfs 上设置可写覆盖层
-   - 覆盖层存储在加密数据分区或 tmpfs 上
+   - 在只读 rootfs 上设置可写差异层
+   - 差异层存储在加密 delta 分区或内存中
    - 为 switch_root 准备系统
 
 详情请参阅[启动过程文档](docs/boot_zh.md)。

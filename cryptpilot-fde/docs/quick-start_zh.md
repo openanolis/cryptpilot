@@ -20,16 +20,16 @@
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [rootfs.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.exec]
+[delta.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 EOF
@@ -47,9 +47,9 @@ tree ./config_dir
 **配置说明：**
 
 - `[rootfs]`：根文件系统配置
-  - `rw_overlay_location = "disk"`：将可写覆盖层存储在数据分区上（重启后保留）
+  - `delta_location = "disk"`：将可写差异层存储在 delta 分区上（重启后保留）
   - `encrypt.exec`：使用 exec 提供者，密码为 "AAAaaawewe222"
-- `[data]`：数据分区配置
+- `[delta]`：delta 分区配置
   - `integrity = true`：启用 dm-integrity 数据完整性保护
   - `encrypt.exec`：使用 exec 提供者，密码为 "AAAaaawewe222"
 
@@ -88,7 +88,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 
 1. 读取原始磁盘镜像
 2. 创建带有 dm-verity 的加密 rootfs 分区
-3. 创建带有 dm-integrity 的加密数据分区
+3. 创建带有 dm-integrity 的加密 delta 分区
 4. 将 cryptpilot-fde 安装到 initrd
 5. 配置引导加载程序以支持加密启动
 6. 将加密磁盘写入输出文件
@@ -158,13 +158,13 @@ cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 # 注意：rootfs 段不包含 encrypt 配置
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.exec]
+[delta.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 EOF
@@ -173,13 +173,13 @@ EOF
 **配置说明：**
 
 - `[rootfs]`：根文件系统配置
-  - `rw_overlay_location = "disk"`：将可写覆盖层存储在数据分区上
+  - `delta_location = "disk"`：将可写差异层存储在 delta 分区上
   - **不包含** `encrypt` 配置：rootfs 不加密，仅使用 dm-verity 完整性保护
-- `[data]`：数据分区配置
+- `[delta]`：delta 分区配置
   - `integrity = true`：启用 dm-integrity
-  - `encrypt.exec`：数据分区仍然加密
+  - `encrypt.exec`：delta 分区仍然加密
 
-### 加密数据分区（rootfs 不加密）
+### 加密 delta 分区（rootfs 不加密）
 
 使用 `--rootfs-no-encryption` 参数：
 
@@ -193,7 +193,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 **发生的事情：**
 
 1. rootfs 使用 dm-verity 进行完整性保护（不加密）
-2. 数据分区正常加密
+2. delta 分区正常加密
 3. 系统启动时仍会进行度量和证明
 4. rootfs 以只读方式挂载，通过 overlay 提供可写层
 
@@ -228,16 +228,16 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [rootfs.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.exec]
+[delta.encrypt.exec]
 command = "echo"
 args = ["-n", "AAAaaawewe222"]
 EOF
@@ -269,16 +269,16 @@ cryptpilot-convert --device /dev/nvme2n1 \
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [rootfs.encrypt.kbs]
 url = "https://kbs.example.com"
 resource_path = "/secrets/rootfs-key"
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.kbs]
+[delta.encrypt.kbs]
 url = "https://kbs.example.com"
 resource_path = "/secrets/data-key"
 EOF
@@ -316,17 +316,17 @@ cryptpilot-convert --device /dev/nvme2n1 \
 mkdir -p ./config_dir
 cat << EOF > ./config_dir/fde.toml
 [rootfs]
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 [rootfs.encrypt.kms]
 kms_instance_id = "kst-****"
 client_key_id = "LTAI****"
 client_key_password_from_kms = "alias/ClientKey_****"
 
-[data]
+[delta]
 integrity = true
 
-[data.encrypt.kms]
+[delta.encrypt.kms]
 kms_instance_id = "kst-****"
 client_key_id = "LTAI****"
 client_key_password_from_kms = "alias/ClientKey_****"
@@ -406,7 +406,7 @@ cryptpilot-fde -c ./config_dir/ config check --keep-checking
 1. **检查磁盘格式**：磁盘镜像仅支持 qcow2 格式
 2. **检查磁盘大小**：确保有足够空间用于加密开销
 3. **对于真实磁盘**：确保磁盘未挂载且不在使用中
-4. **设备已存在错误**：如果出现类似 `/dev/system: already exists in filesystem` 的错误，可能是上次 convert 失败遗留的，尝试 `dmsetup remove_all` 清除
+4. **设备已存在错误**：如果出现类似 `/dev/cryptpilot: already exists in filesystem` 的错误，可能是上次 convert 失败遗留的，尝试 `dmsetup remove_all` 清除
 5. **查看日志**：最后一次 convert 的详细日志保存在 `/tmp/.cryptpilot-convert.log`
 
 ### 启动失败

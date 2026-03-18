@@ -18,7 +18,7 @@ pub struct BootServiceConfig {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
 
     #[allow(unused_imports)]
     use super::*;

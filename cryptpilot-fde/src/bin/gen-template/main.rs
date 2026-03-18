@@ -3,8 +3,8 @@ use clap::{command, Parser};
 use cryptpilot::config::encrypt::{EncryptConfig, KeyProviderConfig};
 use cryptpilot::provider::kbs::{CdhType, KbsConfig};
 use cryptpilot_fde::config::{
-    BootServiceConfig, DataConfig, FdeConfig, GlobalConfig, RootFsConfig, RwOverlayBackend,
-    RwOverlayLocation,
+    BootServiceConfig, DeltaBackend, DeltaConfig, DeltaLocation, FdeConfig, GlobalConfig,
+    RootFsConfig,
 };
 use documented::DocumentedFields;
 use shadow_rs::shadow;
@@ -116,8 +116,8 @@ impl AsAnnotatedToml for FdeConfig {
             annotate_toml_table::<RootFsConfig>(item)
                 .context("Failed to annotate `RootFsConfig`")?;
         };
-        if let Some(item) = toml.get_mut("data").and_then(|item| item.as_table_mut()) {
-            annotate_toml_table::<DataConfig>(item).context("Failed to annotate `DataConfig`")?;
+        if let Some(item) = toml.get_mut("delta").and_then(|item| item.as_table_mut()) {
+            annotate_toml_table::<DeltaConfig>(item).context("Failed to annotate `DeltaConfig`")?;
         };
         Ok(toml)
     }
@@ -126,8 +126,8 @@ impl AsAnnotatedToml for FdeConfig {
 pub fn get_fde_config() -> FdeConfig {
     FdeConfig {
         rootfs: RootFsConfig {
-            rw_overlay_location: Some(RwOverlayLocation::Disk),
-            rw_overlay_backend: Some(RwOverlayBackend::DmSnapshot),
+            delta_location: Some(DeltaLocation::Disk),
+            delta_backend: Some(DeltaBackend::DmSnapshot),
             encrypt: Some(EncryptConfig {
                 key_provider: KeyProviderConfig::Kbs(KbsConfig {
                     cdh_type: CdhType::OneShot {
@@ -145,7 +145,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 }),
             }),
         },
-        data: DataConfig {
+        delta: DeltaConfig {
             integrity: true,
             encrypt: EncryptConfig {
                 key_provider: KeyProviderConfig::Kbs(KbsConfig {

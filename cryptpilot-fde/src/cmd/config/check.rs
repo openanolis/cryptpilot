@@ -62,7 +62,7 @@ impl super::super::Command for ConfigCheckCommand {
                     .encrypt
                     .map(|encrypt| ("rootfs", encrypt))
                     .into_iter()
-                    .chain(std::iter::once(("data", fde.data.encrypt)));
+                    .chain(std::iter::once(("delta", fde.delta.encrypt)));
 
                 for (volume_debug_name, encrypt) in encrypt_configs {
                     tracing::info!("Checking config for FDE \"{}\" volume", volume_debug_name);

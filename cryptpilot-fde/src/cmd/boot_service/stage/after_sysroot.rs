@@ -6,10 +6,10 @@ use tokio::{
     process::Command,
 };
 
-use crate::cmd::boot_service::stage::{DATA_DEVICE, ROOTFS_DEVICE};
+use crate::cmd::boot_service::stage::{DELTA_DEVICE, ROOTFS_DEVICE};
 use cryptpilot::fs::cmd::CheckCommandOutput;
 
-use crate::config::{RwOverlayBackend, RwOverlayLocation};
+use crate::config::{DeltaBackend, DeltaLocation};
 
 pub async fn setup_mounts_required_by_fde() -> Result<()> {
     tracing::info!("Setting up mounts required by FDE");
@@ -23,16 +23,16 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
         return Ok(());
     };
 
-    let backend = fde_config.rootfs.rw_overlay_backend.unwrap_or_default();
+    let backend = fde_config.rootfs.delta_backend.unwrap_or_default();
     tracing::info!("Using overlay backend: {:?}", backend);
 
     check_sysroot().await?;
 
     match backend {
-        RwOverlayBackend::Overlayfs => {
+        DeltaBackend::Overlayfs => {
             setup_overlayfs_mounts(fde_config).await?;
         }
-        RwOverlayBackend::DmSnapshot => {
+        DeltaBackend::DmSnapshot => {
             tracing::info!(
                 "dm-snapshot device already mounted at /sysroot, no additional setup needed"
             );
@@ -43,21 +43,21 @@ pub async fn setup_mounts_required_by_fde() -> Result<()> {
 }
 
 async fn setup_overlayfs_mounts(fde_config: crate::config::FdeConfig) -> Result<()> {
-    // 1. Mount the data volume to filesystem
-    tracing::info!("[ 1/3 ] Mounting data volume");
+    // 1. Mount the delta volume to filesystem
+    tracing::info!("[ 1/3 ] Mounting delta volume");
     async {
-        tokio::fs::create_dir_all("/data_volume").await?;
+        tokio::fs::create_dir_all("/delta_volume").await?;
 
         Command::new("mount")
-            .arg(DATA_DEVICE)
-            .arg("/data_volume")
+            .arg(DELTA_DEVICE)
+            .arg("/delta_volume")
             .run()
             .await?;
 
         Ok::<_, anyhow::Error>(())
     }
     .await
-    .context("Failed to mount data volume on /data_volume")?;
+    .context("Failed to mount delta volume on /delta_volume")?;
 
     // 2. Setup the rootfs-overlay. If on ram, create it first. If on disk, just use it to setup overlayfs.
     tracing::info!("[ 2/3 ] Setting up rootfs overlay");
@@ -80,10 +80,10 @@ async fn setup_overlayfs_mounts(fde_config: crate::config::FdeConfig) -> Result<
     .await
     .with_context(|| format!("Failed to setup backup of /sysroot at {sysroot_bak:?}"))?;
 
-    let rw_overlay_location = fde_config
+    let delta_location = fde_config
         .rootfs
-        .rw_overlay_location
-        .unwrap_or(RwOverlayLocation::Disk);
+        .delta_location
+        .unwrap_or(DeltaLocation::Disk);
 
     // Load overlay module if not loaded
     Command::new("modprobe")
@@ -92,8 +92,8 @@ async fn setup_overlayfs_mounts(fde_config: crate::config::FdeConfig) -> Result<
         .await
         .context("Failed to load kernel module 'overlay'")?;
 
-    let overlay_dir = match rw_overlay_location {
-        RwOverlayLocation::Ram => {
+    let overlay_dir = match delta_location {
+        DeltaLocation::Ram => {
             tracing::info!("Using tmpfs as rootfs overlay");
             async {
                 tokio::fs::create_dir_all("/ram_overlay").await?;
@@ -126,17 +126,17 @@ async fn setup_overlayfs_mounts(fde_config: crate::config::FdeConfig) -> Result<
 
             Path::new("/ram_overlay")
         }
-        RwOverlayLocation::Disk | RwOverlayLocation::DiskPersist => {
+        DeltaLocation::Disk | DeltaLocation::DiskPersist => {
             async {
-                tokio::fs::create_dir_all("/data_volume/overlay/upper").await?;
-                tokio::fs::create_dir_all("/data_volume/overlay/work").await?;
+                tokio::fs::create_dir_all("/delta_volume/overlay/upper").await?;
+                tokio::fs::create_dir_all("/delta_volume/overlay/work").await?;
 
                 Command::new("mount")
                     .args(["-t", "overlay"])
                     .arg(ROOTFS_DEVICE)
                     .args([
                         "-o",
-                        "lowerdir=/sysroot,upperdir=/data_volume/overlay/upper,workdir=/data_volume/overlay/work",
+                        "lowerdir=/sysroot,upperdir=/delta_volume/overlay/upper,workdir=/delta_volume/overlay/work",
                         "/sysroot",
                     ])
                     .run()
@@ -148,7 +148,7 @@ async fn setup_overlayfs_mounts(fde_config: crate::config::FdeConfig) -> Result<
             .await
             .context("Failed to setup overlayfs on /sysroot")?;
 
-            Path::new("/data_volume/overlay")
+            Path::new("/delta_volume/overlay")
         }
     };
 

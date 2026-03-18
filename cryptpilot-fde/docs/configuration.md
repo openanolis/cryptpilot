@@ -7,7 +7,7 @@ This guide covers configuration options for Full Disk Encryption (FDE) with cryp
 The default configuration directory is `/etc/cryptpilot/`:
 
 - **`global.toml`**: Global configuration (optional), see [global.toml.template](../../dist/etc/global.toml.template)
-- **`fde.toml`**: FDE configuration for rootfs and data volumes
+- **`fde.toml`**: FDE configuration for rootfs and delta volumes
 
 ## FDE Configuration
 
@@ -15,13 +15,13 @@ System disk encryption (Full Disk Encryption) encrypts the entire system disk, p
 
 An encrypted system disk contains two main volumes:
 - **Rootfs volume**: Read-only root filesystem
-- **Data volume**: Writable data partition
+- **Delta volume**: Writable delta partition
 
 ### Configuration File Structure
 
 Reference template: [fde.toml.template](../../dist/etc/fde.toml.template)
 
-A basic FDE configuration must contain `[rootfs]` and `[data]` sections.
+A basic FDE configuration must contain `[rootfs]` and `[delta]` sections.
 
 ### Rootfs Volume Configuration
 
@@ -34,10 +34,10 @@ An overlayfs layer provides write capability on top of the read-only rootfs.
 ```toml
 [rootfs]
 # Storage location for the overlay layer: "disk", "disk-persist", or "ram"
-# - "disk": Stored on data volume but cleared on boot (default, recommended for security)
-# - "disk-persist": Stored on data volume (persistent, but depends on data volume type)
+# - "disk": Stored on delta volume but cleared on boot (default, recommended for security)
+# - "disk-persist": Stored on delta volume (persistent, but depends on delta volume type)
 # - "ram": Stored in memory (cleared on reboot)
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 # Encryption configuration (optional)
 # If omitted, rootfs will not be encrypted (but still protected by dm-verity)
@@ -48,9 +48,9 @@ resource_path = "/secrets/rootfs-key"
 
 **Available fields:**
 
-- **`rw_overlay_location`** (optional, default: `"disk"`): Overlay storage location
-  - `"disk"`: Store on data volume but forcibly cleared on boot (**default**, recommended for security)
-  - `"disk-persist"`: Store on data volume (persistent across reboots, but depends on data volume configuration: if data volume is temporary, it will still be lost on reboot)
+- **`delta_location`** (optional, default: `"disk"`): Overlay storage location
+  - `"disk"`: Store on delta volume but forcibly cleared on boot (**default**, recommended for security)
+  - `"disk-persist"`: Store on delta volume (persistent across reboots, but depends on delta volume configuration: if delta volume is temporary, it will still be lost on reboot)
   - `"ram"`: Store in tmpfs (cleared on reboot, no disk space used)
 
 - **`encrypt`** (optional): Key provider configuration for rootfs encryption
@@ -72,19 +72,19 @@ cryptpilot-fde uses Remote Attestation to measure the root filesystem:
 
 When using `kbs` as the key provider, measurement information is automatically included when fetching decryption keys from KBS. The KBS owner can configure [Remote Attestation Policies](https://github.com/openanolis/trustee/blob/main/attestation-service/docs/policy.md) to validate the measurements, establishing a full trust chain for confidential VM boot.
 
-### Data Volume Configuration
+### Delta Volume Configuration
 
-The data volume uses the remaining disk space and contains an encrypted, writable filesystem. During boot, this volume is decrypted and mounted at `/data`.
+The delta volume uses the remaining disk space and contains an encrypted, writable filesystem. During boot, this volume is decrypted and mounted at `/data`.
 
 **Configuration options:**
 
 ```toml
-[data]
-# Enable data integrity protection
+[delta]
+# Enable delta integrity protection
 integrity = true
 
 # Encryption configuration (required)
-[data.encrypt.kbs]
+[delta.encrypt.kbs]
 url = "https://kbs.example.com"
 resource_path = "/secrets/data-key"
 ```
@@ -95,7 +95,7 @@ resource_path = "/secrets/data-key"
   - When enabled, data is verified on every read
   - Prevents data tampering (but not replay attacks)
 
-- **`encrypt`** (required): Key provider configuration for data volume encryption
+- **`encrypt`** (required): Key provider configuration for delta volume encryption
   - See [Key Providers](../../docs/key-providers.md) for provider details
 
 ## Configuration Validation

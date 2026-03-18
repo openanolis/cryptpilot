@@ -21,23 +21,23 @@
 
 参考模板：[fde.toml.template](../../dist/etc/fde.toml.template)
 
-一个基础的 FDE 配置文件必须包含 `[rootfs]` 和 `[data]` 两个配置项。
+一个基础的 FDE 配置文件必须包含 `[rootfs]` 和 `[delta]` 两个配置项。
 
 ### Rootfs 卷配置
 
 rootfs 卷存放只读的根分区文件系统。对该文件系统的加密是可选的，但不管是否开启加密，在启动时该卷都会被度量，并基于 dm-verity 防止数据被修改。
 
-在启动阶段，一个基于 overlayfs 的覆盖层将被覆盖在只读的根文件系统上，允许在根分区上做临时性的写入修改。
+在启动阶段，一个差异层（支持 overlayfs 或 dm-snapshot）将被应用到只读的根文件系统上，允许在根分区上做临时性的写入修改。
 
 **配置选项：**
 
 ```toml
 [rootfs]
-# 覆盖层的存储位置："disk"、"disk-persist" 或 "ram"
+# 差异层的存储位置："disk"、"disk-persist" 或 "ram"
 # - "disk": 存储到 data 卷上但每次启动时清空（默认，推荐用于安全性）
 # - "disk-persist": 存储到 data 卷上（重启后保留，具体持久性取决于 data 卷配置）
 # - "ram": 存储在内存中（重启后清除）
-rw_overlay_location = "disk"
+delta_location = "disk"
 
 # 加密配置（可选）
 # 如不指定，则根分区不加密（但仍受 dm-verity 保护）
@@ -48,7 +48,7 @@ resource_path = "/secrets/rootfs-key"
 
 **字段说明：**
 
-- **`rw_overlay_location`**（可选，默认：`"disk"`）：覆盖层存储位置
+- **`delta_location`**（可选，默认：`"disk"`）：差异层存储位置
   - `"disk"`：存储到 data 卷，但每次启动时强制清空（**默认值**，推荐用于提高安全性）
   - `"disk-persist"`：存储到 data 卷（重启后保留，但持久性取决于 data 卷的配置：如果 data 卷本身是临时卷，重启后仍会丢失）
   - `"ram"`：存储在内存中（重启后清除，不占用磁盘空间）
@@ -79,12 +79,12 @@ data 卷使用系统盘上剩余可用空间，包含一个加密的可读写文
 **配置选项：**
 
 ```toml
-[data]
+[delta]
 # 开启数据完整性保护
 integrity = true
 
 # 加密配置（必需）
-[data.encrypt.kbs]
+[delta.encrypt.kbs]
 url = "https://kbs.example.com"
 resource_path = "/secrets/data-key"
 ```
