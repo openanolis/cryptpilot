@@ -225,8 +225,10 @@ define write-commits-to-file-deb
 	@git log $(LAST_TAG)..HEAD --pretty=format:"  * %s" --no-merges > $(1) 2>/dev/null || echo "  * Version bump to $(2)" > $(1)
 endef
 
-# Function to update RPM changelog
-define update-rpm-changelog
+# Function to update RPM spec version and changelog
+define update-rpm-spec
+	@# Update Version field in spec file (matches any version number)
+	@sed -i 's/^Version: .*/Version: $(1)/' cryptpilot.spec
 	$(eval RPM_DATE := $(shell date +"%a %b %d %Y"))
 	@echo "* $(RPM_DATE) $(AUTHOR) - $(1)-1" > /tmp/rpm_changelog_entry.txt
 	$(call write-commits-to-file,/tmp/rpm_commits.txt,$(1))
@@ -260,8 +262,8 @@ define bump-version-internal
 	$(call update-cargo-lock)
 	$(call get-git-info,$(2))
 	@echo "Last tag: $(LAST_TAG)"
-	@echo "Updating RPM spec changelog..."
-	$(call update-rpm-changelog,$(2))
+	@echo "Updating RPM spec version and changelog..."
+	$(call update-rpm-spec,$(2))
 	@echo "Updating Debian changelog..."
 	$(call update-debian-changelog,$(2))
 	@echo "Version bump complete. New version: $(2)"
