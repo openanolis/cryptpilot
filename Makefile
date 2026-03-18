@@ -211,7 +211,7 @@ endef
 
 # Function to get git info
 define get-git-info
-	$(eval LAST_TAG := $(shell git tag --sort=-version:refname | head -1))
+	$(eval LAST_TAG := $(shell git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1))
 	$(eval AUTHOR := $(shell git log -1 --pretty=format:"%an <%ae>"))
 endef
 
