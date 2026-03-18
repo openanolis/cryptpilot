@@ -1,3 +1,11 @@
+cryptpilot (0.5.0) unstable; urgency=medium
+
+  * ci: upgrade GitHub Actions to v6/v8 for Node.js 24 compatibility
+  * build(makefile): update RPM spec Version field during version bump
+  * ci: add GitHub Release notes generation workflow
+
+ -- Kun Lai <laikun@linux.alibaba.com>  Wed, 18 Mar 2026 19:07:26 +0800
+
 cryptpilot (0.3.1-1) unstable; urgency=medium
 
   * feat(kbs): support both one-shot and daemon modes for CDH

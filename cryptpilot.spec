@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.4.0
+Version: 0.5.0
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -273,6 +273,11 @@ fi
 
 
 %changelog
+* Wed Mar 18 2026 Kun Lai <laikun@linux.alibaba.com> - 0.5.0-1
+- ci: upgrade GitHub Actions to v6/v8 for Node.js 24 compatibility
+- build(makefile): update RPM spec Version field during version bump
+- ci: add GitHub Release notes generation workflow
+
 * Tue Mar 03 2026 Kun Lai <laikun@linux.alibaba.com> - 0.4.0-1
 - feat(fs): replace is_empty_disk with more precise has_valuable_data
 - refactor(ci): add multi-arch RPM build with SLSA provenance support
