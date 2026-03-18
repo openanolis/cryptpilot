@@ -52,7 +52,6 @@ phases:
 
 outputs:
   - path: /tmp/rpmbuild/SRPMS/cryptpilot-${VERSION}-${RELEASE}.al8.src.rpm
-  - path: /tmp/rpmbuild/RPMS/aarch64/cryptpilot-${VERSION}-${RELEASE}.al8.aarch64.rpm
   - path: /tmp/rpmbuild/RPMS/aarch64/cryptpilot-crypt-${VERSION}-${RELEASE}.al8.aarch64.rpm
   - path: /tmp/rpmbuild/RPMS/aarch64/cryptpilot-fde-${VERSION}-${RELEASE}.al8.aarch64.rpm
   - path: /tmp/rpmbuild/RPMS/aarch64/cryptpilot-verity-${VERSION}-${RELEASE}.al8.aarch64.rpm

@@ -69,6 +69,7 @@ jobs:
           make deb-build
           mkdir -p $GITHUB_WORKSPACE/deb-packages
           cp ../*.deb $GITHUB_WORKSPACE/deb-packages/
+          rm -f ../cryptpilot_*.deb # Remove the generated main package
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
