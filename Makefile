@@ -175,7 +175,7 @@ deb-build-in-docker:
 		--workdir=/code \
 		ubuntu:24.04 \
 		bash -x -c "\
-			apt-get update && \
+			export DEBIAN_FRONTEND=noninteractive && apt-get update && \
 			apt-get install -y build-essential debhelper devscripts curl cmake \
 				protobuf-compiler libcryptsetup-dev libdevmapper-dev libfuse3-dev \
 				clang pkg-config && \
@@ -186,4 +186,110 @@ deb-build-in-docker:
 	@echo "DEB packages are in ~/deb-packages/"
 	@ls -lh ~/deb-packages/*.deb 2>/dev/null || true
 
+# Get current version from Cargo.toml
+CURRENT_VERSION := $(shell grep '^version' Cargo.toml | awk -F' = ' '{print $$2}' | tr -d '"')
+
+# Parse version components
+MAJOR := $(shell echo $(CURRENT_VERSION) | awk -F. '{print $$1}')
+MINOR := $(shell echo $(CURRENT_VERSION) | awk -F. '{print $$2}')
+PATCH := $(shell echo $(CURRENT_VERSION) | awk -F. '{print $$3}')
+
+# Calculate new versions
+NEW_VERSION_MAJOR := $(shell echo $$(( $(MAJOR) + 1 ))).0.0
+NEW_VERSION_MINOR := $(MAJOR).$(shell echo $$(( $(MINOR) + 1 ))).0
+NEW_VERSION_PATCH := $(MAJOR).$(MINOR).$(shell echo $$(( $(PATCH) + 1 )))
+
+# Function to update Cargo.toml version
+define update-cargo-toml
+	@sed -i 's/^version = "$(CURRENT_VERSION)"/version = "$(1)"/' Cargo.toml
+endef
+
+# Function to update Cargo.lock
+define update-cargo-lock
+	@cargo update --workspace --offline 2>/dev/null || cargo update --workspace
+endef
+
+# Function to get git info
+define get-git-info
+	$(eval LAST_TAG := $(shell git tag --sort=-version:refname | head -1))
+	$(eval AUTHOR := $(shell git log -1 --pretty=format:"%an <%ae>"))
+endef
+
+# Function to write commits to file for RPM (uses -)
+define write-commits-to-file
+	@git log $(LAST_TAG)..HEAD --pretty=format:"- %s" --no-merges > $(1) 2>/dev/null || echo "- Version bump to $(2)" > $(1)
+endef
+
+# Function to write commits to file for Debian (uses *)
+define write-commits-to-file-deb
+	@git log $(LAST_TAG)..HEAD --pretty=format:"  * %s" --no-merges > $(1) 2>/dev/null || echo "  * Version bump to $(2)" > $(1)
+endef
+
+# Function to update RPM changelog
+define update-rpm-changelog
+	$(eval RPM_DATE := $(shell date +"%a %b %d %Y"))
+	@echo "* $(RPM_DATE) $(AUTHOR) - $(1)-1" > /tmp/rpm_changelog_entry.txt
+	$(call write-commits-to-file,/tmp/rpm_commits.txt,$(1))
+	@cat /tmp/rpm_commits.txt >> /tmp/rpm_changelog_entry.txt
+	@echo "" >> /tmp/rpm_changelog_entry.txt
+	@echo "" >> /tmp/rpm_changelog_entry.txt
+	@awk '/^%changelog/{print; while((getline line < "/tmp/rpm_changelog_entry.txt") > 0) print line; close("/tmp/rpm_changelog_entry.txt"); next} {print}' cryptpilot.spec > cryptpilot.spec.new && mv cryptpilot.spec.new cryptpilot.spec
+	@rm -f /tmp/rpm_changelog_entry.txt /tmp/rpm_commits.txt
+endef
+
+# Function to update Debian changelog
+define update-debian-changelog
+	$(eval DEB_DATE := $(shell date -R))
+	@echo "cryptpilot ($(1)) unstable; urgency=medium" > /tmp/deb_changelog_entry.txt
+	@echo "" >> /tmp/deb_changelog_entry.txt
+	$(call write-commits-to-file-deb,/tmp/deb_commits.txt,$(1))
+	@cat /tmp/deb_commits.txt >> /tmp/deb_changelog_entry.txt
+	@echo "" >> /tmp/deb_changelog_entry.txt
+	@echo "" >> /tmp/deb_changelog_entry.txt
+	@echo " -- $(AUTHOR)  $(DEB_DATE)" >> /tmp/deb_changelog_entry.txt
+	@echo "" >> /tmp/deb_changelog_entry.txt
+	@cat /tmp/deb_changelog_entry.txt debian/changelog > debian/changelog.new && mv debian/changelog.new debian/changelog
+	@rm -f /tmp/deb_changelog_entry.txt /tmp/deb_commits.txt
+endef
+
+# Main bump version function
+define bump-version-internal
+	@echo "Bumping $(1) version: $(CURRENT_VERSION) -> $(2)"
+	$(call update-cargo-toml,$(2))
+	@echo "New version: $(2)"
+	$(call update-cargo-lock)
+	$(call get-git-info,$(2))
+	@echo "Last tag: $(LAST_TAG)"
+	@echo "Updating RPM spec changelog..."
+	$(call update-rpm-changelog,$(2))
+	@echo "Updating Debian changelog..."
+	$(call update-debian-changelog,$(2))
+	@echo "Version bump complete. New version: $(2)"
+	@echo "Changes made:"
+	@echo "  - Updated Cargo.toml"
+	@echo "  - Updated Cargo.lock"
+	@echo "  - Updated RPM spec changelog"
+	@echo "  - Updated Debian changelog"
+	@echo ""
+	@echo "If it is ok to commit, run the following commands:"
+	@echo "  git add ."
+	@echo "  git commit -m \"Bump $(1) version to $(2)\""
+	@echo "  git tag -a v$(2) -m \"Bump $(1) version to $(2)\""
+	@echo "  git push origin v$(2)"
+endef
+
+# Bump major version (0.4.1 -> 1.0.0)
+.PHONY: bump-version-major
+bump-version-major:
+	$(call bump-version-internal,major,$(NEW_VERSION_MAJOR))
+
+# Bump minor version (0.4.1 -> 0.5.0)
+.PHONY: bump-version-minor
+bump-version-minor:
+	$(call bump-version-internal,minor,$(NEW_VERSION_MINOR))
+
+# Bump patch version (0.4.1 -> 0.4.2)
+.PHONY: bump-version-patch
+bump-version-patch:
+	$(call bump-version-internal,patch,$(NEW_VERSION_PATCH))
 

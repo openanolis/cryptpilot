@@ -32,6 +32,7 @@ jobs:
     steps:
       - name: Install git for checkout
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y git
 
@@ -42,6 +43,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y \
             build-essential \
@@ -64,7 +66,7 @@ jobs:
       - name: Build DEB packages
         run: |
           source "$HOME/.cargo/env"
-          dpkg-buildpackage -us -uc -b
+          make deb-build
           mkdir -p $GITHUB_WORKSPACE/deb-packages
           cp ../*.deb $GITHUB_WORKSPACE/deb-packages/
 
