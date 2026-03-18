@@ -219,14 +219,33 @@ jobs:
         id: generate-notes
         run: |
           CURRENT_TAG="${{ github.ref_name }}"
-          # Get the previous stable tag (excluding alpha/beta/rc suffixes)
-          # Filter tags matching vX.Y.Z pattern (no suffix like -alpha, -beta, -rc)
-          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -A1 "^${CURRENT_TAG}$" | tail -n1)
-          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$CURRENT_TAG" ]; then
-            PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -2 | tail -n1)
+          echo "Current tag: $CURRENT_TAG"
+          
+          # Extract version number from current tag (e.g., v0.5.0-alpha -> v0.5.0)
+          CURRENT_VERSION=$(echo "$CURRENT_TAG" | grep -oE '^v[0-9]+\.[0-9]+\.[0-9]+')
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Get all stable tags sorted by version
+          STABLE_TAGS=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
+          echo "Stable tags:"
+          echo "$STABLE_TAGS" | head -5
+          
+          # Check if the stable version of current tag exists
+          if echo "$STABLE_TAGS" | grep -q "^${CURRENT_VERSION}$"; then
+            echo "Found stable version $CURRENT_VERSION, finding previous tag"
+            # Use the stable version as reference, find the one before it
+            PREV_TAG=$(echo "$STABLE_TAGS" | grep -A1 "^${CURRENT_VERSION}$" | tail -n1)
+          else
+            echo "Stable version not found, using most recent stable tag"
+            # Current tag is pre-release, find the most recent stable tag
+            PREV_TAG=$(echo "$STABLE_TAGS" | head -1)
           fi
           
-          echo "Current tag: $CURRENT_TAG"
+          # Fallback: if still no prev tag, use the most recent stable tag
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$CURRENT_VERSION" ]; then
+            echo "Fallback: using most recent stable tag"
+            PREV_TAG=$(echo "$STABLE_TAGS" | head -1)
+          fi
           echo "Previous tag: $PREV_TAG"
           
           # Generate changelog with commit hashes

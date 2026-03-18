@@ -210,9 +210,18 @@ define update-cargo-lock
 endef
 
 # Function to get git info
+# $(1) = expected previous version tag (e.g., v0.4.0)
 define get-git-info
-	$(eval LAST_TAG := $(shell git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1))
+	$(eval EXPECTED_PREV_TAG := v$(shell echo $(1) | awk -F. '{print $$1"."$$2".0"}'))
 	$(eval AUTHOR := $(shell git log -1 --pretty=format:"%an <%ae>"))
+endef
+
+# Function to determine last tag
+# $(1) = expected previous version tag (e.g., v0.4.0)
+define determine-last-tag
+	$(eval EXPECTED_TAG := $(1))
+	$(eval TAG_EXISTS := $(shell git tag -l "$(EXPECTED_TAG)"))
+	$(eval LAST_TAG := $(if $(TAG_EXISTS),$(EXPECTED_TAG),$(shell git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1)))
 endef
 
 # Function to write commits to file for RPM (uses -)
@@ -255,13 +264,17 @@ define update-debian-changelog
 endef
 
 # Main bump version function
+# $(1) = version type (major/minor/patch)
+# $(2) = new version number
+# $(3) = expected previous version tag (e.g., v0.4.0)
 define bump-version-internal
 	@echo "Bumping $(1) version: $(CURRENT_VERSION) -> $(2)"
 	$(call update-cargo-toml,$(2))
 	@echo "New version: $(2)"
 	$(call update-cargo-lock)
 	$(call get-git-info,$(2))
-	@echo "Last tag: $(LAST_TAG)"
+	$(call determine-last-tag,$(3))
+	@echo "Using last tag: $(LAST_TAG)"
 	@echo "Updating RPM spec version and changelog..."
 	$(call update-rpm-spec,$(2))
 	@echo "Updating Debian changelog..."
@@ -270,7 +283,7 @@ define bump-version-internal
 	@echo "Changes made:"
 	@echo "  - Updated Cargo.toml"
 	@echo "  - Updated Cargo.lock"
-	@echo "  - Updated RPM spec changelog"
+	@echo "  - Updated RPM spec version and changelog"
 	@echo "  - Updated Debian changelog"
 	@echo ""
 	@echo "If it is ok to commit, run the following commands:"
@@ -283,15 +296,15 @@ endef
 # Bump major version (0.4.1 -> 1.0.0)
 .PHONY: bump-version-major
 bump-version-major:
-	$(call bump-version-internal,major,$(NEW_VERSION_MAJOR))
+	$(call bump-version-internal,major,$(NEW_VERSION_MAJOR),v$(CURRENT_VERSION))
 
 # Bump minor version (0.4.1 -> 0.5.0)
 .PHONY: bump-version-minor
 bump-version-minor:
-	$(call bump-version-internal,minor,$(NEW_VERSION_MINOR))
+	$(call bump-version-internal,minor,$(NEW_VERSION_MINOR),v$(CURRENT_VERSION))
 
 # Bump patch version (0.4.1 -> 0.4.2)
 .PHONY: bump-version-patch
 bump-version-patch:
-	$(call bump-version-internal,patch,$(NEW_VERSION_PATCH))
+	$(call bump-version-internal,patch,$(NEW_VERSION_PATCH),v$(CURRENT_VERSION))
 
