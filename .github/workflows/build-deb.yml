@@ -37,7 +37,7 @@ jobs:
           apt-get install -y git
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: 'true'
 
@@ -98,7 +98,7 @@ jobs:
       image: ${{ matrix.distro }}
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deb-packages-${{ matrix.arch }}
           path: ./deb-packages/
@@ -160,7 +160,7 @@ jobs:
     needs: test
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: ./artifacts/
           merge-multiple: false

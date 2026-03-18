@@ -17,7 +17,7 @@ jobs:
       PRE_RELEASE: ${{ steps.check-pre-release.outputs.PRE_RELEASE }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: 'true'
 
@@ -63,12 +63,12 @@ jobs:
       rpm_name_al8: ${{ steps.extract-rpm-name.outputs.rpm_name_al8 }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: 'true'
 
       - name: Download tarball
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: source-tarball
           path: ./
@@ -158,7 +158,7 @@ jobs:
           yum update -y
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: build-output-${{ matrix.arch }}
           path: ./rpm-packages/
@@ -211,7 +211,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
