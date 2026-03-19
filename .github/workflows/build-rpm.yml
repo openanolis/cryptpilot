@@ -147,14 +147,18 @@ jobs:
     container:
       image: ${{ matrix.distro }}
     steps:
-      - name: Update yum mirror
+      - name: Install dependencies
         run: |
           set -e
           set -x
 
-          # replace the mirror
+          # Speed up package installation
           sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
           sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+          sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf
+          if ! grep -q "^max_parallel_downloads=" /etc/yum.conf; then
+            sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf
+          fi
 
           # update packages
           yum update -y

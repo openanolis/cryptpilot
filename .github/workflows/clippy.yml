@@ -21,14 +21,18 @@ jobs:
     container:
       image: alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest
     steps:
-      - name: Update yum mirror
+      - name: Install dependencies
         run: |
           set -e
           set -x
 
-          # replace the mirror
+          # Speed up package installation
           sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
           sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+          sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf
+          if ! grep -q "^max_parallel_downloads=" /etc/yum.conf; then
+            sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf
+          fi
 
           # install development tools
           yum install -y autoconf automake binutils bison flex gcc gcc-c++ gdb glibc-devel libtool make pkgconf pkgconf-m4 pkgconf-pkg-config rpm-build rpm-sign strace asciidoc byacc ctags diffstat elfutils-libelf-devel git intltool patchutils perl-Fedora-VSP perl-Sys-Syslog perl-generators pesign source-highlight systemtap valgrind valgrind-devel cmake expect rpmdevtools rpmlint perl clang

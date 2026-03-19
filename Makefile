@@ -95,7 +95,7 @@ rpm-build-in-al3-docker:
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}-vendored-source.tar.gz ~/rpmbuild/SOURCES/
 
-	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest bash -x -c "sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo ; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
+	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest bash -x -c "sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo ; sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf ; if ! grep -q '^max_parallel_downloads=' /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi ; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
 
 .PHONE: rpm-build-in-an23-docker
 rpm-build-in-an23-docker:
@@ -103,7 +103,7 @@ rpm-build-in-an23-docker:
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}-vendored-source.tar.gz ~/rpmbuild/SOURCES/
 
-	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:23 bash -x -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
+	docker run --rm -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code registry.openanolis.cn/openanolis/anolisos:23 bash -x -c "sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf ; if ! grep -q '^max_parallel_downloads=' /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi ; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
 
 .PHONE: rpm-build-in-docker
 rpm-build-in-docker: rpm-build-in-al3-docker
@@ -114,7 +114,7 @@ rpm-build-in-docker-aarch64:
 	mkdir -p ~/rpmbuild/SOURCES/
 	cp /tmp/cryptpilot-${VERSION}-vendored-source.tar.gz ~/rpmbuild/SOURCES/
 
-	docker run --rm --platform linux/arm64 -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest bash -x -c "sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo ; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
+	docker run --rm --platform linux/arm64 -v ~/rpmbuild:/root/rpmbuild -v .:/code --workdir=/code alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest bash -x -c "sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo ; sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf ; if ! grep -q '^max_parallel_downloads=' /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi ; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none ; source \"\$$HOME/.cargo/env\" ; yum install -y rpmdevtools yum-utils; rpmdev-setuptree ; yum-builddep -y --skip-unavailable ./cryptpilot.spec ; rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'"
 
 .PHONE: rpm-install
 rpm-install: rpm-build

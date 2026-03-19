@@ -46,6 +46,9 @@ phases:
       - rustup default 1.91.1
       # Change yum source from Anolis to Alinux
       - sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+      # Configure yum for faster downloads
+      - sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf
+      - if ! grep -q "^max_parallel_downloads=" /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi
   build:
     commands:
       - rpmbuild --define "_topdir /tmp/rpmbuild" -ba /tmp/rpmbuild/SPECS/cryptpilot.spec --define 'with_rustup 1'
