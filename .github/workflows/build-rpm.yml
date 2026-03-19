@@ -124,7 +124,9 @@ jobs:
           if-no-files-found: error
           path: |
             /tmp/rpmbuild/SRPMS/cryptpilot-*.al8.src.rpm
-            /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-*.al8.${{ matrix.arch }}.rpm
+            /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-fde-*.al8.${{ matrix.arch }}.rpm
+            /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-crypt-*.al8.${{ matrix.arch }}.rpm
+            /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-verity-*.al8.${{ matrix.arch }}.rpm
 
   test:
     strategy:
