@@ -207,7 +207,89 @@ This configuration is suitable for:
 - ✅ Want to reduce decryption performance overhead for rootfs
 - ❌ Not suitable when rootfs contains sensitive configurations or keys
 
-## Example 3: Encrypt a Real System Disk
+### Calculate Reference Values
+
+Calculate reference values for measure-only mode:
+
+```sh
+cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
+```
+
+The output contains multiple measurement values (kernel, initrd, cmdline, etc.), all of which need to be imported to RVPS.
+
+## Example 3: Measure-Only rootfs + UKI Mode
+
+UKI (Unified Kernel Image) mode packages the kernel, initrd, and boot parameters into a single EFI executable. Combined with measure-only rootfs (no encryption), it enables fast boot and simplified remote attestation.
+
+> [!NOTE]
+> **UKI Mode Features:**
+> - Single UKI file contains all boot components
+> - Measure-only without encryption for faster boot
+> - Reference value contains only UKI measurement, simpler verification
+> - Suitable for scenarios requiring fast boot and simplified attestation
+
+### Configuration
+
+Create UKI mode configuration (rootfs not encrypted, delta encrypted):
+
+```sh
+mkdir -p ./config_dir
+cat << EOF > ./config_dir/fde.toml
+[rootfs]
+delta_location = "disk"
+# rootfs not encrypted, measure only
+
+[delta]
+integrity = true
+
+[delta.encrypt.exec]
+command = "echo"
+args = ["-n", "AAAaaawewe222"]
+EOF
+```
+
+**Configuration Explanation:**
+
+- `[rootfs]`: Root filesystem measure-only without encryption
+  - `delta_location = "disk"`: Writable overlay stored on delta partition
+  - No `encrypt` configuration: rootfs uses dm-verity integrity protection
+- `[delta]`: Delta partition encrypted
+  - Protects user data and system changes
+
+### Encrypt and Generate UKI Image
+
+```sh
+cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
+    --out ./uki-encrypted.qcow2 \
+    -c ./config_dir/ \
+    --rootfs-no-encryption \
+    --uki-mode
+```
+
+**Parameter Explanation:**
+
+- `--rootfs-no-encryption`: rootfs measure-only without encryption
+- `--uki-mode`: Generate UKI unified kernel image
+
+### Calculate Reference Values
+
+UKI mode reference values contain only UKI measurement, making verification simpler:
+
+```sh
+cryptpilot-fde show-reference-value --disk ./uki-encrypted.qcow2
+```
+
+Example output:
+
+```json
+{
+  "measurement.uki.SHA-384": [
+    "a46e162a57e072be7f660e65504477c646acf6b3bfea4ffc0e3a8ee4f2c2726c2284c8bf1ec2b3bd95b204fe7f4e899c"
+  ]
+}
+```
+
+## Example 5: Encrypt a Real System Disk
 
 For production systems, you need to encrypt a real disk.
 
@@ -259,7 +341,7 @@ cryptpilot-convert --device /dev/nvme2n1 \
 
 4. **Re-bind the disk** to the original instance and boot from it.
 
-## Example 4: Using KBS Provider (Production)
+## Example 6: Using KBS Provider (Production)
 
 For production environments, use Key Broker Service with remote attestation.
 
@@ -306,7 +388,7 @@ When booting, the system will:
 4. If verified, KBS returns the decryption key
 5. System decrypts and boots
 
-## Example 5: Using KMS Provider (Cloud-Managed)
+## Example 7: Using KMS Provider (Cloud-Managed)
 
 For Alibaba Cloud users, use KMS for centralized key management.
 

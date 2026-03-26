@@ -207,7 +207,89 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 - ✅ 希望减少解密 rootfs 的性能开销
 - ❌ 不适合 rootfs 中包含敏感配置或密钥的场景
 
-## 示例 3：加密真实系统磁盘
+### 计算参考值
+
+计算仅度量模式的参考值：
+
+```sh
+cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
+```
+
+输出包含多个度量值（kernel、initrd、cmdline 等），需要全部导入到 RVPS。
+
+## 示例 3：rootfs 不加密仅度量 + UKI 模式
+
+UKI（Unified Kernel Image）模式将内核、initrd 和启动参数打包为单个 EFI 可执行文件，配合不加密仅度量的 rootfs，可实现快速启动和简化的远程证明。
+
+> [!NOTE]
+> **UKI 模式特点：**
+> - 单一 UKI 文件包含所有启动组件
+> - 仅度量不加密，启动更快
+> - 参考值只包含 UKI 度量值，验证更简单
+> - 适合需要快速启动和简化证明的场景
+
+### 配置
+
+创建 UKI 模式配置（rootfs 不加密，delta 加密）：
+
+```sh
+mkdir -p ./config_dir
+cat << EOF > ./config_dir/fde.toml
+[rootfs]
+delta_location = "disk"
+# rootfs 不加密，仅度量
+
+[delta]
+integrity = true
+
+[delta.encrypt.exec]
+command = "echo"
+args = ["-n", "AAAaaawewe222"]
+EOF
+```
+
+**配置说明：**
+
+- `[rootfs]`：根文件系统仅度量不加密
+  - `delta_location = "disk"`：可写差异层存储在 delta 分区
+  - 无 `encrypt` 配置：rootfs 使用 dm-verity 完整性保护
+- `[delta]`：delta 分区加密
+  - 保护用户数据和系统变更
+
+### 加密并生成 UKI 镜像
+
+```sh
+cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
+    --out ./uki-encrypted.qcow2 \
+    -c ./config_dir/ \
+    --rootfs-no-encryption \
+    --uki-mode
+```
+
+**参数说明：**
+
+- `--rootfs-no-encryption`：rootfs 仅度量不加密
+- `--uki-mode`：生成 UKI 统一内核镜像
+
+### 计算参考值
+
+UKI 模式的参考值仅包含 UKI 度量值，验证更简单：
+
+```sh
+cryptpilot-fde show-reference-value --disk ./uki-encrypted.qcow2
+```
+
+输出示例：
+
+```json
+{
+  "measurement.uki.SHA-384": [
+    "a46e162a57e072be7f660e65504477c646acf6b3bfea4ffc0e3a8ee4f2c2726c2284c8bf1ec2b3bd95b204fe7f4e899c"
+  ]
+}
+```
+
+## 示例 5：加密真实系统磁盘
 
 对于生产系统，你需要加密真实磁盘。
 
@@ -259,7 +341,7 @@ cryptpilot-convert --device /dev/nvme2n1 \
 
 4. **重新绑定磁盘**到原始实例并从其启动。
 
-## 示例 4：使用 KBS 提供者（生产环境）
+## 示例 6：使用 KBS 提供者（生产环境）
 
 对于生产环境，使用带有远程证明的密钥代理服务。
 
@@ -306,7 +388,7 @@ cryptpilot-convert --device /dev/nvme2n1 \
 4. 如果验证通过，KBS 返回解密密钥
 5. 系统解密并启动
 
-## 示例 5：使用 KMS 提供者（云托管）
+## 示例 7：使用 KMS 提供者（云托管）
 
 对于阿里云用户，使用 KMS 进行集中式密钥管理。
 
