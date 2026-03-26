@@ -263,6 +263,14 @@ define update-debian-changelog
 	@rm -f /tmp/deb_changelog_entry.txt /tmp/deb_commits.txt
 endef
 
+# Function to update buildspec.yml version tags
+# Updates tags in all three APPLICATION buildspec.yml files
+define update-buildspec-yml
+	@sed -i -E 's/(tags: \[\[)[0-9]+\.[0-9]+\.[0-9]+(, latest\]\])/\1$(1)\2/' APPLICATION/cryptpilot-fde/buildspec.yml
+	@sed -i -E 's/(tags: \[\[)[0-9]+\.[0-9]+\.[0-9]+(, latest\]\])/\1$(1)\2/' APPLICATION/cryptpilot-crypt/buildspec.yml
+	@sed -i -E 's/(tags: \[\[)[0-9]+\.[0-9]+\.[0-9]+(, latest\]\])/\1$(1)\2/' APPLICATION/cryptpilot-verity/buildspec.yml
+endef
+
 # Main bump version function
 # $(1) = version type (major/minor/patch)
 # $(2) = new version number
@@ -279,12 +287,15 @@ define bump-version-internal
 	$(call update-rpm-spec,$(2))
 	@echo "Updating Debian changelog..."
 	$(call update-debian-changelog,$(2))
+	@echo "Updating buildspec.yml files..."
+	$(call update-buildspec-yml,$(2))
 	@echo "Version bump complete. New version: $(2)"
 	@echo "Changes made:"
 	@echo "  - Updated Cargo.toml"
 	@echo "  - Updated Cargo.lock"
 	@echo "  - Updated RPM spec version and changelog"
 	@echo "  - Updated Debian changelog"
+	@echo "  - Updated APPLICATION buildspec.yml files"
 	@echo ""
 	@echo "If it is ok to commit, run the following commands:"
 	@echo "  git add ."
@@ -307,4 +318,23 @@ bump-version-minor:
 .PHONY: bump-version-patch
 bump-version-patch:
 	$(call bump-version-internal,patch,$(NEW_VERSION_PATCH),v$(CURRENT_VERSION))
+
+# Docker build targets
+.PHONY: docker-build
+docker-build: docker-build-fde docker-build-crypt docker-build-verity
+
+.PHONY: docker-build-fde
+docker-build-fde:
+	docker build -f Dockerfile --target release-fde -t cryptpilot-fde:latest .
+
+.PHONY: docker-build-crypt
+docker-build-crypt:
+	docker build -f Dockerfile --target release-crypt -t cryptpilot-crypt:latest .
+
+.PHONY: docker-build-verity
+docker-build-verity:
+	docker build -f Dockerfile --target release-verity -t cryptpilot-verity:latest .
+
+.PHONY: docker-build-all
+docker-build-all: docker-build
 
