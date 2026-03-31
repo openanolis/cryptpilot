@@ -242,4 +242,45 @@ overlayfs挂载将lowerdir、upperdir和workdir组合，将联合视图挂载到
 
 `cryptpilot-fde-after-sysroot`完成后，initrd阶段结束。dracut执行清理工作，将控制权交给systemd。systemd将`/sysroot`作为真实根文件系统切换，系统进入正常的System Manager阶段。此时运行的根文件系统根据配置可能是overlayfs联合视图（overlayfs机制）或dm-snapshot设备（dm-snapshot机制），既受dm-verity完整性保护又支持正常写入操作。
 
+## 静态链接内核配置
 
+CryptPilot支持静态链接内核（所有内核模块编译进内核）。如果您的内核采用静态链接方式，需要确保以下内核模块已内联到内核中：
+
+### 6.1 必需的内核模块
+
+| 模块名 | 用途 | 配置选项 |
+|--------|------|----------|
+| **dm_mod** | Device Mapper 核心 | `CONFIG_BLK_DEV_DM=y` |
+| **dm_linear** | 线性设备映射 | 内建 |
+| **dm_verity** | 完整性验证 | `CONFIG_DM_VERITY=y` |
+| **dm_snapshot** | 快照支持（dm-snapshot后端） | `CONFIG_DM_SNAPSHOT=y` |
+| **dm_zero** | Zero 目标设备（dm-snapshot后端） | `CONFIG_DM_ZERO=y` |
+| **overlay** | OverlayFS 文件系统（overlayfs后端） | `CONFIG_OVERLAY_FS=y` |
+| **zram** | 压缩 RAM 块设备（ram模式） | `CONFIG_ZRAM=y` |
+| **loop** | 回环设备 | `CONFIG_BLK_DEV_LOOP=y` |
+
+### 6.2 可选的内核模块
+
+| 模块名 | 用途 | 配置选项 |
+|--------|------|----------|
+| **nbd** | 网络块设备（外部磁盘使用） | `CONFIG_BLK_DEV_NBD=y` |
+
+### 6.3 配置示例
+
+在 `.config` 文件中启用静态链接：
+
+```
+# Device Mapper 支持
+CONFIG_BLK_DEV_DM=y
+CONFIG_DM_VERITY=y
+CONFIG_DM_SNAPSHOT=y
+CONFIG_DM_ZERO=y
+
+# 文件系统支持
+CONFIG_OVERLAY_FS=y
+
+# 块设备支持
+CONFIG_ZRAM=y
+CONFIG_BLK_DEV_LOOP=y
+CONFIG_BLK_DEV_NBD=y
+```

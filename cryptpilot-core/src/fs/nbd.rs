@@ -32,13 +32,9 @@ impl NbdDevice {
     }
 
     pub async fn modprobe() -> Result<()> {
-        Command::new("modprobe")
-            .args(["nbd", "max_part=8"])
-            .run()
+        super::kernel_module::ensure_module_loaded("nbd", &["max_part=8"])
             .await
-            .context("Failed to load kernel module 'nbd'")?;
-
-        Ok(())
+            .context("Failed to load kernel module 'nbd'")
     }
 
     pub async fn get_avaliable() -> Result<NbdDeviceNumber> {

@@ -1,5 +1,6 @@
 pub mod block;
 pub mod cmd;
+pub mod kernel_module;
 pub mod luks2;
 pub mod mkfs;
 pub mod mount;

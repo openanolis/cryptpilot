@@ -35,6 +35,11 @@ impl DummyDevice {
     }
 
     async fn setup(device_size: u64, block_size: u64, on_tmpfs: bool) -> Result<Self> {
+        // Load loop module if not available
+        crate::fs::kernel_module::ensure_module_loaded("loop", &[])
+            .await
+            .context("Failed to load loop module")?;
+
         let mut sparse_file = tempfile::Builder::new()
             .prefix("cryptpilot-")
             .suffix(".img")
@@ -57,8 +62,7 @@ impl DummyDevice {
         sparse_file.seek(std::io::SeekFrom::Start(device_size - 1))?;
         sparse_file.write_all(&[0])?;
 
-        let lc = LoopControl::open()
-            .context("Failed to open loop control, maybe forgot to run 'sudo modprobe loop'?")?;
+        let lc = LoopControl::open().context("Failed to open loop control")?;
         // Retry to avoid conflicts and waiting for avaliable loop device
         let ld = RetryPolicy::exponential(Duration::from_millis(1))
             .with_max_retries(200)

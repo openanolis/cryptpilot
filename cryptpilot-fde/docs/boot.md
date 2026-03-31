@@ -240,3 +240,46 @@ No additional operations are required at this stage; all write operations are ha
 ## 5. System Switch Stage
 
 After `cryptpilot-fde-after-sysroot` completes, the initrd stage ends. dracut performs cleanup work and hands over control to systemd. systemd switches `/sysroot` as the real root filesystem, and the system enters the normal System Manager stage. At this point, the running root filesystem may be either the overlayfs unified view (overlayfs mechanism) or the dm-snapshot device (dm-snapshot mechanism), protected by dm-verity integrity while supporting normal write operations.
+
+## 6. Statically Linked Kernel Configuration
+
+CryptPilot supports statically linked kernels (all kernel modules compiled into the kernel). If your kernel uses static linking, ensure the following kernel modules are built-in:
+
+### 6.1 Required Kernel Modules
+
+| Module Name | Purpose | Config Option |
+|-------------|---------|---------------|
+| **dm_mod** | Device Mapper core | `CONFIG_BLK_DEV_DM=y` |
+| **dm_linear** | Linear device mapping | Builtin |
+| **dm_verity** | Integrity verification | `CONFIG_DM_VERITY=y` |
+| **dm_snapshot** | Snapshot support (dm-snapshot backend) | `CONFIG_DM_SNAPSHOT=y` |
+| **dm_zero** | Zero target device (dm-snapshot backend) | `CONFIG_DM_ZERO=y` |
+| **overlay** | OverlayFS filesystem (overlayfs backend) | `CONFIG_OVERLAY_FS=y` |
+| **zram** | Compressed RAM block device (ram mode) | `CONFIG_ZRAM=y` |
+
+### 6.2 Optional Kernel Modules
+
+| Module Name | Purpose | Config Option |
+|-------------|---------|---------------|
+| **loop** | Loop device (testing/debugging) | `CONFIG_BLK_DEV_LOOP=y` |
+| **nbd** | Network block device (external disk) | `CONFIG_BLK_DEV_NBD=y` |
+
+### 6.3 Configuration Example
+
+Enable static linking in your `.config` file:
+
+```
+# Device Mapper support
+CONFIG_BLK_DEV_DM=y
+CONFIG_DM_VERITY=y
+CONFIG_DM_SNAPSHOT=y
+CONFIG_DM_ZERO=y
+
+# Filesystem support
+CONFIG_OVERLAY_FS=y
+
+# Block device support
+CONFIG_ZRAM=y
+CONFIG_BLK_DEV_LOOP=y
+CONFIG_BLK_DEV_NBD=y
+```

@@ -37,6 +37,15 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
 
     tracing::info!("Setting up volumes required by FDE");
 
+    // Load required kernel modules for LVM and device mapper
+    cryptpilot::fs::kernel_module::ensure_module_loaded("dm_mod", &[])
+        .await
+        .context("Failed to load dm_mod module")?;
+
+    cryptpilot::fs::kernel_module::ensure_module_loaded("dm-linear", &[])
+        .await
+        .context("Failed to load dm-linear module")?;
+
     // 1. Checking and activating LVM volume group
     tracing::info!(
         volume_group_name = VOLUME_GROUP_NAME,
@@ -245,9 +254,7 @@ async fn setup_rootfs_dm_verity(
     lower_dm_device: &Path,
 ) -> Result<()> {
     async {
-        Command::new("modprobe")
-            .arg("dm-verity")
-            .run()
+        cryptpilot::fs::kernel_module::ensure_module_loaded("dm-verity", &[])
             .await
             .context("Failed to load kernel module 'dm-verity'")?;
 
@@ -400,14 +407,10 @@ async fn setup_delta_volume_luks2(
 }
 
 async fn create_zram_cow_device() -> Result<PathBuf> {
-    // Load zram module
-    if !Path::new("/sys/class/zram-control").exists() {
-        Command::new("modprobe")
-            .arg("zram")
-            .run()
-            .await
-            .context("Failed to load zram module")?;
-    }
+    // Load zram module if not available
+    cryptpilot::fs::kernel_module::ensure_module_loaded("zram", &[])
+        .await
+        .context("Failed to load zram module")?;
 
     // Get total memory in KB
     let mem_info = tokio::fs::read_to_string("/proc/meminfo").await?;
@@ -448,11 +451,16 @@ async fn setup_dm_snapshot_device_chain(
     );
 
     // Load required kernel modules
-    Command::new("modprobe")
-        .arg("dm-snapshot")
-        .run()
+    cryptpilot::fs::kernel_module::ensure_module_loaded("dm-snapshot", &[])
         .await
         .context("Failed to load dm-snapshot module")?;
+
+    cryptpilot::fs::kernel_module::ensure_module_loaded("dm-zero", &[])
+        .await
+        .context("Failed to load dm-zero module")?;
+    cryptpilot::fs::kernel_module::ensure_module_loaded("dm-linear", &[])
+        .await
+        .context("Failed to load dm-linear module")?;
 
     // Get device sizes (in sectors, 512 bytes each)
     let verity_size = get_device_size_bytes(rootfs_device).await? / 512;

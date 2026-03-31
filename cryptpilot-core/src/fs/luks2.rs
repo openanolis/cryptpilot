@@ -217,6 +217,16 @@ pub async fn open_with_check_passphrase(
     passphrase: &Passphrase,
     integrity: IntegrityType,
 ) -> Result<(), anyhow::Error> {
+    crate::fs::kernel_module::ensure_module_loaded("dm_crypt", &[])
+        .await
+        .context("Failed to load dm_crypt module")?;
+
+    if !matches!(integrity, IntegrityType::None) {
+        crate::fs::kernel_module::ensure_module_loaded("dm-integrity", &[])
+            .await
+            .context("Failed to load dm-integrity module")?;
+    }
+
     let passphrase = passphrase.to_owned();
     let verbose = get_verbose().await;
 
