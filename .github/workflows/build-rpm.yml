@@ -208,7 +208,7 @@ jobs:
         run: |
           echo "Extracting qcow2 image from container..."
           mkdir -p ${{ github.workspace }}/test-images
-          docker create --name temp-extract ${{ env.TEST_IMAGE }}
+          docker create --name temp-extract ${{ env.TEST_IMAGE }} /bin/true
           docker cp temp-extract:/image.qcow2 ${{ github.workspace }}/test-images/test-image.qcow2
           docker rm temp-extract
           ls -lh ${{ github.workspace }}/test-images/test-image.qcow2
