@@ -189,12 +189,29 @@ jobs:
         case: [uki-encrypted, uki-noenc, grub-encrypted, grub-noenc]
     runs-on: ubuntu-latest
     needs: build
+    env:
+      TEST_IMAGE_TAG: "alinux3-20251030"  # Update this when test image changes
     steps:
       - name: Load NBD kernel module
         run: |
           echo "Loading nbd module on host..."
           sudo modprobe nbd max_part=16
           lsmod | grep nbd
+
+      - name: Pull test image from ghcr.io
+        run: |
+          TEST_IMAGE="ghcr.io/${{ github.repository_owner }}/cryptpilot-fde-test-image:${{ env.TEST_IMAGE_TAG }}"
+          docker pull "$TEST_IMAGE" 
+          echo "TEST_IMAGE=$TEST_IMAGE" >> $GITHUB_ENV
+
+      - name: Extract qcow2 image from container
+        run: |
+          echo "Extracting qcow2 image from container..."
+          mkdir -p ${{ github.workspace }}/test-images
+          docker create --name temp-extract ${{ env.TEST_IMAGE }}
+          docker cp temp-extract:/image.qcow2 ${{ github.workspace }}/test-images/test-image.qcow2
+          docker rm temp-extract
+          ls -lh ${{ github.workspace }}/test-images/test-image.qcow2
 
       - name: Start test container
         run: |
@@ -240,7 +257,7 @@ jobs:
       - name: Run convert test
         run: |
           docker exec -w /workspace/repo test-container bash -c "
-            make run-convert-test-case CASE=${{ matrix.case }}
+            make run-convert-test-case CASE=${{ matrix.case }} INPUT_IMAGE=/workspace/test-images/test-image.qcow2
           "
 
       - name: Cleanup
