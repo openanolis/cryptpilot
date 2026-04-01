@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
 use std::path::Path;
 use tokio::process::Command;
-use tracing::{debug, info};
+
+use crate::fs::cmd::CheckCommandOutput;
 
 /// Check if a kernel module is loaded (either built-in or as a loadable module)
 ///
@@ -31,49 +31,52 @@ pub fn is_module_available(name: &str) -> bool {
 ///
 /// ```ignore
 /// // Load module without parameters
-/// ensure_module_loaded("dm-verity", &[]).await?;
+/// ensure_module_loaded("dm-verity", &[]).await;
 ///
 /// // Load module with parameters
-/// ensure_module_loaded("nbd", &["max_part=8"]).await?;
+/// ensure_module_loaded("nbd", &["max_part=8"]).await;
 /// ```
-pub async fn ensure_module_loaded(name: &str, args: &[&str]) -> Result<()> {
+pub async fn ensure_module_loaded(name: &str, args: &[&str]) {
     if is_module_available(name) {
-        debug!("Kernel module '{}' is already available", name);
-        return Ok(());
+        tracing::debug!("Kernel module '{}' is already available", name);
+        return;
     }
 
-    info!("Loading kernel module '{}' with args: {:?}", name, args);
+    // Check if modprobe is available
+    if !Path::new("/sbin/modprobe").exists() && !Path::new("/usr/sbin/modprobe").exists() {
+        tracing::warn!(
+            "modprobe not found, skipping module load for '{}' (module may be built-in)",
+            name
+        );
+        return;
+    }
+
+    tracing::info!("Loading kernel module '{}' with args: {:?}", name, args);
 
     let mut cmd = Command::new("modprobe");
     cmd.arg(name);
     cmd.args(args);
 
-    let output = cmd
-        .output()
-        .await
-        .with_context(|| format!("Failed to execute modprobe for '{}'", name))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if let Err(e) = cmd.run().await {
         // Check if module is actually available now (might be built-in)
         if is_module_available(name) {
-            debug!(
-                "Module '{}' appears to be available after modprobe attempt (stderr: {})",
-                name, stderr
+            tracing::debug!(
+                "Module '{}' appears to be available after modprobe attempt",
+                name
             );
-            return Ok(());
+            return;
         }
 
-        anyhow::bail!("Failed to load kernel module '{}': {}", name, stderr);
-    }
+        tracing::warn!(module = name, error = %e, "Failed to load kernel module");
+        return;
+    };
 
     // Verify module is now available
     if is_module_available(name) {
-        debug!("Successfully loaded kernel module '{}'", name);
-        Ok(())
+        tracing::debug!("Successfully loaded kernel module '{}'", name);
     } else {
-        anyhow::bail!(
-            "Module '{}' was loaded by modprobe but not found in /sys/module/",
+        tracing::warn!(
+            "Module '{}' was loaded by modprobe but not found in /sys/module/ maybe it is built-in module",
             name
         )
     }

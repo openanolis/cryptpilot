@@ -36,9 +36,7 @@ impl DummyDevice {
 
     async fn setup(device_size: u64, block_size: u64, on_tmpfs: bool) -> Result<Self> {
         // Load loop module if not available
-        crate::fs::kernel_module::ensure_module_loaded("loop", &[])
-            .await
-            .context("Failed to load loop module")?;
+        crate::fs::kernel_module::ensure_module_loaded("loop", &[]).await;
 
         let mut sparse_file = tempfile::Builder::new()
             .prefix("cryptpilot-")

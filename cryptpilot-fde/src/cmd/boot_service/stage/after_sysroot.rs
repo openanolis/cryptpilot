@@ -86,9 +86,7 @@ async fn setup_overlayfs_mounts(fde_config: crate::config::FdeConfig) -> Result<
         .unwrap_or(DeltaLocation::Disk);
 
     // Load overlay module if not available
-    cryptpilot::fs::kernel_module::ensure_module_loaded("overlay", &[])
-        .await
-        .context("Failed to load kernel module 'overlay'")?;
+    cryptpilot::fs::kernel_module::ensure_module_loaded("overlay", &[]).await;
 
     let overlay_dir = match delta_location {
         DeltaLocation::Ram => {

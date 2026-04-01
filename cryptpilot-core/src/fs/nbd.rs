@@ -31,15 +31,13 @@ impl NbdDevice {
         Path::new("/dev/nbd0").exists()
     }
 
-    pub async fn modprobe() -> Result<()> {
-        super::kernel_module::ensure_module_loaded("nbd", &["max_part=8"])
-            .await
-            .context("Failed to load kernel module 'nbd'")
+    pub async fn modprobe() {
+        super::kernel_module::ensure_module_loaded("nbd", &["max_part=8"]).await;
     }
 
     pub async fn get_avaliable() -> Result<NbdDeviceNumber> {
         if !Self::is_module_loaded() {
-            Self::modprobe().await?;
+            Self::modprobe().await;
         }
 
         for i in 0..=99 {
