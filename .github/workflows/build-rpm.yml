@@ -236,10 +236,11 @@ jobs:
           "
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
-          name: rpm-packages-x86_64
+          name: build-output-x86_64
           path: ./rpm-packages/
+          merge-multiple: false
 
       - name: Install RPM packages
         run: |
