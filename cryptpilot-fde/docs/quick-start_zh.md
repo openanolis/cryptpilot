@@ -263,13 +263,13 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
     --out ./uki-encrypted.qcow2 \
     -c ./config_dir/ \
     --rootfs-no-encryption \
-    --uki-mode
+    --uki
 ```
 
 **参数说明：**
 
 - `--rootfs-no-encryption`：rootfs 仅度量不加密
-- `--uki-mode`：生成 UKI 统一内核镜像
+- `--uki`：生成 UKI 统一内核镜像
 
 ### 计算参考值
 
