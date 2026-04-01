@@ -51,7 +51,8 @@ phases:
       - if ! grep -q "^max_parallel_downloads=" /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi
   build:
     commands:
-      - rpmbuild --define "_topdir /tmp/rpmbuild" -ba /tmp/rpmbuild/SPECS/cryptpilot.spec --define 'with_rustup 1'
+      - rpmbuild --define "_topdir /tmp/rpmbuild" -bs /tmp/rpmbuild/SPECS/cryptpilot.spec --define 'with_rustup 1' --target src
+      - rpmbuild --define "_topdir /tmp/rpmbuild" -bb /tmp/rpmbuild/SPECS/cryptpilot.spec --define 'with_rustup 1'
 
 outputs:
   - path: /tmp/rpmbuild/SRPMS/cryptpilot-${VERSION}-${RELEASE}.al8.src.rpm
