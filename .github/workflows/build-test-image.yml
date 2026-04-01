@@ -1,0 +1,66 @@
+name: Build Test Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL of the qcow2 image to download'
+        required: true
+        type: string
+      tag:
+        description: 'Tag for the resulting image (e.g., alinux3-20251030)'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  # Target repository for test images
+  IMAGE_NAME: ${{ github.repository_owner }}/cryptpilot-fde-test-image
+
+jobs:
+  build-test-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download qcow2 image
+        run: |
+          echo "Downloading image from: ${{ inputs.url }}"
+          mkdir -p /tmp/qcow2-image
+          wget -O /tmp/qcow2-image/test-image.qcow2 "${{ inputs.url }}"
+          ls -lh /tmp/qcow2-image/test-image.qcow2
+
+      - name: Copy Dockerfile
+        run: |
+          cp tests/test-image.Dockerfile /tmp/qcow2-image/Dockerfile
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v5
+        with:
+          context: /tmp/qcow2-image
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.description=Test image with qcow2 for cryptpilot-convert integration tests
+            qcow2.source.url=${{ inputs.url }}
+
+      - name: Output image reference
+        run: |
+          echo "Test image built and pushed:"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}"
