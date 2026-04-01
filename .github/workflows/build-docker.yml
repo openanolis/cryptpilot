@@ -31,7 +31,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/openanolis/cryptpilot-fde
+            ghcr.io/${{ github.repository_owner }}/cryptpilot-fde
           labels: |
             org.opencontainers.image.title=cryptpilot-fde
             org.opencontainers.image.description=Full-disk encryption tooling for system volumes
@@ -48,7 +48,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/openanolis/cryptpilot-crypt
+            ghcr.io/${{ github.repository_owner }}/cryptpilot-crypt
           labels: |
             org.opencontainers.image.title=cryptpilot-crypt
             org.opencontainers.image.description=Data volume encryption tooling
@@ -65,7 +65,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/openanolis/cryptpilot-verity
+            ghcr.io/${{ github.repository_owner }}/cryptpilot-verity
           labels: |
             org.opencontainers.image.title=cryptpilot-verity
             org.opencontainers.image.description=Integrity measurement tool for directory trees
