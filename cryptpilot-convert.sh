@@ -538,9 +538,7 @@ disk::install_deb_on_rootfs() {
 
     # Essential packages for Debian/Ubuntu
     local essential_packages=(
-        "cryptpilot"
-        "attestation-agent"
-        "confidential-data-hub"
+        "cryptpilot-fde"
     )
 
     local copied_debs=()
