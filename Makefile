@@ -325,15 +325,15 @@ docker-build: docker-build-fde docker-build-crypt docker-build-verity
 
 .PHONY: docker-build-fde
 docker-build-fde:
-	docker build -f Dockerfile --target release-fde -t cryptpilot-fde:latest .
+	docker build -f Dockerfile.fde --target release-fde -t cryptpilot-fde:latest .
 
 .PHONY: docker-build-crypt
 docker-build-crypt:
-	docker build -f Dockerfile --target release-crypt -t cryptpilot-crypt:latest .
+	docker build -f Dockerfile.crypt --target release-crypt -t cryptpilot-crypt:latest .
 
 .PHONY: docker-build-verity
 docker-build-verity:
-	docker build -f Dockerfile --target release-verity -t cryptpilot-verity:latest .
+	docker build -f Dockerfile.verity --target release-verity -t cryptpilot-verity:latest .
 
 .PHONY: docker-build-all
 docker-build-all: docker-build

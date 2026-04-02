@@ -28,7 +28,7 @@ images:
     region: cn-hongkong
     platform: [linux/amd64]
     docker_file:
-      path: Dockerfile
+      path: Dockerfile.verity
       scene:
         args: []
         tags: [[0.6.0, latest]]

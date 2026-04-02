@@ -1,0 +1,59 @@
+# Builder stage - build RPM packages
+FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest AS builder
+
+# Replace mirrors for faster yum install
+RUN sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+# Increase yum download speed
+RUN sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf ; if ! grep -q '^max_parallel_downloads=' /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi ;
+
+# Install Rust toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --no-modify-path --default-toolchain none
+
+WORKDIR /code/
+
+COPY rust-toolchain.toml .
+
+# Install toolchain and cache it
+RUN . "$HOME/.cargo/env" && rustup show
+
+# Install build dependencies
+RUN yum install -y git protobuf-devel gcc cmake clang clang-libs \
+    cryptsetup-devel perl-IPC-Cmd device-mapper-devel fuse3-devel \
+    rpmdevtools yum-utils && \
+    yum clean all
+
+COPY . .
+
+# Setup RPM build tree
+RUN rpmdev-setuptree
+
+# Build RPM packages using the same process as rpm-build target
+RUN . "$HOME/.cargo/env" && \
+    # Create source tarball
+    make create-tarball && \
+    # Copy tarball to RPM build sources
+    cp /tmp/cryptpilot-$(grep '^version' Cargo.toml | awk -F' = ' '{print $2}' | tr -d '"')-vendored-source.tar.gz ~/rpmbuild/SOURCES/ && \
+    # Install build dependencies from spec file (like yum-builddep)
+    yum-builddep -y --skip-unavailable ./cryptpilot.spec && \
+    # Build RPM packages
+    rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'
+
+
+# Release stage for cryptpilot-crypt
+FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest AS release-crypt
+
+# Replace mirrors for faster yum install
+RUN sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+# Increase yum download speed
+RUN sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf ; if ! grep -q '^max_parallel_downloads=' /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi ;
+
+# Copy RPM from builder
+COPY --from=builder /root/rpmbuild/RPMS/x86_64/cryptpilot-crypt-*.rpm /tmp/
+
+# Install Crypt package and its dependencies
+RUN yum install -y /tmp/cryptpilot-crypt-*.rpm && \
+    yum clean all && \
+    rm -rf /var/cache/yum /tmp/*.rpm
+
+CMD ["cryptpilot-crypt"]
