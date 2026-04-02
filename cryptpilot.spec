@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.5.0
+Version: 0.6.0
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -273,6 +273,18 @@ fi
 
 
 %changelog
+* Thu Apr 02 2026 Kun Lai <laikun@linux.alibaba.com> - 0.6.0-1
+- fix(convert): update essential packages for Debian/Ubuntu rootfs
+- rpm: separate SRPM and RPM build steps in buildspec templates
+- docs: fix UKI parameter name in quick-start guides
+- refactor(kernel): make module loading non-fatal with modprobe detection
+- feat(kernel): add kernel module loading helper with static kernel support
+- ci: add workflow to build and publish test images to GHCR
+- build: add Docker image build support with RPM-based workflow
+- docs(fde): add UKI measure-only example and reference value documentation
+- build: configure yum for faster parallel downloads
+- ci: complete removal of cryptpilot main package from CI artifacts
+
 * Wed Mar 18 2026 Kun Lai <laikun@linux.alibaba.com> - 0.5.0-1
 - build: improve version tag detection robustness
 - ci: upgrade GitHub Actions to v6/v8 for Node.js 24 compatibility

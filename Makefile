@@ -238,7 +238,7 @@ endef
 define update-rpm-spec
 	@# Update Version field in spec file (matches any version number)
 	@sed -i 's/^Version: .*/Version: $(1)/' cryptpilot.spec
-	$(eval RPM_DATE := $(shell date +"%a %b %d %Y"))
+	$(eval RPM_DATE := $(shell env LC_ALL=C date +"%a %b %d %Y"))
 	@echo "* $(RPM_DATE) $(AUTHOR) - $(1)-1" > /tmp/rpm_changelog_entry.txt
 	$(call write-commits-to-file,/tmp/rpm_commits.txt,$(1))
 	@cat /tmp/rpm_commits.txt >> /tmp/rpm_changelog_entry.txt
@@ -250,7 +250,7 @@ endef
 
 # Function to update Debian changelog
 define update-debian-changelog
-	$(eval DEB_DATE := $(shell date -R))
+	$(eval DEB_DATE := $(shell env LC_ALL=C date -R))
 	@echo "cryptpilot ($(1)) unstable; urgency=medium" > /tmp/deb_changelog_entry.txt
 	@echo "" >> /tmp/deb_changelog_entry.txt
 	$(call write-commits-to-file-deb,/tmp/deb_commits.txt,$(1))

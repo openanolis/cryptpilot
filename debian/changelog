@@ -1,3 +1,18 @@
+cryptpilot (0.6.0) unstable; urgency=medium
+
+  * fix(convert): update essential packages for Debian/Ubuntu rootfs
+  * rpm: separate SRPM and RPM build steps in buildspec templates
+  * docs: fix UKI parameter name in quick-start guides
+  * refactor(kernel): make module loading non-fatal with modprobe detection
+  * feat(kernel): add kernel module loading helper with static kernel support
+  * ci: add workflow to build and publish test images to GHCR
+  * build: add Docker image build support with RPM-based workflow
+  * docs(fde): add UKI measure-only example and reference value documentation
+  * build: configure yum for faster parallel downloads
+  * ci: complete removal of cryptpilot main package from CI artifacts
+
+ -- Kun Lai <laikun@linux.alibaba.com>  Thu, 02 Apr 2026 15:28:09 +0800
+
 cryptpilot (0.5.0) unstable; urgency=medium
 
   * build: improve version tag detection robustness
