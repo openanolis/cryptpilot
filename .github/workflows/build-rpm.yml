@@ -243,9 +243,19 @@ jobs:
           merge-multiple: false
 
       - name: Install RPM packages
+        id: install-rpm
         run: |
+          # Find the RPM path and export it (host path)
+          RPM_PATH=$(ls ./rpm-packages/RPMS/*/cryptpilot-fde-[0-9]*.rpm | head -1)
+          echo "Found RPM: ${RPM_PATH}"
+          # Convert to container path (workspace is mounted at /workspace)
+          RPM_PATH_IN_CONTAINER="/workspace/${RPM_PATH#./}"
+          echo "RPM path in container: ${RPM_PATH_IN_CONTAINER}"
+          # Export both host path and container path
+          echo "cryptpilot_fde_rpm=${RPM_PATH}" >> $GITHUB_OUTPUT
+          echo "cryptpilot_fde_rpm_container=${RPM_PATH_IN_CONTAINER}" >> $GITHUB_OUTPUT
           docker exec test-container bash -c "
-            yum install -y /workspace/rpm-packages/RPMS/*/cryptpilot-fde-[0-9]*.rpm
+            yum install -y ${RPM_PATH_IN_CONTAINER}
             cryptpilot-fde --version
           "
 
@@ -258,7 +268,7 @@ jobs:
       - name: Run convert test
         run: |
           docker exec -w /workspace/repo test-container bash -c "
-            make run-convert-test-case CASE=${{ matrix.case }} INPUT_IMAGE=/workspace/test-images/test-image.qcow2
+            make run-convert-test-case CASE=${{ matrix.case }} INPUT_IMAGE=/workspace/test-images/test-image.qcow2 CRYPTPILOT_FDE_RPM=${{ steps.install-rpm.outputs.cryptpilot_fde_rpm_container }}
           "
 
       - name: Cleanup

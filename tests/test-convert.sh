@@ -37,6 +37,9 @@ readonly TEST_PASSPHRASE="test-passphrase-12345"
 # Source image path (can be overridden via --input)
 SOURCE_IMAGE=""
 
+# Path to cryptpilot-fde RPM package (required)
+CRYPTPILOT_FDE_RPM=""
+
 # Script directory (where this script is located)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -128,9 +131,9 @@ load_nbd_module() {
 
 # Check for conflicting LVM volume group
 check_vg_conflict() {
-    if [[ -e /dev/system ]] || vgs system &>/dev/null; then
-        fatal "LVM volume group 'system' already exists on this host. " \
-              "The test cannot run on machines with an existing 'system' VG. " \
+    if [[ -e /dev/cryptpilot ]] || vgs cryptpilot &>/dev/null; then
+        fatal "LVM volume group 'cryptpilot' already exists on this host. " \
+              "The test cannot run on machines with an existing 'cryptpilot' VG. " \
               "Please run tests in a container or VM without conflicting VGs."
     fi
 }
@@ -184,7 +187,7 @@ cleanup() {
     done
 
     # Deactivate LVM volume groups created during tests
-    for vg in $(vgs --noheadings -o vg_name 2>/dev/null | grep -E "^[[:space:]]*system" || true); do
+    for vg in $(vgs --noheadings -o vg_name 2>/dev/null | grep -E "^[[:space:]]*cryptpilot" || true); do
         vg=$(echo "$vg" | tr -d ' ')
         log::info "Deactivating VG: $vg"
         vgchange -an "$vg" 2>/dev/null || true
@@ -251,21 +254,37 @@ download_test_image() {
 # Create test configuration directory with OTP provider
 create_test_config() {
     local config_dir="$1"
+    local use_encryption="$2"
     mkdir -p "${config_dir}"
 
     # Create fde.toml with OTP provider (simplest, no external dependencies)
-    cat > "${config_dir}/fde.toml" <<'EOF'
+    if [[ "${use_encryption}" == "true" ]]; then
+        cat > "${config_dir}/fde.toml" <<EOF
 # Test configuration for cryptpilot-convert integration tests
 [rootfs]
-rw_overlay = "disk"
+delta_location = "disk"
 
-[rootfs.encrypt.otp]
+[rootfs.encrypt.exec]
+command = "echo"
+args = ["-n", "${TEST_PASSPHRASE}"]
 
-[data]
+[delta]
 integrity = false
 
-[data.encrypt.otp]
+[delta.encrypt.otp]
 EOF
+    else
+        cat > "${config_dir}/fde.toml" <<'EOF'
+# Test configuration for cryptpilot-convert integration tests (no encryption)
+[rootfs]
+delta_location = "disk"
+
+[delta]
+integrity = false
+
+[delta.encrypt.otp]
+EOF
+    fi
 
     log::info "Created test config at: ${config_dir}/fde.toml"
 }
@@ -326,6 +345,8 @@ run_convert() {
         cmd+=("--rootfs-no-encryption")
     fi
 
+    cmd+=("--package" "${CRYPTPILOT_FDE_RPM}")
+
     log::info "Command: ${cmd[*]}"
 
     # Run the conversion
@@ -361,6 +382,21 @@ verify_converted_image() {
     fi
     log::info "Output image size: $((file_size / 1024 / 1024 / 1024))GB"
 
+    # Test reference value calculation
+    log::info "Testing reference value calculation..."
+    if command -v cryptpilot-fde &>/dev/null; then
+        local reference_value_file="${WORKDIR}/reference_value-${test_name}.json"
+        if cryptpilot-fde show-reference-value --disk "${output_image}" 1>"${reference_value_file}" 2>/dev/null; then
+            log::info "Reference value calculation succeeded"
+            cat "${reference_value_file}"
+        else
+            log::error "Reference value calculation failed"
+            verify_failed=1
+        fi
+    else
+        log::warn "cryptpilot-fde not found, skipping reference value test"
+    fi
+
     # Connect image via NBD
     local nbd_device
     nbd_device=$(get_available_nbd)
@@ -385,83 +421,50 @@ verify_converted_image() {
         verify_failed=1
     fi
 
-    # Check for EFI partition
-    if ! blkid "${nbd_device}p1" 2>/dev/null | grep -q -i "vfat\|fat"; then
-        log::warn "EFI partition (p1) may not be FAT format"
-    else
-        log::info "EFI partition found"
-    fi
-
     # Check for LVM partition and volume group
     log::info "Scanning for LVM..."
     pvscan --cache 2>/dev/null || true
     vgscan 2>/dev/null || true
 
-    if ! vgs system &>/dev/null; then
-        log::error "LVM volume group 'system' not found"
+    if ! vgs cryptpilot &>/dev/null; then
+        log::error "LVM volume group 'cryptpilot' not found"
         verify_failed=1
     else
-        log::info "LVM volume group 'system' found"
+        log::info "LVM volume group 'cryptpilot' found"
 
         # Check for logical volumes
-        if ! lvs system/rootfs &>/dev/null; then
-            log::error "Logical volume 'system/rootfs' not found"
+        if ! lvs cryptpilot/rootfs &>/dev/null; then
+            log::error "Logical volume 'cryptpilot/rootfs' not found"
             verify_failed=1
         else
-            log::info "Logical volume 'system/rootfs' found"
+            log::info "Logical volume 'cryptpilot/rootfs' found"
         fi
 
-        if ! lvs system/rootfs_hash &>/dev/null; then
-            log::error "Logical volume 'system/rootfs_hash' not found"
+        if ! lvs cryptpilot/rootfs_hash &>/dev/null; then
+            log::error "Logical volume 'cryptpilot/rootfs_hash' not found"
             verify_failed=1
         else
-            log::info "Logical volume 'system/rootfs_hash' found"
+            log::info "Logical volume 'cryptpilot/rootfs_hash' found"
         fi
     fi
 
     # Check encryption status
     if [[ "${use_encryption}" == "true" ]]; then
         log::info "Checking LUKS encryption..."
-        vgchange -ay system 2>/dev/null || true
-        if cryptsetup isLuks /dev/mapper/system-rootfs 2>/dev/null; then
-            log::info "LUKS encryption verified on system-rootfs"
+        vgchange -ay cryptpilot 2>/dev/null || true
+        if cryptsetup isLuks /dev/mapper/cryptpilot-rootfs 2>/dev/null; then
+            log::info "LUKS encryption verified on cryptpilot-rootfs"
         else
-            log::error "Expected LUKS encryption on system-rootfs but not found"
+            log::error "Expected LUKS encryption on cryptpilot-rootfs but not found"
             verify_failed=1
         fi
     else
         log::info "Skipping encryption check (no-encryption mode)"
     fi
 
-    # Check UKI vs GRUB specific items
-    if [[ "${use_uki}" == "true" ]]; then
-        log::info "Checking UKI boot configuration..."
-        # Mount EFI partition to check for UKI
-        local efi_mount="${WORKDIR}/mnt-efi-${test_name}"
-        mkdir -p "${efi_mount}"
-        if mount "${nbd_device}p1" "${efi_mount}" 2>/dev/null; then
-            if [[ -f "${efi_mount}/EFI/BOOT/BOOTX64.EFI" ]]; then
-                log::info "UKI image found at EFI/BOOT/BOOTX64.EFI"
-            else
-                log::error "UKI image not found at expected location"
-                ls -la "${efi_mount}/EFI/" 2>/dev/null || true
-                verify_failed=1
-            fi
-            umount "${efi_mount}" 2>/dev/null || true
-        else
-            log::warn "Could not mount EFI partition to verify UKI"
-        fi
-    else
-        log::info "Checking GRUB boot configuration..."
-        # In GRUB mode, there should be a boot partition
-        # The boot partition could be p2 or embedded in rootfs depending on layout
-        log::info "GRUB mode verification: checking for boot-related partitions"
-        lsblk -o NAME,SIZE,TYPE,FSTYPE "${nbd_device}" || true
-    fi
-
     # Cleanup: deactivate VG and disconnect NBD
     log::info "Cleaning up verification mounts..."
-    vgchange -an system 2>/dev/null || true
+    vgchange -an cryptpilot 2>/dev/null || true
     sleep 1
     qemu-nbd --disconnect "${nbd_device}" 2>/dev/null || true
 
@@ -473,6 +476,109 @@ verify_converted_image() {
         return 1
     fi
 }
+
+
+# Test booting the converted image with QEMU in container
+# Returns 0 if login prompt appears, 1 if emergency shell or timeout
+test_qemu_boot() {
+    local test_name="$1"
+    local output_image="$2"
+
+    log::step "Testing QEMU boot for: ${test_name}"
+
+    local boot_log="${WORKDIR}/${test_name}-boot.log"
+
+    log::info "Starting QEMU container with UEFI boot mode"
+
+    # Start QEMU container in background and capture console output
+    local container_name="qemu-test-${test_name}-$$"
+    local container_id
+    container_id=$(docker run -d --rm --privileged \
+        -v "${output_image}:${output_image}:ro" \
+        -e "IMAGE=${output_image}" \
+        -e BOOT="" \
+        -e "KVM=N" \
+        -e "CPU_CORES=$(nproc)" \
+        -e "RAM_SIZE=$(awk '/MemTotal/{printf "%d", $2 * 0.8 / 1024}' /proc/meminfo)" \
+        --entrypoint /bin/bash \
+        --name "${container_name}" \
+        ghcr.io/qemus/qemu:7.29 \
+            -c 'echo "📦 Creating temporary COW layer..." && \
+            qemu-img create -f qcow2 -F qcow2 -b ${IMAGE} /boot.qcow2 && \
+            echo "✅ COW layer created, starting QEMU..." && \
+            exec /usr/bin/tini -s /run/entry.sh' 2>&1) || {
+        log::error "Failed to start QEMU container: ${container_id}"
+        return 1
+    }
+
+    log::info "QEMU container started: ${container_id}"
+
+    # Stream logs to file and check for boot status
+    local timeout=180  # 3 minutes timeout
+    local elapsed=0
+    local check_interval=2
+    local boot_success=false
+
+    # Start capturing logs in background
+    docker logs -f "${container_name}" > "${boot_log}" 2>&1 &
+    local logs_pid=$!
+
+    while [[ $elapsed -lt $timeout ]]; do
+        sleep $check_interval
+        elapsed=$((elapsed + check_interval))
+
+        # Check if container is still running (check by ID, not name)
+        if ! docker ps -q --filter "id=${container_id}" | grep -q .; then
+            log::warn "QEMU container exited prematurely"
+            break
+        fi
+
+        # Check for login prompt (success)
+        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+            log::success "Login prompt detected - boot successful!"
+            boot_success=true
+            break
+        fi
+
+        # Check for emergency shell (failure)
+        if grep -q -i "Emergency Mode" "${boot_log}" 2>/dev/null || \
+           grep -q -i "emergency shell" "${boot_log}" 2>/dev/null || \
+           grep -q -i "Entering emergency mode" "${boot_log}" 2>/dev/null; then
+            log::error "Emergency shell detected - boot failed!"
+            break
+        fi
+
+        # Check for kernel panic
+        if grep -q -i "Kernel panic" "${boot_log}" 2>/dev/null; then
+            log::error "Kernel panic detected - boot failed!"
+            break
+        fi
+    done
+
+    # Stop log capture (kill the docker logs process)
+    kill $logs_pid 2>/dev/null || true
+    wait $logs_pid 2>/dev/null || true
+
+    # Stop and remove container
+    log::info "Stopping QEMU container..."
+    docker stop "${container_name}" >/dev/null 2>&1 || true
+
+    # Show full boot log for debugging
+    log::info "Full boot log:"
+    cat "${boot_log}" || true
+
+    if [[ "${boot_success}" == "true" ]]; then
+        log::success "QEMU boot test passed for: ${test_name}"
+        return 0
+    else
+        if [[ $elapsed -ge $timeout ]]; then
+            log::error "QEMU boot test timed out after ${timeout} seconds"
+        fi
+        log::error "QEMU boot test failed for: ${test_name}"
+        return 1
+    fi 
+}
+
 
 # ============================================================================
 # Test case functions
@@ -496,15 +602,16 @@ run_test_case() {
     local output_image="${test_workdir}/output.qcow2"
     local config_dir="${test_workdir}/config"
 
-    # Create a copy of the input image for this test
-    log::info "Creating working copy of input image..."
-    if ! cp "${SOURCE_IMAGE}" "${input_image}"; then
-        log::error "Failed to copy input image"
+    # Create a working copy of the input image for this test
+    # Use qemu-img with backing file for fast copy-on-write clone
+    log::info "Creating working copy of input image (using qcow2 backing file)..."
+    if ! qemu-img create -f qcow2 -F qcow2 -b "${SOURCE_IMAGE}" "${input_image}"; then
+        log::error "Failed to create input image with qemu-img"
         return 1
     fi
 
     # Create test configuration
-    create_test_config "${config_dir}"
+    create_test_config "${config_dir}" "${use_encryption}"
 
     # Run enhancement (hardens the image before conversion)
     if ! run_enhance "${test_name}" "${input_image}"; then
@@ -518,6 +625,11 @@ run_test_case() {
 
     # Verify the result
     if ! verify_converted_image "${test_name}" "${output_image}" "${use_uki}" "${use_encryption}"; then
+        return 1
+    fi
+
+    # Test QEMU boot
+    if ! test_qemu_boot "${test_name}" "${output_image}"; then
         return 1
     fi
 
@@ -535,9 +647,12 @@ run_test_case() {
 
 show_help() {
     cat <<EOF
-Usage: $(basename "$0") [OPTIONS]
+Usage: $(basename "$0") --rpm <path> [OPTIONS]
 
 Integration tests for cryptpilot-convert
+
+Required:
+    --rpm <path>    Path to cryptpilot-fde RPM package
 
 Options:
     --case <name>   Run a specific test case. Valid cases:
@@ -550,9 +665,9 @@ Options:
     --help          Show this help message
 
 Examples:
-    $(basename "$0") --case uki-encrypted
-    $(basename "$0") --all
-    $(basename "$0") --case grub-noenc --input /path/to/image.qcow2
+    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --case uki-encrypted
+    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --all
+    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --case grub-noenc --input /path/to/image.qcow2
 EOF
 }
 
@@ -564,6 +679,10 @@ main() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --rpm)
+                CRYPTPILOT_FDE_RPM="$2"
+                shift 2
+                ;;
             --case)
                 test_case="$2"
                 shift 2
@@ -585,6 +704,16 @@ main() {
                 ;;
         esac
     done
+
+    # Validate required --rpm argument
+    if [[ -z "${CRYPTPILOT_FDE_RPM}" ]]; then
+        show_help
+        fatal "Missing required argument: --rpm <path>"
+    fi
+    if [[ ! -f "${CRYPTPILOT_FDE_RPM}" ]]; then
+        fatal "cryptpilot-fde RPM package not found: ${CRYPTPILOT_FDE_RPM}"
+    fi
+    log::info "Using cryptpilot-fde RPM: ${CRYPTPILOT_FDE_RPM}"
 
     # Validate custom input if provided
     if [[ -n "${custom_input}" ]]; then
