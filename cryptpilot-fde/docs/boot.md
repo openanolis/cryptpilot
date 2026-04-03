@@ -255,7 +255,7 @@ CryptPilot supports statically linked kernels (all kernel modules compiled into 
 | **dm_snapshot** | Snapshot support (dm-snapshot backend) | `CONFIG_DM_SNAPSHOT=y` |
 | **dm_zero** | Zero target device (dm-snapshot backend) | `CONFIG_DM_ZERO=y` |
 | **dm_crypt** | LUKS/dm-crypt encryption | `CONFIG_DM_CRYPT=y` |
-| **dm_integrity** | dm-integrity protection | `CONFIG_BLK_DEV_INTEGRITY=y` |
+| **dm_integrity** | dm-integrity protection | `CONFIG_DM_INTEGRITY=y` |
 | **overlay** | OverlayFS filesystem (overlayfs backend) | `CONFIG_OVERLAY_FS=y` |
 | **zram** | Compressed RAM block device (ram mode) | `CONFIG_ZRAM=y` |
 
