@@ -382,15 +382,19 @@ verify_converted_image() {
     fi
     log::info "Output image size: $((file_size / 1024 / 1024 / 1024))GB"
 
+    local verify_failed=0
+
     # Test reference value calculation
     log::info "Testing reference value calculation..."
     if command -v cryptpilot-fde &>/dev/null; then
         local reference_value_file="${WORKDIR}/reference_value-${test_name}.json"
-        if cryptpilot-fde show-reference-value --disk "${output_image}" 1>"${reference_value_file}" 2>/dev/null; then
+        local reference_value_stderr="${WORKDIR}/reference_value-${test_name}.stderr"
+        if cryptpilot-fde show-reference-value --disk "${output_image}" 1>"${reference_value_file}" 2>"${reference_value_stderr}"; then
             log::info "Reference value calculation succeeded"
             cat "${reference_value_file}"
         else
             log::error "Reference value calculation failed"
+            log::error "stderr: $(cat "${reference_value_stderr}" 2>/dev/null)"
             verify_failed=1
         fi
     else
@@ -411,8 +415,6 @@ verify_converted_image() {
     sleep 2
     partprobe "${nbd_device}" 2>/dev/null || true
     sleep 1
-
-    local verify_failed=0
 
     # Check partition layout
     log::info "Checking partition layout..."
@@ -490,10 +492,9 @@ test_qemu_boot() {
 
     log::info "Starting QEMU container with UEFI boot mode"
 
-    # Start QEMU container in background and capture console output
+    # Start QEMU container in background
     local container_name="qemu-test-${test_name}-$$"
-    local container_id
-    container_id=$(docker run -d --rm --privileged \
+    if ! docker run -d --rm --privileged \
         -v "${output_image}:${output_image}:ro" \
         -e "IMAGE=${output_image}" \
         -e BOOT="" \
@@ -506,12 +507,12 @@ test_qemu_boot() {
             -c 'echo "📦 Creating temporary COW layer..." && \
             qemu-img create -f qcow2 -F qcow2 -b ${IMAGE} /boot.qcow2 && \
             echo "✅ COW layer created, starting QEMU..." && \
-            exec /usr/bin/tini -s /run/entry.sh' 2>&1) || {
-        log::error "Failed to start QEMU container: ${container_id}"
+            exec /usr/bin/tini -s /run/entry.sh'; then
+        log::error "Failed to start QEMU container: ${container_name}"
         return 1
-    }
+    fi
 
-    log::info "QEMU container started: ${container_id}"
+    log::info "QEMU container started: ${container_name}"
 
     # Stream logs to file and check for boot status
     local timeout=180  # 3 minutes timeout
@@ -527,8 +528,8 @@ test_qemu_boot() {
         sleep $check_interval
         elapsed=$((elapsed + check_interval))
 
-        # Check if container is still running (check by ID, not name)
-        if ! docker ps -q --filter "id=${container_id}" | grep -q .; then
+        # Check if container is still running
+        if ! docker ps -q --filter "name=${container_name}" | grep -q .; then
             log::warn "QEMU container exited prematurely"
             break
         fi
