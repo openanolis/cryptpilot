@@ -27,7 +27,7 @@ No additional fields required.
 
 **Supported by:** cryptpilot-crypt only (not available for FDE rootfs/data volumes)
 
-Template: [otp.toml.template](../dist/etc/volumes/otp.toml.template)
+Template: [otp.toml.template](../../dist/etc/volumes/otp.toml.template)
 
 ---
 
@@ -70,7 +70,7 @@ key_uri = "kbs:///default/mykey/volume_data0"
 
 **Supported by:** cryptpilot-fde, cryptpilot-crypt
 
-Template: [kbs.toml.template](../dist/etc/volumes/kbs.toml.template)
+Template: [kbs.toml.template](../../dist/etc/volumes/kbs.toml.template)
 
 ---
 
@@ -94,7 +94,7 @@ client_key_password_from_kms = "alias/ClientKey_****"
 
 **Supported by:** cryptpilot-fde, cryptpilot-crypt
 
-Template: [kms.toml.template](../dist/etc/volumes/kms.toml.template)
+Template: [kms.toml.template](../../dist/etc/volumes/kms.toml.template)
 
 ---
 
@@ -123,7 +123,7 @@ args = []
 
 **Supported by:** cryptpilot-fde, cryptpilot-crypt
 
-Template: [oidc.toml.template](../dist/etc/volumes/oidc.toml.template)
+Template: [oidc.toml.template](../../dist/etc/volumes/oidc.toml.template)
 
 ---
 
@@ -149,7 +149,7 @@ args = ["-n", "MySecretPassword"]
 
 **Supported by:** cryptpilot-fde, cryptpilot-crypt
 
-Template: [exec.toml.template](../dist/etc/volumes/exec.toml.template)
+Template: [exec.toml.template](../../dist/etc/volumes/exec.toml.template)
 
 > [!WARNING]
 > The exec provider is mainly for testing. Use KBS, KMS, or OIDC in production.
@@ -168,6 +168,6 @@ Template: [exec.toml.template](../dist/etc/volumes/exec.toml.template)
 
 ## See Also
 
-- [FDE Configuration Guide](../cryptpilot-fde/docs/configuration.md) - Full disk encryption configuration
-- [Volume Configuration Guide](../cryptpilot-crypt/docs/configuration.md) - Data volume encryption configuration
-- [Development Guide](development.md) - Build and test instructions
+- [FDE Configuration Guide](../../cryptpilot-fde/docs/configuration.md) - Full disk encryption configuration
+- [Volume Configuration Guide](configuration.md) - Data volume encryption configuration
+- [Development Guide](../../development.md) - Build and test instructions

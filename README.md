@@ -133,7 +133,7 @@ mount /dev/mapper/data0 /mnt/data0
 
 ### Development
 
-- [Development Guide](docs/development.md) - Build, test, and package
+- [Development Guide](development.md) - Build, test, and package
 
 ## License
 
@@ -141,7 +141,7 @@ Apache-2.0
 
 ## Contributing
 
-Contributions welcome! Please see [Development Guide](docs/development.md).
+Contributions welcome! Please see [Development Guide](development.md).
 
 ## See Also
 

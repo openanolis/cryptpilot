@@ -21,7 +21,7 @@
 rpm --install cryptpilot-crypt-*.rpm
 ```
 
-或从源码构建（参见[开发指南](../docs/development.md)）。
+或从源码构建（参见[开发指南](../development.md)）。
 
 ## 快速开始
 
@@ -193,14 +193,14 @@ cryptpilot-crypt config check [--keep-checking] [--skip-check-passphrase]
 - **OIDC**：使用 OpenID Connect 认证的 KMS
 - **Exec**：提供密钥的自定义可执行文件
 
-详细配置请参阅[密钥提供者](../docs/key-providers_zh.md)。
+详细配置请参阅[密钥提供者](docs/key-providers_zh.md)。
 
 ## 文档
 
 - [快速开始指南](docs/quick-start_zh.md) - 分步示例
 - [配置指南](docs/configuration_zh.md) - 详细配置选项
 - [Systemd 服务](docs/systemd-service_zh.md) - 启动时自动打开卷
-- [开发指南](../docs/development.md) - 构建和测试说明
+- [开发指南](../development.md) - 构建和测试说明
 
 ## 使用场景
 

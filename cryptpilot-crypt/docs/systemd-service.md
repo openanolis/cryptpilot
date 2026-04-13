@@ -117,4 +117,4 @@ systemctl disable cryptpilot.service
 
 - [Configuration Guide](configuration.md) - Volume configuration options
 - [Main README](../README.md) - Quick start and usage examples
-- [Development Guide](../../docs/development.md) - Build and test instructions
+- [Development Guide](../../development.md) - Build and test instructions

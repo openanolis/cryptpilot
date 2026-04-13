@@ -49,7 +49,7 @@ graph LR
 rpm --install cryptpilot-fde-*.rpm
 ```
 
-或从源码构建（参见[开发指南](../docs/development.md)）。
+或从源码构建（参见[开发指南](../development.md)）。
 
 ## 快速开始
 
@@ -136,7 +136,7 @@ cryptpilot-enhance --mode full --image ./disk.qcow2
 - [快速开始指南](docs/quick-start_zh.md) - 分步示例
 - [配置指南](docs/configuration_zh.md) - 详细配置选项
 - [启动过程](docs/boot_zh.md) - cryptpilot-fde 如何与系统启动集成
-- [开发指南](../docs/development.md) - 构建和测试说明
+- [开发指南](../development.md) - 构建和测试说明
 
 ## 工作原理
 
@@ -164,7 +164,7 @@ cryptpilot-enhance --mode full --image ./disk.qcow2
 - **OIDC**：使用 OpenID Connect 认证的 KMS
 - **Exec**：提供密钥的自定义可执行文件
 
-详细配置请参阅[密钥提供者](../docs/key-providers_zh.md)。
+详细配置请参阅[密钥提供者](../cryptpilot-crypt/docs/key-providers_zh.md)。
 
 ## 支持的发行版
 

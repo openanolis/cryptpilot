@@ -503,10 +503,10 @@ cryptpilot-fde -c ./config_dir/ config check --keep-checking
 
 - [配置指南](configuration_zh.md) - 详细配置选项
 - [启动过程](boot_zh.md) - cryptpilot-fde 如何与启动集成
-- [密钥提供者](../../docs/key-providers_zh.md) - 密钥提供者配置详情
+- [密钥提供者](../../cryptpilot-crypt/docs/key-providers_zh.md) - 密钥提供者配置详情
 - [cryptpilot-enhance](cryptpilot_enhance_zh.md) - 加密前加固镜像
 
 ## 参见
 
 - [cryptpilot-crypt 快速开始](../../cryptpilot-crypt/docs/quick-start_zh.md) - 加密数据卷
-- [开发指南](../../docs/development.md) - 构建和测试说明
+- [开发指南](../../development.md) - 构建和测试说明

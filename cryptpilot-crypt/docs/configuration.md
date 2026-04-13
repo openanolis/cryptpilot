@@ -65,7 +65,7 @@ integrity = true
 - **`integrity`** (optional, default: `false`): Enable dm-integrity for data authentication
   - Verifies data on every read
   - Prevents tampering (but not replay attacks)
-- **`encrypt`** (required): Key provider configuration (see [Key Providers](../../docs/key-providers.md))
+- **`encrypt`** (required): Key provider configuration (see [Key Providers](key-providers.md))
 
 ## Auto-Open at Boot
 
@@ -153,7 +153,7 @@ Options:
 
 ## See Also
 
-- [Key Providers](../../docs/key-providers.md) - Detailed key provider configuration
+- [Key Providers](key-providers.md) - Detailed key provider configuration
 - [Systemd Service](systemd-service.md) - Auto-open volumes at boot
-- [Development Guide](../../docs/development.md) - Build and test instructions
+- [Development Guide](../../development.md) - Build and test instructions
 - [Main README](../README.md) - Quick start and usage examples

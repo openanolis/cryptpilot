@@ -65,7 +65,7 @@ integrity = true
 - **`integrity`**（可选，默认：`false`）：启用 dm-integrity 数据完整性保护
   - 每次读取时验证数据
   - 防止篡改（但无法防止回滚攻击）
-- **`encrypt`**（必需）：密钥提供者配置（详见[密钥提供者](../../docs/key-providers_zh.md)）
+- **`encrypt`**（必需）：密钥提供者配置（详见[密钥提供者](key-providers_zh.md)）
 
 ## 启动时自动打开
 
@@ -153,7 +153,7 @@ cryptpilot-crypt config check --keep-checking
 
 ## 参见
 
-- [密钥提供者](../../docs/key-providers_zh.md) - 详细的密钥提供者配置
+- [密钥提供者](key-providers_zh.md) - 详细的密钥提供者配置
 - [Systemd 服务](systemd-service_zh.md) - 启动时自动打开卷
-- [开发指南](../../docs/development.md) - 构建和测试说明
+- [开发指南](../../development.md) - 构建和测试说明
 - [主 README](../README.md) - 快速开始和使用示例

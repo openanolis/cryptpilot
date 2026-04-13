@@ -133,7 +133,7 @@ mount /dev/mapper/data0 /mnt/data0
 
 ### 开发
 
-- [开发指南](docs/development.md) - 构建、测试和打包
+- [开发指南](development.md) - 构建、测试和打包
 
 ## 许可证
 
@@ -141,7 +141,7 @@ Apache-2.0
 
 ## 贡献
 
-欢迎贡献！请参阅[开发指南](docs/development.md)。
+欢迎贡献！请参阅[开发指南](development.md)。
 
 ## 参见
 

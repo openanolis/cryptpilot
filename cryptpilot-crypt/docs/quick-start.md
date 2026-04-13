@@ -267,4 +267,4 @@ If volumes don't open at boot:
 
 - [Configuration Guide](configuration.md) - Detailed configuration options
 - [Systemd Service](systemd-service.md) - Auto-open volumes at boot
-- [Key Providers](../../docs/key-providers.md) - Key provider configuration details
+- [Key Providers](key-providers.md) - Key provider configuration details
