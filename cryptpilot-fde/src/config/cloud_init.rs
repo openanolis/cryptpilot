@@ -49,14 +49,15 @@ impl super::FdeConfigSource for CloudInitConfigSource {
     }
 
     async fn get_fde_config_bundle(&self) -> Result<FdeConfigBundle> {
-        let is_ecs = cryptpilot::vendor::aliyun::check_is_aliyun_ecs().await;
-        if !is_ecs {
-            bail!("Not a Aliyun ECS instance, skip fetching config from cloud-init user data");
-        } else {
-            let user_data =
-                cryptpilot::vendor::aliyun::cloudinit::get_aliyun_ecs_cloudinit_user_data().await?;
-            Self::parse_from_user_data(&user_data)
-        }
+        cryptpilot::vendor::aliyun::check_is_aliyun_ecs()
+            .await
+            .context(
+                "Aliyun IMDS is not reachable, skip fetching config from cloud-init user data",
+            )?;
+
+        let user_data =
+            cryptpilot::vendor::aliyun::cloudinit::get_aliyun_ecs_cloudinit_user_data().await?;
+        Self::parse_from_user_data(&user_data)
     }
 }
 
