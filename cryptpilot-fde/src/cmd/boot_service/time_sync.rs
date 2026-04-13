@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
 
 pub async fn sync_time_to_system() -> Result<()> {
-    let is_ecs = cryptpilot::vendor::aliyun::check_is_aliyun_ecs().await;
-    if !is_ecs {
-        tracing::debug!("Not a Aliyun ECS instance, skip syncing system time");
+    if let Err(e) = cryptpilot::vendor::aliyun::check_is_aliyun_ecs().await {
+        tracing::debug!("Aliyun IMDS not reachable, skip syncing system time: {e:#}");
         return Ok(());
     } else {
         tracing::info!("Aliyun ECS instance detected, sync system time now");
@@ -39,8 +38,10 @@ pub mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_time() -> Result<()> {
-        let is_ecs = cryptpilot::vendor::aliyun::check_is_aliyun_ecs().await;
-        if !is_ecs {
+        if cryptpilot::vendor::aliyun::check_is_aliyun_ecs()
+            .await
+            .is_err()
+        {
             /* Skip */
             return Ok(());
         } else {
