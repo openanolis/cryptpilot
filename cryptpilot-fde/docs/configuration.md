@@ -55,7 +55,7 @@ resource_path = "/secrets/rootfs-key"
 
 - **`encrypt`** (optional): Key provider configuration for rootfs encryption
   - If omitted, rootfs is not encrypted (but still integrity-protected)
-  - See [Key Providers](../../docs/key-providers.md) for provider details
+  - See [Key Providers](../../cryptpilot-crypt/docs/key-providers.md) for provider details
 
 #### Measurement and Attestation
 
@@ -96,7 +96,7 @@ resource_path = "/secrets/data-key"
   - Prevents data tampering (but not replay attacks)
 
 - **`encrypt`** (required): Key provider configuration for delta volume encryption
-  - See [Key Providers](../../docs/key-providers.md) for provider details
+  - See [Key Providers](../../cryptpilot-crypt/docs/key-providers.md) for provider details
 
 ## Configuration Validation
 
@@ -111,7 +111,7 @@ Options:
 
 ## See Also
 
-- [Key Providers](../../docs/key-providers.md) - Detailed key provider configuration
+- [Key Providers](../../cryptpilot-crypt/docs/key-providers.md) - Detailed key provider configuration
 - [Boot Process](boot.md) - How cryptpilot-fde integrates with boot
 - [cryptpilot-enhance](cryptpilot_enhance.md) - Disk hardening tool
-- [Development Guide](../../docs/development.md) - Build and test instructions
+- [Development Guide](../../development.md) - Build and test instructions

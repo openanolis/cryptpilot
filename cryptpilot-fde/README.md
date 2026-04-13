@@ -49,7 +49,7 @@ Install from the [latest release](https://github.com/openanolis/cryptpilot/relea
 rpm --install cryptpilot-fde-*.rpm
 ```
 
-Or build from source (see [Development Guide](../docs/development.md)).
+Or build from source (see [Development Guide](../development.md)).
 
 ## Quick Start
 
@@ -136,7 +136,7 @@ See [cryptpilot-enhance documentation](docs/cryptpilot_enhance.md) for details.
 - [Quick Start Guide](docs/quick-start.md) - Step-by-step examples
 - [Configuration Guide](docs/configuration.md) - Detailed configuration options
 - [Boot Process](docs/boot.md) - How cryptpilot-fde integrates with system boot
-- [Development Guide](../docs/development.md) - Build and test instructions
+- [Development Guide](../development.md) - Build and test instructions
 
 ## How It Works
 
@@ -164,7 +164,7 @@ Multiple key providers are supported for flexible key management:
 - **OIDC**: KMS using OpenID Connect authentication
 - **Exec**: Custom executable that provides the key
 
-See [Key Providers](../docs/key-providers.md) for detailed configuration.
+See [Key Providers](../cryptpilot-crypt/docs/key-providers.md) for detailed configuration.
 
 ## Supported Distributions
 

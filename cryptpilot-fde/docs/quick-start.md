@@ -503,10 +503,10 @@ If the encrypted system fails to boot:
 
 - [Configuration Guide](configuration.md) - Detailed configuration options
 - [Boot Process](boot.md) - How cryptpilot-fde integrates with boot
-- [Key Providers](../../docs/key-providers.md) - Key provider configuration details
+- [Key Providers](../../cryptpilot-crypt/docs/key-providers.md) - Key provider configuration details
 - [cryptpilot-enhance](cryptpilot_enhance.md) - Harden images before encryption
 
 ## See Also
 
 - [cryptpilot-crypt Quick Start](../../cryptpilot-crypt/docs/quick-start.md) - Encrypt delta volumes
-- [Development Guide](../../docs/development.md) - Build and test instructions
+- [Development Guide](../../development.md) - Build and test instructions

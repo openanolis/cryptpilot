@@ -117,4 +117,4 @@ systemctl disable cryptpilot.service
 
 - [配置指南](configuration_zh.md) - 卷配置选项
 - [主 README](../README.md) - 快速开始和使用示例
-- [开发指南](../../docs/development.md) - 构建和测试说明
+- [开发指南](../../development.md) - 构建和测试说明

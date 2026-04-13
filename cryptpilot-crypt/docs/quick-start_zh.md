@@ -343,4 +343,4 @@ cryptpilot-crypt config check --keep-checking
 
 - [配置指南](configuration_zh.md) - 详细配置选项
 - [Systemd 服务](systemd-service_zh.md) - 启动时自动打开卷
-- [密钥提供者](../../docs/key-providers_zh.md) - 密钥提供者配置详情
+- [密钥提供者](key-providers_zh.md) - 密钥提供者配置详情

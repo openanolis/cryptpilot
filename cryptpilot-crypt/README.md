@@ -21,7 +21,7 @@ Install from the [latest release](https://github.com/openanolis/cryptpilot/relea
 rpm --install cryptpilot-crypt-*.rpm
 ```
 
-Or build from source (see [Development Guide](../docs/development.md)).
+Or build from source (see [Development Guide](../development.md)).
 
 ## Quick Start
 
@@ -193,14 +193,14 @@ Supports multiple key providers:
 - **OIDC**: KMS with OpenID Connect authentication
 - **Exec**: Custom executable providing keys
 
-See [Key Providers](../docs/key-providers.md) for detailed configuration.
+See [Key Providers](docs/key-providers.md) for detailed configuration.
 
 ## Documentation
 
 - [Quick Start Guide](docs/quick-start.md) - Step-by-step examples
 - [Configuration Guide](docs/configuration.md) - Detailed configuration options
 - [Systemd Service](docs/systemd-service.md) - Auto-open volumes at boot
-- [Development Guide](../docs/development.md) - Build and test instructions
+- [Development Guide](../development.md) - Build and test instructions
 
 ## Use Cases
 

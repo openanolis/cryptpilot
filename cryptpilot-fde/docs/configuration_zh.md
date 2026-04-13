@@ -55,7 +55,7 @@ resource_path = "/secrets/rootfs-key"
 
 - **`encrypt`**（可选）：rootfs 卷的密钥提供者配置
   - 如不指定，根分区不加密（但仍有 dm-verity 完整性保护）
-  - 详见[密钥提供者](../../docs/key-providers_zh.md)文档
+  - 详见[密钥提供者](../../cryptpilot-crypt/docs/key-providers_zh.md)文档
 
 #### 度量与证明
 
@@ -96,7 +96,7 @@ resource_path = "/secrets/data-key"
   - 防止数据篡改（但无法防止回滚攻击）
 
 - **`encrypt`**（必需）：data 卷的密钥提供者配置
-  - 详见[密钥提供者](../../docs/key-providers_zh.md)文档
+  - 详见[密钥提供者](../../cryptpilot-crypt/docs/key-providers_zh.md)文档
 
 ## 配置验证
 
@@ -111,7 +111,7 @@ cryptpilot-fde -c /path/to/config config check --keep-checking
 
 ## 参见
 
-- [密钥提供者](../../docs/key-providers_zh.md) - 详细的密钥提供者配置
+- [密钥提供者](../../cryptpilot-crypt/docs/key-providers_zh.md) - 详细的密钥提供者配置
 - [启动过程](boot_zh.md) - cryptpilot-fde 如何集成到系统启动
 - [cryptpilot-enhance](cryptpilot_enhance_zh.md) - 磁盘加固工具
-- [开发指南](../../docs/development.md) - 构建和测试说明
+- [开发指南](../../development.md) - 构建和测试说明

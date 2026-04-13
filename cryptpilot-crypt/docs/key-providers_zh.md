@@ -27,7 +27,7 @@ cryptpilot 通过模块化设计支持多种密钥提供者类型。密钥提供
 
 **支持范围：** 仅 cryptpilot-crypt（FDE 的 rootfs/data 卷不可用）
 
-模板：[otp.toml.template](../dist/etc/volumes/otp.toml.template)
+模板：[otp.toml.template](../../dist/etc/volumes/otp.toml.template)
 
 ---
 
@@ -70,7 +70,7 @@ key_uri = "kbs:///default/mykey/volume_data0"
 
 **支持范围：** cryptpilot-fde, cryptpilot-crypt
 
-模板：[kbs.toml.template](../dist/etc/volumes/kbs.toml.template)
+模板：[kbs.toml.template](../../dist/etc/volumes/kbs.toml.template)
 
 ---
 
@@ -94,7 +94,7 @@ client_key_password_from_kms = "alias/ClientKey_****"
 
 **支持范围：** cryptpilot-fde, cryptpilot-crypt
 
-模板：[kms.toml.template](../dist/etc/volumes/kms.toml.template)
+模板：[kms.toml.template](../../dist/etc/volumes/kms.toml.template)
 
 ---
 
@@ -123,7 +123,7 @@ args = []
 
 **支持范围：** cryptpilot-fde, cryptpilot-crypt
 
-模板：[oidc.toml.template](../dist/etc/volumes/oidc.toml.template)
+模板：[oidc.toml.template](../../dist/etc/volumes/oidc.toml.template)
 
 ---
 
@@ -149,7 +149,7 @@ args = ["-n", "MySecretPassword"]
 
 **支持范围：** cryptpilot-fde, cryptpilot-crypt
 
-模板：[exec.toml.template](../dist/etc/volumes/exec.toml.template)
+模板：[exec.toml.template](../../dist/etc/volumes/exec.toml.template)
 
 > [!WARNING]
 > exec 提供者主要用于测试。生产环境请使用 KBS、KMS 或 OIDC。
