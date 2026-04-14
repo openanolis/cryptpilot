@@ -212,6 +212,11 @@ jobs:
           docker cp temp-extract:/image.qcow2 ${{ github.workspace }}/test-images/test-image.qcow2
           docker rm temp-extract
           ls -lh ${{ github.workspace }}/test-images/test-image.qcow2
+          echo "Removing pulled test image to reclaim disk space..."
+          docker rmi "$TEST_IMAGE"
+
+      - name: Check available disk and memory
+        run: df -h && echo "---" && free -h
 
       - name: Start test container
         run: |
@@ -222,7 +227,6 @@ jobs:
             -v /dev:/dev \
             -v /run/udev/control:/run/udev/control \
             -v ${{ github.workspace }}:/workspace \
-            --tmpfs /tmp:exec,size=20G \
             alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest \
             sleep infinity
 
@@ -273,7 +277,9 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f test-container || true
+        run: |
+          docker rm -f test-container || true
+          rm -rf ${{ github.workspace }}/test-images
 
   release:
     if: startsWith(github.ref, 'refs/tags/')

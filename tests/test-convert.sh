@@ -624,6 +624,12 @@ run_test_case() {
         return 1
     fi
 
+    # Free input image and source immediately after conversion to reclaim disk space.
+    # output.qcow2 is a standalone image that no longer depends on these files.
+    log::info "Freeing input image and source to reclaim disk space..."
+    rm -f "${input_image}"
+    rm -f "${SOURCE_IMAGE}"
+
     # Verify the result
     if ! verify_converted_image "${test_name}" "${output_image}" "${use_uki}" "${use_encryption}"; then
         return 1
@@ -634,9 +640,9 @@ run_test_case() {
         return 1
     fi
 
-    # Clean up test-specific files to save space
+    # Clean up remaining test-specific files
     log::info "Cleaning up test files for: ${test_name}"
-    rm -f "${input_image}" "${output_image}"
+    rm -f "${output_image}"
 
     log::success "Test case passed: ${test_name}"
     return 0
