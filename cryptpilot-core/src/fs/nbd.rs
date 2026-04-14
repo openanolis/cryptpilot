@@ -89,10 +89,22 @@ impl NbdDevice {
         tracing::debug!("Waiting 1 second for the nbd device to be ready");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        Ok(Self {
+        let device = Self {
             nbd_dev_num,
             udev_rule,
-        })
+        };
+
+        // Reactively remove any device-mapper holders that udev may have auto-created
+        // for the nbd partitions (e.g., when the udev rule reload failed and the host
+        // udevd processed the partition events with its default rules).
+        if let Err(error) = device.remove_holder_dm_devices().await {
+            tracing::warn!(
+                ?error,
+                "Failed to remove udev-created device-mapper holders for {nbd_dev_path:?}"
+            );
+        }
+
+        Ok(device)
     }
 
     pub fn to_path(&self) -> PathBuf {
@@ -176,11 +188,22 @@ impl Drop for NbdDevice {
 }
 
 struct UdevRule {
-    rule_path: PathBuf,
+    // None if udevadm was not available (no-op UdevRule)
+    rule_path: Option<PathBuf>,
 }
 
 impl UdevRule {
     pub async fn install_ignore_nbd_rule() -> Result<Self> {
+        // If udevadm is not available (e.g., minimal container), skip rule installation.
+        // Without a running udevd there is nothing to interfere with the nbd device anyway.
+        if which::which("udevadm").is_err() {
+            tracing::warn!(
+                "udevadm not found, skipping udev rule installation for nbd devices. \
+                Udev interference will be handled reactively if needed."
+            );
+            return Ok(Self { rule_path: None });
+        }
+
         let udev_rule_path = Path::new("/run/udev/rules.d");
         if !udev_rule_path.exists() {
             tracing::debug!("{udev_rule_path:?} does not exist, creating it");
@@ -189,13 +212,7 @@ impl UdevRule {
                 .with_context(|| format!("Failed to create {udev_rule_path:?}"))?;
         }
 
-        which::which("udevadm").context("Could not found `udevadm`")?;
-
         let rule_path = udev_rule_path.join("99-cryptpilot-ignore.rules");
-
-        let this = Self {
-            rule_path: rule_path.to_path_buf(),
-        };
 
         let mut file = File::options()
             .write(true)
@@ -213,26 +230,58 @@ ACTION=="add|change", KERNEL=="nbd*", OPTIONS:="nowatch"
         )
         .await?;
 
-        Command::new("udevadm")
+        // Try to reload udev rules so that the nowatch rule takes effect immediately.
+        // This can fail in container environments where the in-container udevadm version
+        // is incompatible with the host udevd (e.g., alinux3 container on Ubuntu host).
+        // In that case we fall back to `udevadm settle`, which drains any pending udev
+        // events without requiring the daemon to accept a reload command.  Either way,
+        // any device-mapper holders that udev may have already created will be cleaned
+        // up reactively by the caller after the NBD device is connected.
+        if let Err(reload_error) = Command::new("udevadm")
             .arg("control")
             .arg("--reload-rules")
             .run()
             .await
-            .context("Failed to reload udev rules")?;
-
-        Command::new("udevadm")
+        {
+            tracing::warn!(
+                ?reload_error,
+                "Failed to reload udev rules (udev daemon may not be running or has an \
+                incompatible version). Falling back to `udevadm settle` to drain pending \
+                udev events."
+            );
+            if let Err(settle_error) = Command::new("udevadm")
+                .arg("settle")
+                .run()
+                .await
+            {
+                tracing::warn!(
+                    ?settle_error,
+                    "Failed to run `udevadm settle`. Proceeding without udev \
+                    synchronisation; any device-mapper interference will be cleaned up \
+                    reactively after the NBD device is connected."
+                );
+            }
+        } else if let Err(error) = Command::new("udevadm")
             .arg("trigger")
             .run()
             .await
-            .context("Failed to trigger udevadm")?;
+        {
+            tracing::warn!(?error, "Failed to trigger udevadm");
+        }
 
-        Ok(this)
+        Ok(Self {
+            rule_path: Some(rule_path),
+        })
     }
 }
 
 impl Drop for UdevRule {
     fn drop(&mut self) {
-        let rule_path = self.rule_path.to_owned();
+        // No-op if udevadm was not available during installation.
+        let rule_path = match self.rule_path.clone() {
+            Some(p) => p,
+            None => return,
+        };
         async_defer! {
             async{
                 if let Err(error) = tokio::fs::remove_file(&rule_path).await{
