@@ -1,3 +1,4 @@
+pub mod blkid;
 pub mod block;
 pub mod cmd;
 pub mod kernel_module;

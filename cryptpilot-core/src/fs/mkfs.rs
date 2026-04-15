@@ -12,7 +12,7 @@ use tokio::{
 };
 
 use crate::{
-    fs::{block::dummy::DummyDevice, cmd::CheckCommandOutput as _},
+    fs::{blkid::BlkidProbeResult, block::dummy::DummyDevice, cmd::CheckCommandOutput as _},
     types::{IntegrityType, MakeFsType},
 };
 
@@ -197,64 +197,32 @@ pub async fn force_mkfs(
 /// - If `fs_hint` is `Some`, and the expected filesystem is not detected, returns an error.
 /// - If `fs_hint` is `None`, returns `true` if something detected on the device.
 pub async fn has_valuable_data(device_path: &Path, fs_hint: Option<MakeFsType>) -> Result<bool> {
-    Command::new("blkid")
-        .arg("-p")
-        .arg(device_path)
-        .env("LC_ALL", "C")
-        .run_with_status_checker(|code, stdout, stderr| {
-            match code {
-                0 => {
-                    let output = String::from_utf8_lossy(&stdout);
+    let probe = crate::fs::blkid::probe_device(device_path).await?;
 
-                    match fs_hint {
-                        Some(expected_fs) => {
-                            let expected_str = match expected_fs {
-                                MakeFsType::Swap => "swap",
-                                MakeFsType::Ext4 => "ext4",
-                                MakeFsType::Xfs => "xfs",
-                                MakeFsType::Vfat => "vfat",
-                            };
+    match (probe, fs_hint) {
+        (BlkidProbeResult::NoSignatures, _) => Ok(false),
+        (BlkidProbeResult::KnownSignature { fs_type, .. }, Some(expected_fs)) => {
+            let expected_str = match expected_fs {
+                MakeFsType::Swap => "swap",
+                MakeFsType::Ext4 => "ext4",
+                MakeFsType::Xfs => "xfs",
+                MakeFsType::Vfat => "vfat",
+            };
 
-                            if output.contains(&format!("TYPE=\"{}\"", expected_str)) {
-                                Ok(true)
-                            } else {
-                                // Something else detected (may have partition table, unknown FS, etc.)
-                                bail!(
-                                    "Something else on {device_path:?} is detected, but expected '{expected_str}', found blkid output '{}'",
-                                    output.trim()
-                                );
-                            }
-                        }
-                        None => {
-                            // Check if it's mistakenly identified as PTTYPE="atari" partition table.
-                            // See: https://bugs.launchpad.net/ubuntu/+source/util-linux/+bug/2015355
-                            if output.contains("PTTYPE=\"atari\"") {
-                                tracing::debug!("Found PTTYPE=\"atari\" partition table on {device_path:?}, treating as no valuable data");
-                                Ok(false)
-                            }else{
-                                // Log which one was found (for debug)
-                                tracing::debug!("Found filesystem signature on {device_path:?}, blkid output: {}", output.trim());
-                                Ok(true)
-                            }
-                        }
-                    }
-                }
-                2 => {
-                    // No signatures found
-                    Ok(false)
-                }
-                _ => {
-                    let stdout = String::from_utf8_lossy(&stdout);
-                    let stderr = String::from_utf8_lossy(&stderr);
-                    bail!(
-                        "blkid failed with exit code {}: stdout='{}', stderr='{}'",
-                        code,
-                        stdout.trim(),
-                        stderr.trim()
-                    );
-                }
+            if fs_type.as_deref() == Some(expected_str) {
+                Ok(true)
+            } else {
+                // Something else detected (may have partition table, unknown FS, etc.)
+                bail!(
+                    "Something else on {device_path:?} is detected (found {fs_type:?}), but expected '{expected_str}'"
+                );
             }
-        })
-        .await
-        .context("Failed to detect filesystem signatures using blkid")
+        }
+        (probe @ BlkidProbeResult::KnownSignature { .. }, None) => {
+            tracing::info!(
+                "Found filesystem signature on {device_path:?}, probe result: {probe:?}"
+            );
+            Ok(true)
+        }
+    }
 }

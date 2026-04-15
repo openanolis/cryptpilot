@@ -429,6 +429,25 @@ async fn create_zram_cow_device() -> Result<PathBuf> {
     Ok(PathBuf::from(format!("/dev/zram{}", zram_id)))
 }
 
+/// Wipe a device by writing zeros using tokio async I/O.
+/// Writes 4KB megabytes of zeros to the device.
+async fn wipe_cow_device_header_async(device_path: &Path) -> Result<(), anyhow::Error> {
+    use tokio::fs::OpenOptions;
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .open(device_path)
+        .await
+        .context("Failed to open device for wiping")?;
+
+    file.write_all(&[0u8; 4096]).await?;
+
+    // Final sync to ensure everything is written
+    file.sync_all().await?;
+
+    Ok(())
+}
+
 async fn setup_dm_snapshot_device_chain(
     rootfs_device: &Path,
     cow_device: &Path,
@@ -437,6 +456,7 @@ async fn setup_dm_snapshot_device_chain(
     tracing::info!(
         ?rootfs_device,
         ?cow_device,
+        persistent,
         "Building dm-snapshot device chain"
     );
 
@@ -471,6 +491,41 @@ async fn setup_dm_snapshot_device_chain(
         .run()
         .await
         .context("Failed to create dm-linear device")?;
+
+    if !persistent {
+        // Non-persistent mode: directly wipe the COW device, no need to probe
+        tracing::info!("Non-persistent mode: wiping COW device");
+        wipe_cow_device_header_async(cow_device)
+            .await
+            .context("Failed to wipe COW device")?;
+    } else {
+        // Persistent mode: probe COW device to determine safe action
+        tracing::info!("Persistent mode: probing COW device state");
+        let probe = cryptpilot::fs::blkid::probe_device(cow_device).await?;
+
+        match probe {
+            cryptpilot::fs::blkid::BlkidProbeResult::NoSignatures => {
+                // Clean device, safe to wipe
+                tracing::info!("COW device is clean, wiping");
+                wipe_cow_device_header_async(cow_device)
+                    .await
+                    .context("Failed to wipe COW device")?;
+            }
+            cryptpilot::fs::blkid::BlkidProbeResult::KnownSignature { .. }
+                if probe.is_dm_snapshot_cow() =>
+            {
+                // No need to wipe and just use the metadata header
+                tracing::info!("COW device has dm-snapshot metadata, using it");
+            }
+            cryptpilot::fs::blkid::BlkidProbeResult::KnownSignature { fs_type, pt_type } => {
+                // Some other filesystem/partition signature detected — protect user data
+                bail!(
+                    "COW device has valuable data (fs_type={fs_type:?}, pt_type={pt_type:?}), \
+                     cannot overwrite in persistent mode"
+                );
+            }
+        }
+    }
 
     // Create dm-snapshot device
     tracing::info!("Creating dm-snapshot device");
