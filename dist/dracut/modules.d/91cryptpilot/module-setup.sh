@@ -61,6 +61,8 @@ installkernel() {
         hostonly='' instmods dm-mod dm-crypt dm-integrity dm-verity authenc overlay
         hostonly='' instmods virtio-pci virtio-net net-failover
         hostonly='' instmods loop
+        # for delta_backend = "dm-snapshot"
+        hostonly='' instmods dm-snapshot dm-zero zram
 }
 
 depends() {
