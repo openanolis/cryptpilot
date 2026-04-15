@@ -435,6 +435,39 @@ step::extract_boot_part_from_rootfs() {
     disk::umount_wait_busy "${rootfs_mount_point}"
 }
 
+# Install zram kernel modules if needed (for Ubuntu systems)
+install_zram_module_if_needed() {
+    local rootfs_mount_point="$1"
+
+    # Check if we're in an Ubuntu-like system by looking for the presence of apt
+    if [ -x "${rootfs_mount_point}/usr/bin/apt-get" ] && [ -x "${rootfs_mount_point}/usr/bin/dpkg" ]; then
+        log::info "Detecting Ubuntu-like system, attempting to install zram kernel modules"
+
+        # Find the kernel version from the currently installed kernel image
+        local kernel_version
+        kernel_version=$(chroot "${rootfs_mount_point}" bash -c "dpkg -l | grep -oP 'linux-image-\K[0-9.-]+-generic' | head -n1")
+
+        if [ -z "$kernel_version" ]; then
+            log::error "Could not determine kernel version, zram module installation failed"
+            return 1
+        fi
+
+        log::info "Detected kernel version: $kernel_version"
+
+        # Install the modules package with minimal dependencies
+        if ! chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+            ${https_proxy:+https_proxy=$https_proxy} \
+            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+            ${all_proxy:+all_proxy=$all_proxy} \
+            ${no_proxy:+no_proxy=$no_proxy} \
+            bash -c "apt-get update && apt-get install -y --no-install-recommends --no-install-suggests linux-modules-extra-$kernel_version"; then
+            log::error "Could not install zram modules, possibly due to disk space constraints or missing package"
+            return 1
+        fi
+    fi
+}
+
 disk::install_rpm_on_rootfs() {
     local rootfs_mount_point="$1"
     shift
@@ -471,17 +504,17 @@ disk::install_rpm_on_rootfs() {
 
     # Step 2: Build essential packages list
     local cryptpilot_fde_version=""
-    
+
     # Try to query the version of cryptpilot-fde from the current system
     if command -v rpm >/dev/null 2>&1; then
         cryptpilot_fde_version=$(rpm -q cryptpilot-fde --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
     elif command -v dpkg-query >/dev/null 2>&1; then
         cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde 2>/dev/null || true)
     fi
-    
+
     local essential_packages_with_version=()
     local essential_package_names=()
-    
+
     if [ -n "${cryptpilot_fde_version}" ]; then
         log::info "Detected cryptpilot-fde version: ${cryptpilot_fde_version}"
         essential_packages_with_version+=("cryptpilot-fde-${cryptpilot_fde_version}")
@@ -490,7 +523,7 @@ disk::install_rpm_on_rootfs() {
         essential_packages_with_version+=("cryptpilot-fde")
     fi
     essential_package_names+=("cryptpilot-fde")
-    
+
     essential_packages_with_version+=("yum-plugin-versionlock")
     essential_package_names+=("yum-plugin-versionlock")
 
@@ -499,7 +532,7 @@ disk::install_rpm_on_rootfs() {
     for i in "${!essential_packages_with_version[@]}"; do
         local pkg_with_version="${essential_packages_with_version[$i]}"
         local pkg_name="${essential_package_names[$i]}"
-        
+
         # Check if package is already installed in chroot
         if chroot "${rootfs_mount_point}" rpm -q "$pkg_name" >/dev/null 2>&1; then
             log::info "Package $pkg_name is already installed, skipping"
@@ -536,47 +569,29 @@ disk::install_deb_on_rootfs() {
     shift
     local packages=("$@")
 
-    # Essential packages for Debian/Ubuntu
-    local essential_packages=(
-        "cryptpilot-fde"
-    )
+    local copied_debs=()  # Will store the local paths inside chroot to the copied .deb files
+    local user_packages=() # User provided packages to install
 
-    local copied_debs=()
-    local deb_args=()
-    local packages_to_install=()
-
+    # Step 1: Install user-provided packages first
     for package in "${packages[@]}"; do
         if [[ -f "$package" && "$package" == *.deb ]]; then
+            # This is a valid .deb file on the host
             base_name=$(basename "$package")
-            cp "$package" "${rootfs_mount_point}/tmp/"
-            copied_debs+=("/tmp/$base_name")
-            deb_args+=("/tmp/$base_name")
+            cp "$package" "${rootfs_mount_point}/tmp/" # Copy into rootfs /tmp/
+            copied_debs+=("/tmp/$base_name")           # Record path inside rootfs
+            user_packages+=("/tmp/$base_name")         # Add to installation list
         else
-            # For package names, we will ask apt to install after dpkg -i
-            deb_args+=("$package")
+            # Assume this is a regular package name (to be installed via apt)
+            user_packages+=("$package")
         fi
     done
 
-    # Check which essential packages are NOT available as local .deb files
-    for essential_pkg in "${essential_packages[@]}"; do
-        local found=false
-        for deb in "${copied_debs[@]}"; do
-            if [[ "$deb" == *"${essential_pkg}"* ]]; then
-                found=true
-                break
-            fi
-        done
-        if [ "$found" = false ]; then
-            packages_to_install+=("$essential_pkg")
-        fi
-    done
-
-    # Try to install .deb files first, then fix dependencies via apt
-    if [ ${#deb_args[@]} -gt 0 ]; then
+    # Install user-provided packages
+    if [ ${#user_packages[@]} -gt 0 ]; then
         chroot "${rootfs_mount_point}" bash -c "dpkg --configure -a || true"
-        chroot "${rootfs_mount_point}" bash -c "dpkg -i $(printf '%s ' "${deb_args[@]}"| sed 's/ $//')" || true
+        chroot "${rootfs_mount_point}" bash -c "dpkg -i $(printf '%s ' "${user_packages[@]}"| sed 's/ $//')" || true
 
-         # Fix dependencies
+        # Fix dependencies
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
@@ -593,28 +608,74 @@ disk::install_deb_on_rootfs() {
             ${all_proxy:+all_proxy=$all_proxy} \
             ${no_proxy:+no_proxy=$no_proxy} \
             apt-get -y -f install || true
-
-        # Install only packages not provided as local .deb files
-        if [ ${#packages_to_install[@]} -gt 0 ]; then
-            chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
-                ${https_proxy:+https_proxy=$https_proxy} \
-                ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
-                ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
-                ${all_proxy:+all_proxy=$all_proxy} \
-                ${no_proxy:+no_proxy=$no_proxy} \
-                apt-get -y install "${packages_to_install[@]}" || true
-        fi
-
-        # Hold package versions for essential packages
-        for p in "${essential_packages[@]}"; do
-            chroot "${rootfs_mount_point}" apt-mark hold "$p" || true
-        done
-        chroot "${rootfs_mount_point}" apt-get clean || true
     fi
 
-    # cleanup copied debs
-    for d in "${copied_debs[@]}"; do
-        rm -f "${rootfs_mount_point}${d}"
+    # Step 2: Build essential packages list
+    local cryptpilot_fde_version=""
+
+    # Try to query the version of cryptpilot-fde from the current system
+    if command -v rpm >/dev/null 2>&1; then
+        cryptpilot_fde_version=$(rpm -q cryptpilot-fde --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+    elif command -v dpkg-query >/dev/null 2>&1; then
+        # Extract version from dpkg-query output, removing epoch if present
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde 2>/dev/null || true)
+    fi
+
+    local essential_packages_with_version=()
+    local essential_package_names=()
+
+    if [ -n "${cryptpilot_fde_version}" ]; then
+        log::info "Detected cryptpilot-fde version: ${cryptpilot_fde_version}"
+        essential_packages_with_version+=("cryptpilot-fde=${cryptpilot_fde_version}")
+    else
+        log::warn "Failed to detect cryptpilot-fde version, installing latest version"
+        essential_packages_with_version+=("cryptpilot-fde")
+    fi
+    essential_package_names+=("cryptpilot-fde")
+
+    # Also include apt-utils for better apt handling
+    if ! chroot "${rootfs_mount_point}" dpkg -l apt-utils >/dev/null 2>&1; then
+        essential_packages_with_version+=("apt-utils")
+        essential_package_names+=("apt-utils")
+    fi
+
+    # Step 3: Check and install missing essential packages
+    local packages_to_install=()
+    for i in "${!essential_packages_with_version[@]}"; do
+        local pkg_with_version="${essential_packages_with_version[$i]}"
+        local pkg_name="${essential_package_names[$i]}"
+
+        # Check if package is already installed in chroot
+        if chroot "${rootfs_mount_point}" dpkg -l "$pkg_name" 2>/dev/null | grep -q "^ii"; then
+            log::info "Package $pkg_name is already installed, skipping"
+        else
+            log::info "Package $pkg_name is not installed, will install: $pkg_with_version"
+            packages_to_install+=("$pkg_with_version")
+        fi
+    done
+
+    # Install missing essential packages
+    if [ ${#packages_to_install[@]} -gt 0 ]; then
+        chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+            ${https_proxy:+https_proxy=$https_proxy} \
+            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+            ${all_proxy:+all_proxy=$all_proxy} \
+            ${no_proxy:+no_proxy=$no_proxy} \
+            apt-get -y install "${packages_to_install[@]}"
+    fi
+
+    # Step 4: Install zram kernel module for Ubuntu
+    install_zram_module_if_needed "${rootfs_mount_point}"
+
+    # Step 5: Lock version for all essential packages (using base package name)
+    chroot "${rootfs_mount_point}" apt-mark hold "${essential_package_names[@]}"
+
+    chroot "${rootfs_mount_point}" apt-get clean
+
+    # Remove the copied .deb files from the chroot after installation
+    for deb in "${copied_debs[@]}"; do
+        rm -f "${rootfs_mount_point}${deb}"
     done
 }
 
@@ -778,6 +839,41 @@ step:update_rootfs() {
     local efi_part=$1
     local boot_file_path=$2
     local uki=$3
+
+    # Expand the rootfs partition to utilize available disk space before update
+    # This ensures sufficient space for package installations that may trigger scripts
+    log::info "Expanding rootfs partition to utilize available disk space before update"
+
+    # Get current rootfs partition size information
+    local original_size_in_bytes
+    original_size_in_bytes=$(blockdev --getsize64 "${rootfs_orig_part}")
+    local original_size_mb=$((original_size_in_bytes / 1024 / 1024))
+
+    log::info "Original rootfs partition size: ${original_size_mb}MB (${original_size_in_bytes} bytes)"
+
+    # Use growpart to expand the partition to maximum available space
+    # This is more reliable than manual calculations
+    if command -v growpart >/dev/null 2>&1; then
+        log::info "Using growpart to expand partition ${rootfs_orig_part_num} on device $device"
+        if growpart "$device" "$rootfs_orig_part_num"; then
+            # Resize the filesystem to fill the new partition size
+            log::info "Resizing filesystem to fill new partition size..."
+            e2fsck -f "${rootfs_orig_part}" -p || true  # Run e2fsck first to ensure filesystem integrity
+            resize2fs "${rootfs_orig_part}"
+
+            # Verify the new size
+            local new_size_in_bytes
+            new_size_in_bytes=$(blockdev --getsize64 "${rootfs_orig_part}")
+            local new_size_mb=$((new_size_in_bytes / 1024 / 1024))
+
+            log::info "New rootfs partition size: ${new_size_mb}MB (${new_size_in_bytes} bytes)"
+            log::info "Rootfs partition and filesystem resized successfully"
+        else
+            log::warn "growpart failed, proceeding with original partition size"
+        fi
+    else
+        log::warn "growpart command not found, proceeding with original partition size"
+    fi
 
     update_rootfs_inner() {
         local rootfs_mount_point=$1
