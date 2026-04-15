@@ -181,12 +181,14 @@ jobs:
           cryptpilot-crypt --version
           cryptpilot-verity --version
 
-  # Integration tests for cryptpilot-convert (4 parallel jobs via matrix)
+  # Integration tests for cryptpilot-convert (12 parallel jobs via matrix)
   test-convert:
     strategy:
       fail-fast: false
       matrix:
-        case: [uki-encrypted, uki-noenc, grub-encrypted, grub-noenc]
+        bootloader: [uki, grub]
+        rootfs_enc: [enc, noenc]
+        delta_location: [ram, disk, disk-persist]
     runs-on: ubuntu-latest
     needs: build
     env:
@@ -272,7 +274,7 @@ jobs:
       - name: Run convert test
         run: |
           docker exec -w /workspace/repo test-container bash -c "
-            make run-convert-test-case CASE=${{ matrix.case }} INPUT_IMAGE=/workspace/test-images/test-image.qcow2 CRYPTPILOT_FDE_RPM=${{ steps.install-rpm.outputs.cryptpilot_fde_rpm_container }}
+            make run-convert-test-case BOOTLOADER=${{ matrix.bootloader }} ROOTFS_ENC=${{ matrix.rootfs_enc }} DELTA_LOCATION=${{ matrix.delta_location }} INPUT_IMAGE=/workspace/test-images/test-image.qcow2 CRYPTPILOT_FDE_RPM=${{ steps.install-rpm.outputs.cryptpilot_fde_rpm_container }}
           "
 
       - name: Cleanup

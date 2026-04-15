@@ -2,16 +2,15 @@
 #
 # Integration tests for cryptpilot-convert
 #
-# This script tests the cryptpilot-convert tool's disk conversion capability
-# with 4 test combinations:
-#   - uki-encrypted:  UKI mode with rootfs encryption
-#   - uki-noenc:      UKI mode without rootfs encryption
-#   - grub-encrypted: GRUB mode with rootfs encryption
-#   - grub-noenc:     GRUB mode without rootfs encryption
+# This script tests the cryptpilot-convert tool's disk conversion capability.
+# A single test run is defined by three independent dimensions:
+#   --bootloader    uki | grub
+#   --rootfs-enc    (flag) rootfs encryption enabled
+#   --rootfs-noenc  (flag) rootfs encryption disabled
+#   --delta-location ram | disk | disk-persist
 #
 # Usage:
-#   ./tests/test-convert.sh --case <case-name>  # Run specific test case
-#   ./tests/test-convert.sh --all               # Run all 4 test cases
+#   ./tests/test-convert.sh --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist>
 #   ./tests/test-convert.sh --help              # Show usage
 #
 
@@ -255,6 +254,7 @@ download_test_image() {
 create_test_config() {
     local config_dir="$1"
     local use_encryption="$2"
+    local delta_location="$3"
     mkdir -p "${config_dir}"
 
     # Create fde.toml with OTP provider (simplest, no external dependencies)
@@ -262,7 +262,7 @@ create_test_config() {
         cat > "${config_dir}/fde.toml" <<EOF
 # Test configuration for cryptpilot-convert integration tests
 [rootfs]
-delta_location = "disk"
+delta_location = "${delta_location}"
 
 [rootfs.encrypt.exec]
 command = "echo"
@@ -274,10 +274,10 @@ integrity = false
 [delta.encrypt.otp]
 EOF
     else
-        cat > "${config_dir}/fde.toml" <<'EOF'
+        cat > "${config_dir}/fde.toml" <<EOF
 # Test configuration for cryptpilot-convert integration tests (no encryption)
 [rootfs]
-delta_location = "disk"
+delta_location = "${delta_location}"
 
 [delta]
 integrity = false
@@ -589,11 +589,13 @@ run_test_case() {
     local test_name="$1"
     local use_uki="$2"
     local use_encryption="$3"
+    local delta_location="$4"
 
     log::step "=========================================="
     log::step "Running test case: ${test_name}"
     log::step "  UKI mode: ${use_uki}"
     log::step "  Encryption: ${use_encryption}"
+    log::step "  Delta location: ${delta_location}"
     log::step "=========================================="
 
     local test_workdir="${WORKDIR}/${test_name}"
@@ -612,7 +614,7 @@ run_test_case() {
     fi
 
     # Create test configuration
-    create_test_config "${config_dir}" "${use_encryption}"
+    create_test_config "${config_dir}" "${use_encryption}" "${delta_location}"
 
     # Run enhancement (hardens the image before conversion)
     if ! run_enhance "${test_name}" "${input_image}"; then
@@ -654,33 +656,31 @@ run_test_case() {
 
 show_help() {
     cat <<EOF
-Usage: $(basename "$0") --rpm <path> [OPTIONS]
+Usage: $(basename "$0") --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist> [OPTIONS]
 
 Integration tests for cryptpilot-convert
 
 Required:
-    --rpm <path>    Path to cryptpilot-fde RPM package
+    --rpm <path>              Path to cryptpilot-fde RPM package
+    --bootloader <uki|grub>   Boot mode
+    --rootfs-enc              Enable rootfs encryption
+    --rootfs-noenc            Disable rootfs encryption
+    --delta-location <value>  Delta partition location: ram | disk | disk-persist
 
 Options:
-    --case <name>   Run a specific test case. Valid cases:
-                      uki-encrypted   - UKI mode with rootfs encryption
-                      uki-noenc       - UKI mode without rootfs encryption
-                      grub-encrypted  - GRUB mode with rootfs encryption
-                      grub-noenc      - GRUB mode without rootfs encryption
-    --all           Run all 4 test cases
     --input <path>  Use specified qcow2 image instead of downloading
     --help          Show this help message
 
 Examples:
-    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --case uki-encrypted
-    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --all
-    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --case grub-noenc --input /path/to/image.qcow2
+    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --bootloader uki --rootfs-enc --delta-location ram
+    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --bootloader grub --rootfs-noenc --delta-location disk --input /path/to/image.qcow2
 EOF
 }
 
 main() {
-    local test_case=""
-    local run_all=false
+    local bootloader=""
+    local rootfs_enc=""
+    local delta_location=""
     local custom_input=""
 
     # Parse arguments
@@ -690,13 +690,21 @@ main() {
                 CRYPTPILOT_FDE_RPM="$2"
                 shift 2
                 ;;
-            --case)
-                test_case="$2"
+            --bootloader)
+                bootloader="$2"
                 shift 2
                 ;;
-            --all)
-                run_all=true
+            --rootfs-enc)
+                rootfs_enc="enc"
                 shift
+                ;;
+            --rootfs-noenc)
+                rootfs_enc="noenc"
+                shift
+                ;;
+            --delta-location)
+                delta_location="$2"
+                shift 2
                 ;;
             --input)
                 custom_input="$2"
@@ -722,6 +730,24 @@ main() {
     fi
     log::info "Using cryptpilot-fde RPM: ${CRYPTPILOT_FDE_RPM}"
 
+    # Validate --bootloader
+    if [[ "${bootloader}" != "uki" && "${bootloader}" != "grub" ]]; then
+        show_help
+        fatal "Invalid or missing --bootloader: must be 'uki' or 'grub'"
+    fi
+
+    # Validate --rootfs-enc / --rootfs-noenc
+    if [[ -z "${rootfs_enc}" ]]; then
+        show_help
+        fatal "Must specify --rootfs-enc or --rootfs-noenc"
+    fi
+
+    # Validate --delta-location
+    if [[ "${delta_location}" != "ram" && "${delta_location}" != "disk" && "${delta_location}" != "disk-persist" ]]; then
+        show_help
+        fatal "Invalid or missing --delta-location: must be 'ram', 'disk', or 'disk-persist'"
+    fi
+
     # Validate custom input if provided
     if [[ -n "${custom_input}" ]]; then
         if [[ ! -f "${custom_input}" ]]; then
@@ -730,21 +756,12 @@ main() {
         log::info "Using custom input image: ${custom_input}"
     fi
 
-    # Validate arguments
-    if [[ -z "${test_case}" ]] && [[ "${run_all}" == "false" ]]; then
-        show_help
-        fatal "Must specify --case <name> or --all"
-    fi
-
-    if [[ -n "${test_case}" ]]; then
-        case "${test_case}" in
-            uki-encrypted|uki-noenc|grub-encrypted|grub-noenc)
-                ;;
-            *)
-                fatal "Invalid test case: ${test_case}. Valid cases: uki-encrypted, uki-noenc, grub-encrypted, grub-noenc"
-                ;;
-        esac
-    fi
+    # Derive test parameters
+    local use_uki="false"
+    local use_encryption="false"
+    [[ "${bootloader}" == "uki" ]] && use_uki="true"
+    [[ "${rootfs_enc}" == "enc" ]] && use_encryption="true"
+    local test_name="${bootloader}-${rootfs_enc}-${delta_location}"
 
     # Pre-flight checks
     log::step "Running pre-flight checks..."
@@ -770,32 +787,14 @@ main() {
         SOURCE_IMAGE="${TEST_IMAGE_CACHE}"
     fi
 
-    # Run tests
+    # Run test
     local failed_tests=()
     local passed_tests=()
 
-    if [[ "${run_all}" == "true" ]]; then
-        local all_cases=("uki-encrypted" "uki-noenc" "grub-encrypted" "grub-noenc")
-        for case_name in "${all_cases[@]}"; do
-            if run_test_case "${case_name}" \
-                "$( [[ "${case_name}" == uki-* ]] && echo true || echo false )" \
-                "$( [[ "${case_name}" == *-encrypted ]] && echo true || echo false )"; then
-                passed_tests+=("${case_name}")
-            else
-                failed_tests+=("${case_name}")
-            fi
-        done
+    if run_test_case "${test_name}" "${use_uki}" "${use_encryption}" "${delta_location}"; then
+        passed_tests+=("${test_name}")
     else
-        local use_uki="false"
-        local use_encryption="false"
-        [[ "${test_case}" == uki-* ]] && use_uki="true"
-        [[ "${test_case}" == *-encrypted ]] && use_encryption="true"
-
-        if run_test_case "${test_case}" "${use_uki}" "${use_encryption}"; then
-            passed_tests+=("${test_case}")
-        else
-            failed_tests+=("${test_case}")
-        fi
+        failed_tests+=("${test_name}")
     fi
 
     # Report results

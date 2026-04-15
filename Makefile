@@ -160,13 +160,9 @@ install-convert-test-depend:
 	yum install -y wget qemu-img cryptsetup lvm2 parted e2fsprogs util-linux libguestfs-tools-c
 	which docker || { yum install -y docker ; }
 
-.PHONY: run-convert-test
-run-convert-test: install-convert-test-depend
-	bash tests/test-convert.sh --rpm $(CRYPTPILOT_FDE_RPM) --all $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),)
-
 .PHONY: run-convert-test-case
 run-convert-test-case: install-convert-test-depend
-	bash tests/test-convert.sh --rpm $(CRYPTPILOT_FDE_RPM) $(if $(CASE),--case $(CASE),--all) $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),)
+	bash tests/test-convert.sh --rpm $(CRYPTPILOT_FDE_RPM) --bootloader $(BOOTLOADER) --rootfs-$(ROOTFS_ENC) --delta-location $(DELTA_LOCATION) $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),)
 
 .PHONE: shellcheck
 shellcheck:
