@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.6.0
+Version: 0.7.0
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -273,6 +273,31 @@ fi
 
 
 %changelog
+* Thu Apr 16 2026 Kun Lai <laikun@linux.alibaba.com> - 0.7.0-1
+- fix(disk-persistent): handle dirty COW device in dm-snapshot setup
+- ci(test-convert): replace fixed 4-case matrix with 3-dimensional 12-case matrix
+- fix(ubuntu): add zram module support for Ubuntu cloud images
+- fix(module-setup): add zram and dm-snapshot modules to initramfs
+- docs: add pre-push checks for gpgsig and Claude committer identity
+- ci: reduce memory and disk usage in test-convert jobs
+- docs: add pre-commit check requirements to CLAUDE.md
+- fix(nbd): make udev rule reload non-fatal with fallback for container environments
+- fix(test): use container_name instead of container_id in QEMU boot test
+- ci: fix RPM path handling and add QEMU boot test
+- ci: fix artifact download in test-convert job
+- ci: fix docker create command for scratch-based test image
+- ci: add test image workflow and optimize CI test performance
+- fix(ci): increase tmpfs to 20GB for test container
+- fix(ci): increase tmpfs size to 10GB for test container
+- fix(ci): load nbd module on host before container tests
+- fix(ci): skip test gracefully when nbd module unavailable
+- fix(ci): resolve test-convert CI failures
+- ci: add integration tests for cryptpilot-convert
+- docs: add CLAUDE.md with git commit requirements
+- docs: reorganize docs/ directory structure
+- fix: clarify IMDS reachability error instead of "not an ECS instance"
+- docs: fix dm-integrity kernel config option
+
 * Thu Apr 02 2026 Kun Lai <laikun@linux.alibaba.com> - 0.6.0-1
 - fix(convert): update essential packages for Debian/Ubuntu rootfs
 - rpm: separate SRPM and RPM build steps in buildspec templates
