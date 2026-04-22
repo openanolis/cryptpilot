@@ -12,6 +12,32 @@
 - **完整性保护**：可选的 dm-integrity 数据真实性保护
 - **灵活的文件系统**：支持 ext4、xfs、vfat、swap
 
+## 加密与完整性
+
+cryptpilot-crypt 使用以下算法进行 LUKS2 卷加密：
+
+- **加密算法**：`aes-xts-plain64`
+- **完整性算法**（启用时）：`hmac-sha256`
+
+### 内核配置要求
+
+以下内核配置选项始终需要（用于加密功能）：
+
+```
+CONFIG_CRYPTO_AES=y
+CONFIG_CRYPTO_AES_NI_INTEL=y
+CONFIG_CRYPTO_XTS=y
+```
+
+当启用 `integrity = true` 时，还需要以下额外选项：
+
+```
+CONFIG_DM_INTEGRITY=y
+CONFIG_DM_BUFIO=y
+CONFIG_CRYPTO_HMAC=y
+CONFIG_AS_SHA256_NI=y
+```
+
 ## 安装
 
 从[最新发布版本](https://github.com/openanolis/cryptpilot/releases)安装：

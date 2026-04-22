@@ -12,6 +12,32 @@
 - **Integrity Protection**: Optional dm-integrity for data authenticity
 - **Flexible File Systems**: Support for ext4, xfs, vfat, swap
 
+## Encryption and Integrity
+
+cryptpilot-crypt uses the following algorithms for LUKS2 volumes:
+
+- **Encryption**: `aes-xts-plain64`
+- **Integrity** (when enabled): `hmac-sha256`
+
+### Kernel Configuration Requirements
+
+The following kernel config options are always required for encryption:
+
+```
+CONFIG_CRYPTO_AES=y
+CONFIG_CRYPTO_AES_NI_INTEL=y
+CONFIG_CRYPTO_XTS=y
+```
+
+When `integrity = true` is enabled, the following additional options are required:
+
+```
+CONFIG_DM_INTEGRITY=y
+CONFIG_DM_BUFIO=y
+CONFIG_CRYPTO_HMAC=y
+CONFIG_AS_SHA256_NI=y
+```
+
 ## Installation
 
 Install from the [latest release](https://github.com/openanolis/cryptpilot/releases):
