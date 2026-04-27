@@ -5,6 +5,14 @@ edition.workspace = true
 version.workspace = true
 
 [[bin]]
+name = "cryptpilot-fde-host"
+path = "src/bin/host.rs"
+
+[[bin]]
+name = "cryptpilot-fde-guest"
+path = "src/bin/guest.rs"
+
+[[bin]]
 name = "fde-gen-template"
 path = "src/bin/gen-template/main.rs"
 

@@ -1,5 +1,3 @@
-// Library exports for cryptpilot-crypt
-
 use shadow_rs::shadow;
 
 shadow!(build);

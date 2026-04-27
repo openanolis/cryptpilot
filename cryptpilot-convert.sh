@@ -505,24 +505,24 @@ disk::install_rpm_on_rootfs() {
     # Step 2: Build essential packages list
     local cryptpilot_fde_version=""
 
-    # Try to query the version of cryptpilot-fde from the current system
+    # Try to query the version of cryptpilot-fde-guest from the current system
     if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q cryptpilot-fde --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-guest --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
     elif command -v dpkg-query >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde 2>/dev/null || true)
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-guest 2>/dev/null || true)
     fi
 
     local essential_packages_with_version=()
     local essential_package_names=()
 
     if [ -n "${cryptpilot_fde_version}" ]; then
-        log::info "Detected cryptpilot-fde version: ${cryptpilot_fde_version}"
-        essential_packages_with_version+=("cryptpilot-fde-${cryptpilot_fde_version}")
+        log::info "Detected cryptpilot-fde-guest version: ${cryptpilot_fde_version}"
+        essential_packages_with_version+=("cryptpilot-fde-guest-${cryptpilot_fde_version}")
     else
-        log::warn "Failed to detect cryptpilot-fde version, installing latest version"
-        essential_packages_with_version+=("cryptpilot-fde")
+        log::warn "Failed to detect cryptpilot-fde-guest version, installing latest version"
+        essential_packages_with_version+=("cryptpilot-fde-guest")
     fi
-    essential_package_names+=("cryptpilot-fde")
+    essential_package_names+=("cryptpilot-fde-guest")
 
     essential_packages_with_version+=("yum-plugin-versionlock")
     essential_package_names+=("yum-plugin-versionlock")
@@ -569,8 +569,15 @@ disk::install_deb_on_rootfs() {
     shift
     local packages=("$@")
 
-    local copied_debs=()  # Will store the local paths inside chroot to the copied .deb files
-    local user_packages=() # User provided packages to install
+    # Essential packages for Debian/Ubuntu
+    local essential_packages=(
+        "cryptpilot-fde-guest"
+    )
+
+    local copied_debs=()
+    local user_packages=()
+    local deb_args=()
+    local packages_to_install=()
 
     # Step 1: Install user-provided packages first
     for package in "${packages[@]}"; do
@@ -613,25 +620,25 @@ disk::install_deb_on_rootfs() {
     # Step 2: Build essential packages list
     local cryptpilot_fde_version=""
 
-    # Try to query the version of cryptpilot-fde from the current system
+    # Try to query the version of cryptpilot-fde-guest from the current system
     if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q cryptpilot-fde --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-guest --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
     elif command -v dpkg-query >/dev/null 2>&1; then
         # Extract version from dpkg-query output, removing epoch if present
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde 2>/dev/null || true)
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-guest 2>/dev/null || true)
     fi
 
     local essential_packages_with_version=()
     local essential_package_names=()
 
     if [ -n "${cryptpilot_fde_version}" ]; then
-        log::info "Detected cryptpilot-fde version: ${cryptpilot_fde_version}"
-        essential_packages_with_version+=("cryptpilot-fde=${cryptpilot_fde_version}")
+        log::info "Detected cryptpilot-fde-guest version: ${cryptpilot_fde_version}"
+        essential_packages_with_version+=("cryptpilot-fde-guest=${cryptpilot_fde_version}")
     else
-        log::warn "Failed to detect cryptpilot-fde version, installing latest version"
-        essential_packages_with_version+=("cryptpilot-fde")
+        log::warn "Failed to detect cryptpilot-fde-guest version, installing latest version"
+        essential_packages_with_version+=("cryptpilot-fde-guest")
     fi
-    essential_package_names+=("cryptpilot-fde")
+    essential_package_names+=("cryptpilot-fde-guest")
 
     # Also include apt-utils for better apt handling
     if ! chroot "${rootfs_mount_point}" dpkg -l apt-utils >/dev/null 2>&1; then
@@ -639,8 +646,7 @@ disk::install_deb_on_rootfs() {
         essential_package_names+=("apt-utils")
     fi
 
-    # Step 3: Check and install missing essential packages
-    local packages_to_install=()
+    # Check and install missing essential packages
     for i in "${!essential_packages_with_version[@]}"; do
         local pkg_with_version="${essential_packages_with_version[$i]}"
         local pkg_name="${essential_package_names[$i]}"
@@ -1637,7 +1643,7 @@ main() {
     echo
     log::info "You can calculate reference value of the disk with:"
     echo ""
-    log::highlight "    cryptpilot-fde show-reference-value --disk ${output_file}"
+    log::highlight "    cryptpilot-fde-host show-reference-value --disk ${output_file}"
 }
 
 main "$@"

@@ -4,10 +4,7 @@ use tempfile::TempDir;
 use tokio::process::Command;
 
 use crate::{
-    cmd::boot_service::{
-        metadata::{load_metadata_from_file, Metadata},
-        stage::before_sysroot::METADATA_PATH_IN_INITRD,
-    },
+    cmd::metadata::{load_metadata_from_file, Metadata, METADATA_PATH_IN_INITRD},
     config::{
         fs::{FileSystemConfigSource, CRYPTPILOT_CONFIG_DIR_DEFAULT},
         FdeConfigBundle, FdeConfigSource,

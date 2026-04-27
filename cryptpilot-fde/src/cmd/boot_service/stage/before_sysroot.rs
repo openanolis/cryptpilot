@@ -5,7 +5,7 @@ use tokio::{fs::File, io::AsyncWriteExt, process::Command};
 
 use crate::{
     cmd::boot_service::{
-        metadata::{load_metadata_from_file, Metadata},
+        metadata::{load_metadata_from_file, Metadata, METADATA_PATH_IN_INITRD},
         stage::{
             DELTA_DEVICE, DELTA_LOGICAL_VOLUME, DELTA_NAME, ROOTFS_DECRYPTED_LAYER_DEVICE,
             ROOTFS_DECRYPTED_NAME, ROOTFS_DEVICE, ROOTFS_EXTENDED_DEVICE, ROOTFS_EXTENDED_NAME,
@@ -23,7 +23,6 @@ use cryptpilot::{
 };
 
 const CRYPTPILOT_LVM_SYSTEM_DIR: &str = "/usr/lib/cryptpilot/lvm/";
-pub const METADATA_PATH_IN_INITRD: &str = "/etc/cryptpilot/metadata.toml";
 
 pub async fn setup_volumes_required_by_fde() -> Result<()> {
     let fde_config = crate::config::get_fde_config_source()

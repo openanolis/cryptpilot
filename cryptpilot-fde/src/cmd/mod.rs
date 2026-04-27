@@ -1,18 +1,12 @@
 pub mod boot_service;
 pub mod config;
+pub mod metadata;
 pub mod show_reference_value;
 
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::{
-    cli::{BootServiceOptions, ShowReferenceValueOptions},
-    cmd::{
-        boot_service::BootServiceCommand,
-        config::{check::ConfigCheckCommand, dump::ConfigDumpCommand},
-        show_reference_value::ShowReferenceValueCommand,
-    },
-};
+use crate::cli::FdeSubcommand;
 
 #[async_trait]
 pub trait Command {
@@ -24,30 +18,42 @@ pub trait IntoCommand {
     fn into_command(self) -> Box<dyn Command>;
 }
 
-impl IntoCommand for crate::cli::FdeSubcommand {
+impl IntoCommand for FdeSubcommand {
     fn into_command(self) -> Box<dyn Command> {
         match self {
-            crate::cli::FdeSubcommand::ShowReferenceValue(ShowReferenceValueOptions {
-                disk,
-                hash_algos,
-            }) => Box::new(ShowReferenceValueCommand { disk, hash_algos }),
-            crate::cli::FdeSubcommand::Config(config_options) => match config_options.command {
-                crate::cli::ConfigSubcommand::Check(config_check_options) => {
-                    Box::new(ConfigCheckCommand {
-                        config_check_options,
-                    })
-                }
-                crate::cli::ConfigSubcommand::Dump(dump_config_options) => {
-                    Box::new(ConfigDumpCommand {
-                        disk: dump_config_options.disk,
-                    })
-                }
-            },
-            crate::cli::FdeSubcommand::BootService(BootServiceOptions { stage }) => {
-                Box::new(BootServiceCommand {
-                    boot_service_options: BootServiceOptions { stage },
+            FdeSubcommand::ShowReferenceValue(opts) => {
+                Box::new(show_reference_value::ShowReferenceValueCommand {
+                    disk: opts.disk,
+                    hash_algos: opts.hash_algos,
                 })
             }
+            FdeSubcommand::Config(config_options) => match config_options.command {
+                crate::cli::ConfigSubcommand::Check(opts) => {
+                    Box::new(config::check::ConfigCheckCommand {
+                        config_check_options: opts,
+                    })
+                }
+                crate::cli::ConfigSubcommand::Dump(opts) => {
+                    Box::new(config::dump::ConfigDumpCommand { disk: opts.disk })
+                }
+            },
         }
+    }
+}
+
+/// Standalone command struct for the guest boot-service binary.
+/// Used by bin/guest.rs which has its own CLI struct.
+pub struct GuestBootServiceCommand {
+    pub boot_service_options: crate::cli::BootServiceOptions,
+}
+
+#[async_trait]
+impl Command for GuestBootServiceCommand {
+    async fn run(&self) -> Result<()> {
+        boot_service::BootServiceCommand {
+            boot_service_options: self.boot_service_options.clone(),
+        }
+        .run()
+        .await
     }
 }

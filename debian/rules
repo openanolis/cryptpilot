@@ -12,9 +12,15 @@ USE_OFFLINE = $(shell test -d $(VENDOR_DIR) && echo "--offline")
 	dh $@
 
 override_dh_auto_build:
-	# Build cryptpilot-fde
-	cargo install --path $(CURDIR)/cryptpilot-fde --bin cryptpilot-fde \
-		--root $(CURDIR)/debian/install/cryptpilot-fde --locked $(USE_OFFLINE)
+	# Build cryptpilot-fde-host
+	cargo install --path $(CURDIR)/cryptpilot-fde --bin cryptpilot-fde-host \
+		--root $(CURDIR)/debian/install/cryptpilot-fde-host --locked $(USE_OFFLINE)
+	# Build cryptpilot-fde-guest
+	cargo install --path $(CURDIR)/cryptpilot-fde --bin cryptpilot-fde-guest \
+		--root $(CURDIR)/debian/install/cryptpilot-fde-guest --locked $(USE_OFFLINE)
+	# Build fde-gen-template
+	cargo install --path $(CURDIR)/cryptpilot-fde --bin fde-gen-template \
+		--root $(CURDIR)/debian/install/cryptpilot-fde-host --locked $(USE_OFFLINE)
 	# Build cryptpilot-crypt
 	cargo install --path $(CURDIR)/cryptpilot-crypt --bin cryptpilot-crypt \
 		--root $(CURDIR)/debian/install/cryptpilot-crypt --locked $(USE_OFFLINE)
@@ -23,40 +29,46 @@ override_dh_auto_build:
 		--root $(CURDIR)/debian/install/cryptpilot-verity --locked $(USE_OFFLINE)
 
 override_dh_auto_install:
-	# Install cryptpilot-fde
-	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde/bin/cryptpilot-fde \
-		$(CURDIR)/debian/cryptpilot-fde/usr/bin/cryptpilot-fde
+	# Install cryptpilot-fde-host
+	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde-host/bin/cryptpilot-fde-host \
+		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/cryptpilot-fde-host
+	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde-host/bin/fde-gen-template \
+		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/fde-gen-template
 	install -D -m 755 $(CURDIR)/cryptpilot-convert.sh \
-		$(CURDIR)/debian/cryptpilot-fde/usr/bin/cryptpilot-convert
+		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/cryptpilot-convert
 	install -D -m 755 $(CURDIR)/cryptpilot-enhance.sh \
-		$(CURDIR)/debian/cryptpilot-fde/usr/bin/cryptpilot-enhance
-	# Dracut modules
-	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/module-setup.sh \
-		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/module-setup.sh
-	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-trigger-network-online.sh \
-		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/initrd-trigger-network-online.sh
-	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.sh \
-		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/initrd-wait-network-online.sh
-	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service \
-		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service
-	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service \
-		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service
-	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service \
-		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service
-	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/lvm.conf \
-		$(CURDIR)/debian/cryptpilot-fde/usr/lib/dracut/modules.d/91cryptpilot/lvm.conf
-	# FDE config templates
+		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/cryptpilot-enhance
+	# FDE config templates (host package)
 	install -D -m 600 $(CURDIR)/dist/etc/global.toml.template \
-		$(CURDIR)/debian/cryptpilot-fde/etc/cryptpilot/global.toml.template
+		$(CURDIR)/debian/cryptpilot-fde-host/etc/cryptpilot/global.toml.template
 	install -D -m 600 $(CURDIR)/dist/etc/fde.toml.template \
-		$(CURDIR)/debian/cryptpilot-fde/etc/cryptpilot/fde.toml.template
-	# Policy file
+		$(CURDIR)/debian/cryptpilot-fde-host/etc/cryptpilot/fde.toml.template
+	# Policy file (host package)
 	install -D -m 644 $(CURDIR)/dist/usr/share/cryptpilot/policy.rego \
-		$(CURDIR)/debian/cryptpilot-fde/usr/share/cryptpilot/policy.rego
-	# Udev rules
+		$(CURDIR)/debian/cryptpilot-fde-host/usr/share/cryptpilot/policy.rego
+
+	# Install cryptpilot-fde-guest
+	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde-guest/bin/cryptpilot-fde-guest \
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/bin/cryptpilot-fde-guest
+	# Dracut modules (guest package)
+	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/module-setup.sh \
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/lib/dracut/modules.d/91cryptpilot/module-setup.sh
+	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-trigger-network-online.sh \
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/lib/dracut/modules.d/91cryptpilot/initrd-trigger-network-online.sh
+	install -D -m 755 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.sh \
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/lib/dracut/modules.d/91cryptpilot/initrd-wait-network-online.sh
+	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service \
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/lib/dracut/modules.d/91cryptpilot/cryptpilot-fde-before-sysroot.service
+	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service \
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/lib/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroot.service
+	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service \
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/lib/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service
+	install -D -m 644 $(CURDIR)/dist/dracut/modules.d/91cryptpilot/lvm.conf \
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/lib/dracut/modules.d/91cryptpilot/lvm.conf
+	# Udev rules (guest package)
 	install -D -m 644 $(CURDIR)/dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules \
-		$(CURDIR)/debian/cryptpilot-fde/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
-	
+		$(CURDIR)/debian/cryptpilot-fde-guest/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+
 	# Install cryptpilot-crypt
 	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-crypt/bin/cryptpilot-crypt \
 		$(CURDIR)/debian/cryptpilot-crypt/usr/bin/cryptpilot-crypt
@@ -74,7 +86,7 @@ override_dh_auto_install:
 		$(CURDIR)/debian/cryptpilot-crypt/etc/cryptpilot/volumes/oidc.toml.template
 	install -D -m 600 $(CURDIR)/dist/etc/volumes/exec.toml.template \
 		$(CURDIR)/debian/cryptpilot-crypt/etc/cryptpilot/volumes/exec.toml.template
-	
+
 	# Install cryptpilot-verity
 	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-verity/bin/cryptpilot-verity \
 		$(CURDIR)/debian/cryptpilot-verity/usr/bin/cryptpilot-verity

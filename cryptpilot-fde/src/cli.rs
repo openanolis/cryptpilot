@@ -4,6 +4,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::build::CLAP_LONG_VERSION;
 
+// ========== Host CLI types ==========
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 #[clap(long_version = CLAP_LONG_VERSION)]
@@ -25,10 +27,6 @@ pub enum FdeSubcommand {
     /// Subcommands related to configuration.
     #[command(name = "config")]
     Config(ConfigOptions),
-
-    /// Running during system booting FDE stages.
-    #[command(name = "boot-service")]
-    BootService(BootServiceOptions),
 }
 
 #[derive(Parser, Debug)]
@@ -38,7 +36,6 @@ pub struct ShowReferenceValueOptions {
     pub disk: Option<PathBuf>,
 
     /// Specify one or more hash algorithms to use.
-    /// Multiple algorithms can be provided (e.g., --hash-algo sha384 --hash-algo sm3).
     #[clap(long = "hash-algo", default_value = "sha384")]
     pub hash_algos: Vec<ShowReferenceValueHashAlgo>,
 }
@@ -95,7 +92,24 @@ pub struct ConfigCheckOptions {
     pub skip_check_passphrase: bool,
 }
 
+// ========== Guest CLI types ==========
+
 #[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+#[clap(long_version = CLAP_LONG_VERSION)]
+pub struct GuestCli {
+    #[command(subcommand)]
+    pub command: GuestSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GuestSubcommand {
+    /// Running during system booting FDE stages.
+    #[command(name = "boot-service")]
+    BootService(BootServiceOptions),
+}
+
+#[derive(Parser, Debug, Clone)]
 pub struct BootServiceOptions {
     /// Indicate the stage of the boot process we are in.
     #[clap(long)]
@@ -103,7 +117,7 @@ pub struct BootServiceOptions {
     pub stage: BootStage,
 }
 
-#[derive(ValueEnum, Clone, Debug, PartialEq)]
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
 pub enum BootStage {
     #[clap(name = "initrd-fde-before-sysroot")]
     InitrdFdeBeforeSysroot,

@@ -15,20 +15,46 @@ Homepage: https://github.com/openanolis/cryptpilot
 
 Package: cryptpilot
 Architecture: any
-Depends: cryptpilot-fde (= ${binary:Version}),
+Depends: cryptpilot-fde-host (= ${binary:Version}),
+         cryptpilot-fde-guest (= ${binary:Version}),
          cryptpilot-crypt (= ${binary:Version}),
          cryptpilot-verity (= ${binary:Version}),
          ${misc:Depends}
 Description: Full-disk encryption and data protection tool for confidential computing
  Cryptpilot is a full-disk encryption utility for protecting data at rest
  in confidential computing environments. This meta-package installs all
- cryptpilot components: cryptpilot-fde, cryptpilot-crypt, and cryptpilot-verity.
+ cryptpilot components: cryptpilot-fde-host, cryptpilot-fde-guest, cryptpilot-crypt, and cryptpilot-verity.
  .
  It provides LUKS2-based encryption for rootfs and data volumes, integrates
  with dracut for early-boot decryption, and supports multiple key providers
  including TPM2, KBS (Key Broker Service), KMS, OIDC, OTP, and custom exec plugins.
 
-Package: cryptpilot-fde
+Package: cryptpilot-fde-host
+Architecture: any
+Depends: lvm2,
+         cryptsetup-bin,
+         coreutils,
+         kmod,
+         util-linux,
+         qemu-utils,
+         file,
+         libguestfs-tools,
+         cloud-guest-utils,
+         grub2-common,
+         ${shlibs:Depends},
+         ${misc:Depends}
+Recommends: dosfstools,
+            xfsprogs,
+            e2fsprogs
+Suggests: confidential-data-hub,
+          attestation-agent
+Description: Full-disk encryption host-side tooling (conversion, configuration, reference values)
+ Cryptpilot-fde-host provides host-side tools for full-disk encryption management,
+ including disk image conversion (cryptpilot-convert), image hardening (cryptpilot-enhance),
+ boot artifact reference value computation (show-reference-value), and configuration
+ validation (config check/dump).
+
+Package: cryptpilot-fde-guest
 Architecture: any
 Depends: dracut,
          dracut-network,
@@ -38,20 +64,14 @@ Depends: dracut,
          systemd,
          kmod,
          util-linux,
-         qemu-utils,
-         file,
          ${shlibs:Depends},
          ${misc:Depends}
-Recommends: dosfstools,
-            xfsprogs,
-            e2fsprogs,
-            libguestfs-tools
-Suggests: confidential-data-hub,
-          attestation-agent
-Description: Full-disk encryption tooling for system volumes
- Cryptpilot-fde provides system disk encryption and boot-time processing
- for full-disk encryption setups. Includes cryptpilot-convert for disk
- image conversion and cryptpilot-enhance for FDE enhancement.
+Recommends: e2fsprogs
+Description: Full-disk encryption guest-side boot service (initrd decryption)
+ Cryptpilot-fde-guest provides the boot-service binary that runs during initrd
+ to set up encrypted volumes (dm-crypt, dm-verity, LVM, overlayfs) before the
+ root filesystem is mounted. This package is designed for inclusion in guest
+ disk images and has minimal dependencies.
 
 Package: cryptpilot-crypt
 Architecture: any

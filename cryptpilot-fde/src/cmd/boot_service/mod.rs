@@ -9,6 +9,7 @@ use async_trait::async_trait;
 
 use crate::cli::{BootServiceOptions, BootStage};
 
+#[derive(Clone)]
 pub struct BootServiceCommand {
     pub boot_service_options: BootServiceOptions,
 }
