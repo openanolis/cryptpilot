@@ -1,6 +1,5 @@
 pub mod boot_service;
 pub mod config;
-pub mod metadata;
 pub mod show_reference_value;
 
 use anyhow::Result;
