@@ -505,21 +505,21 @@ disk::install_rpm_on_rootfs() {
     # Step 2: Build essential packages list
     local cryptpilot_fde_version=""
 
-    # Try to query the version of cryptpilot-fde-guest from the current system
+    # Try to query the version of cryptpilot-fde-host from the current system
     if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-guest --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-host --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
     elif command -v dpkg-query >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-guest 2>/dev/null || true)
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null || true)
     fi
 
     local essential_packages_with_version=()
     local essential_package_names=()
 
     if [ -n "${cryptpilot_fde_version}" ]; then
-        log::info "Detected cryptpilot-fde-guest version: ${cryptpilot_fde_version}"
+        log::info "Detected cryptpilot-fde-host version: ${cryptpilot_fde_version}, will install matching cryptpilot-fde-guest"
         essential_packages_with_version+=("cryptpilot-fde-guest-${cryptpilot_fde_version}")
     else
-        log::warn "Failed to detect cryptpilot-fde-guest version, installing latest version"
+        log::warn "Failed to detect cryptpilot-fde-host version, installing latest cryptpilot-fde-guest"
         essential_packages_with_version+=("cryptpilot-fde-guest")
     fi
     essential_package_names+=("cryptpilot-fde-guest")
@@ -614,22 +614,22 @@ disk::install_deb_on_rootfs() {
     # Step 2: Build essential packages list
     local cryptpilot_fde_version=""
 
-    # Try to query the version of cryptpilot-fde-guest from the current system
+    # Try to query the version of cryptpilot-fde-host from the current system
     if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-guest --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-host --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
     elif command -v dpkg-query >/dev/null 2>&1; then
         # Extract version from dpkg-query output, removing epoch if present
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-guest 2>/dev/null || true)
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null || true)
     fi
 
     local essential_packages_with_version=()
     local essential_package_names=()
 
     if [ -n "${cryptpilot_fde_version}" ]; then
-        log::info "Detected cryptpilot-fde-guest version: ${cryptpilot_fde_version}"
+        log::info "Detected cryptpilot-fde-host version: ${cryptpilot_fde_version}, will install matching cryptpilot-fde-guest"
         essential_packages_with_version+=("cryptpilot-fde-guest=${cryptpilot_fde_version}")
     else
-        log::warn "Failed to detect cryptpilot-fde-guest version, installing latest version"
+        log::warn "Failed to detect cryptpilot-fde-host version, installing latest cryptpilot-fde-guest"
         essential_packages_with_version+=("cryptpilot-fde-guest")
     fi
     essential_package_names+=("cryptpilot-fde-guest")

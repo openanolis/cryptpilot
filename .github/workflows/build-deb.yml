@@ -76,7 +76,9 @@ jobs:
           name: deb-packages-${{ matrix.arch }}
           if-no-files-found: error
           path: |
-            ./deb-packages/cryptpilot-fde_*.deb
+            ./deb-packages/cryptpilot_*.deb
+            ./deb-packages/cryptpilot-fde-host_*.deb
+            ./deb-packages/cryptpilot-fde-guest_*.deb
             ./deb-packages/cryptpilot-crypt_*.deb
             ./deb-packages/cryptpilot-verity_*.deb
 
@@ -152,9 +154,6 @@ jobs:
 
           # Check udev rules
           test -f /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
-
-          # Check policy file
-          test -f /usr/share/cryptpilot/policy.rego
 
           echo "All verification checks passed!"
 

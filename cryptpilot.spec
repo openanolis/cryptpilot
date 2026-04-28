@@ -89,7 +89,8 @@ Suggests: confidential-data-hub
 # If not installed, the kbs keyprovider and AAEL will not work.
 Suggests: attestation-agent
 
-Obsoletes: cryptpilot-fde < 0.6.0-2
+Provides: cryptpilot-fde = %{version}-%{release}
+Obsoletes: cryptpilot-fde < %{version}-%{release}
 
 %description -n cryptpilot-fde-host
 Cryptpilot-fde-host provides host-side tools for full-disk encryption management,
@@ -119,7 +120,8 @@ Recommends: e2fsprogs
 
 # No qemu-img, libguestfs-tools-c, cloud-utils-growpart in guest image
 
-Obsoletes: cryptpilot-fde < 0.6.0-2
+Provides: cryptpilot-fde = %{version}-%{release}
+Obsoletes: cryptpilot-fde < %{version}-%{release}
 
 %description -n cryptpilot-fde-guest
 Cryptpilot-fde-guest provides the boot-service binary that runs during initrd
@@ -173,11 +175,6 @@ pushd src/cryptpilot-fde/
 cargo install --path . --bin cryptpilot-fde-guest --root %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-guest/ --locked --offline
 popd
 
-# Build fde-gen-template
-pushd src/cryptpilot-fde/
-cargo install --path . --bin fde-gen-template --root %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-host/ --locked --offline
-popd
-
 # Build cryptpilot-crypt
 pushd src/cryptpilot-crypt/
 cargo install --path . --bin cryptpilot-crypt --root %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/ --locked --offline
@@ -196,7 +193,6 @@ install -d -p %{buildroot}%{_prefix}/bin
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-host/bin/cryptpilot-fde-host %{buildroot}%{_prefix}/bin/cryptpilot-fde-host
 # Backwards compatibility symlink: cryptpilot-fde -> cryptpilot-fde-host
 ln -sf cryptpilot-fde-host %{buildroot}%{_prefix}/bin/cryptpilot-fde
-install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-host/bin/fde-gen-template %{buildroot}%{_prefix}/bin/fde-gen-template
 # Install FDE enhancement scripts (host only)
 install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
 install -p -m 755 cryptpilot-enhance.sh %{buildroot}%{_prefix}/bin/cryptpilot-enhance
@@ -236,10 +232,7 @@ install -p -m 600 dist/etc/volumes/kms.toml.template %{buildroot}/etc/cryptpilot
 install -p -m 600 dist/etc/volumes/oidc.toml.template %{buildroot}/etc/cryptpilot/volumes/oidc.toml.template
 install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
 
-# Install policy and udev rules
-install -d -p %{buildroot}/usr/share/cryptpilot
-install -p -m 644 dist/usr/share/cryptpilot/policy.rego %{buildroot}/usr/share/cryptpilot/policy.rego
-install -d -p %{buildroot}/usr/lib/udev/rules.d
+# Install udev rules
 install -p -m 644 dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules %{buildroot}/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
 popd
 
@@ -259,16 +252,12 @@ rm -rf %{buildroot}
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot-fde
 %{_prefix}/bin/cryptpilot-fde-host
-%{_prefix}/bin/fde-gen-template
 %{_prefix}/bin/cryptpilot-convert
 %{_prefix}/bin/cryptpilot-enhance
 # FDE configuration templates
 %dir /etc/cryptpilot
 /etc/cryptpilot/global.toml.template
 /etc/cryptpilot/fde.toml.template
-# Policy for FDE
-%dir /usr/share/cryptpilot
-/usr/share/cryptpilot/policy.rego
 
 %post -n cryptpilot-fde-guest
 # Reload udev rules to apply new device filtering rules
@@ -292,13 +281,6 @@ fi
 %{_prefix}/lib/systemd/system/cryptpilot.service
 # Udev rules for device hiding
 /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
-# Volume configuration templates (needed by cryptpilot-crypt)
-%dir /etc/cryptpilot/volumes
-/etc/cryptpilot/volumes/otp.toml.template
-/etc/cryptpilot/volumes/kbs.toml.template
-/etc/cryptpilot/volumes/kms.toml.template
-/etc/cryptpilot/volumes/oidc.toml.template
-/etc/cryptpilot/volumes/exec.toml.template
 
 %files -n cryptpilot-crypt
 %license src/LICENSE

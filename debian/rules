@@ -18,9 +18,6 @@ override_dh_auto_build:
 	# Build cryptpilot-fde-guest
 	cargo install --path $(CURDIR)/cryptpilot-fde --bin cryptpilot-fde-guest \
 		--root $(CURDIR)/debian/install/cryptpilot-fde-guest --locked $(USE_OFFLINE)
-	# Build fde-gen-template
-	cargo install --path $(CURDIR)/cryptpilot-fde --bin fde-gen-template \
-		--root $(CURDIR)/debian/install/cryptpilot-fde-host --locked $(USE_OFFLINE)
 	# Build cryptpilot-crypt
 	cargo install --path $(CURDIR)/cryptpilot-crypt --bin cryptpilot-crypt \
 		--root $(CURDIR)/debian/install/cryptpilot-crypt --locked $(USE_OFFLINE)
@@ -32,8 +29,6 @@ override_dh_auto_install:
 	# Install cryptpilot-fde-host
 	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde-host/bin/cryptpilot-fde-host \
 		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/cryptpilot-fde-host
-	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde-host/bin/fde-gen-template \
-		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/fde-gen-template
 	install -D -m 755 $(CURDIR)/cryptpilot-convert.sh \
 		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/cryptpilot-convert
 	install -D -m 755 $(CURDIR)/cryptpilot-enhance.sh \
@@ -43,9 +38,6 @@ override_dh_auto_install:
 		$(CURDIR)/debian/cryptpilot-fde-host/etc/cryptpilot/global.toml.template
 	install -D -m 600 $(CURDIR)/dist/etc/fde.toml.template \
 		$(CURDIR)/debian/cryptpilot-fde-host/etc/cryptpilot/fde.toml.template
-	# Policy file (host package)
-	install -D -m 644 $(CURDIR)/dist/usr/share/cryptpilot/policy.rego \
-		$(CURDIR)/debian/cryptpilot-fde-host/usr/share/cryptpilot/policy.rego
 
 	# Install cryptpilot-fde-guest
 	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde-guest/bin/cryptpilot-fde-guest \
