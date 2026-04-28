@@ -233,6 +233,7 @@ install -p -m 600 dist/etc/volumes/oidc.toml.template %{buildroot}/etc/cryptpilo
 install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
 
 # Install udev rules
+install -d -p %{buildroot}/usr/lib/udev/rules.d
 install -p -m 644 dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules %{buildroot}/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
 popd
 
