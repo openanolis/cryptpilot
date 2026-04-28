@@ -569,14 +569,8 @@ disk::install_deb_on_rootfs() {
     shift
     local packages=("$@")
 
-    # Essential packages for Debian/Ubuntu
-    local essential_packages=(
-        "cryptpilot-fde-guest"
-    )
-
     local copied_debs=()
     local user_packages=()
-    local deb_args=()
     local packages_to_install=()
 
     # Step 1: Install user-provided packages first

@@ -177,6 +177,7 @@ jobs:
 
           # test rpm package install
           yum install -y ./rpm-packages/RPMS/*/cryptpilot-fde-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-crypt-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-verity-[0-9]*.rpm
+          cryptpilot-fde-host --version
           cryptpilot-fde --version
           cryptpilot-crypt --version
           cryptpilot-verity --version
@@ -262,7 +263,7 @@ jobs:
           echo "cryptpilot_fde_rpm_container=${RPM_PATH_IN_CONTAINER}" >> $GITHUB_OUTPUT
           docker exec test-container bash -c "
             yum install -y ${RPM_PATH_IN_CONTAINER}
-            cryptpilot-fde --version
+            cryptpilot-fde-host --version
           "
 
       - name: Checkout repository
