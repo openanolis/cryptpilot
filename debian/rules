@@ -32,6 +32,8 @@ override_dh_auto_install:
 	# Install cryptpilot-fde-host
 	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde-host/bin/cryptpilot-fde-host \
 		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/cryptpilot-fde-host
+	# Backwards compatibility symlink: cryptpilot-fde -> cryptpilot-fde-host
+	ln -sf cryptpilot-fde-host $(CURDIR)/debian/cryptpilot-fde-host/usr/bin/cryptpilot-fde
 	install -D -m 755 $(CURDIR)/debian/install/cryptpilot-fde-host/bin/fde-gen-template \
 		$(CURDIR)/debian/cryptpilot-fde-host/usr/bin/fde-gen-template
 	install -D -m 755 $(CURDIR)/cryptpilot-convert.sh \
