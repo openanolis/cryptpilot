@@ -76,7 +76,6 @@ jobs:
           name: deb-packages-${{ matrix.arch }}
           if-no-files-found: error
           path: |
-            ./deb-packages/cryptpilot_*.deb
             ./deb-packages/cryptpilot-fde-host_*.deb
             ./deb-packages/cryptpilot-fde-guest_*.deb
             ./deb-packages/cryptpilot-crypt_*.deb
