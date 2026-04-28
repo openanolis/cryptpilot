@@ -124,7 +124,8 @@ jobs:
           if-no-files-found: error
           path: |
             /tmp/rpmbuild/SRPMS/cryptpilot-*.al8.src.rpm
-            /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-fde-*.al8.${{ matrix.arch }}.rpm
+            /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-fde-host-*.al8.${{ matrix.arch }}.rpm
+            /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-fde-guest-*.al8.${{ matrix.arch }}.rpm
             /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-crypt-*.al8.${{ matrix.arch }}.rpm
             /tmp/rpmbuild/RPMS/${{ matrix.arch }}/cryptpilot-verity-*.al8.${{ matrix.arch }}.rpm
 
@@ -176,7 +177,7 @@ jobs:
           set -x
 
           # test rpm package install
-          yum install -y ./rpm-packages/RPMS/*/cryptpilot-fde-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-crypt-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-verity-[0-9]*.rpm
+          yum install -y ./rpm-packages/RPMS/*/cryptpilot-fde-host-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-fde-guest-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-crypt-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-verity-[0-9]*.rpm
           cryptpilot-fde-host --version
           cryptpilot-fde --version
           cryptpilot-crypt --version
@@ -253,7 +254,7 @@ jobs:
         id: install-rpm
         run: |
           # Find the RPM path and export it (host path)
-          RPM_PATH=$(ls ./rpm-packages/RPMS/*/cryptpilot-fde-[0-9]*.rpm | head -1)
+          RPM_PATH=$(ls ./rpm-packages/RPMS/*/cryptpilot-fde-host-[0-9]*.rpm | head -1)
           echo "Found RPM: ${RPM_PATH}"
           # Convert to container path (workspace is mounted at /workspace)
           RPM_PATH_IN_CONTAINER="/workspace/${RPM_PATH#./}"
