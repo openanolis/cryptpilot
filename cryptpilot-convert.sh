@@ -161,9 +161,6 @@ disk::nbd_available() {
 
 disk::get_available_nbd() {
     { lsmod | grep nbd >/dev/null; } || modprobe nbd max_part=8
-    # If run in container, use following instead
-    #
-    # mknod /dev/nbd0 b 43 0
 
     local a
     for a in /dev/nbd[0-9] /dev/nbd[1-9][0-9]; do
@@ -172,6 +169,26 @@ disk::get_available_nbd() {
         return 0
     done
     return 1
+}
+
+# Allocate an available NBD device, connect it to a qcow2 image, and register cleanup hook.
+# Usage: disk::nbd_connect <qcow2_file> <var_name> [--discard=on] [--detect-zeroes=unmap]
+# Sets the global variable named by var_name to the connected NBD device path.
+disk::nbd_connect() {
+    local image_file=$1
+    local var_name=$2
+    shift 2
+    local qemu_nbd_opts=(--connect="PLACEHOLDER" "$image_file" "$@")
+
+    local nbd_dev
+    nbd_dev="$(disk::get_available_nbd)" || proc::fatal "no free NBD device for ${var_name}"
+
+    proc::hook_exit "qemu-nbd -d ${nbd_dev} >/dev/null 2>&1 || true"
+    qemu-nbd --connect="${nbd_dev}" "$@" "${image_file}"
+    sleep 2
+
+    # Assign to caller's variable
+    eval "${var_name}=\"${nbd_dev}\""
 }
 
 disk::umount_wait_busy() {
@@ -507,9 +524,9 @@ disk::install_rpm_on_rootfs() {
 
     # Try to query the version of cryptpilot-fde-host from the current system
     if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-host --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-host --qf '%{VERSION}-%{RELEASE}' 2>/dev/null) || cryptpilot_fde_version=""
     elif command -v dpkg-query >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null || true)
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null) || cryptpilot_fde_version=""
     fi
 
     local essential_packages_with_version=()
@@ -1109,19 +1126,93 @@ EOF
 
     }
 
-    # Remove read-only flag from rootfs.img
-    tune2fs -O ^read-only "${rootfs_file_path}"
+    if [ "${operate_on_device}" = false ]; then
+        # File mode: mount rootfs from source-write, EFI/boot from output
+        local rootfs_mount_point="${workdir}/rootfs"
+        local source_write_rootfs_part="${source_write_device}p${source_rootfs_part_num}"
 
-    # Note that the rootfs.img will not be used any more so mount it without '-o ro' flag will not change the hash of rootfs.
-    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline"
+        # Clear the read-only flag set by tune2fs during shrink, so we can mount rw for dracut
+        log::info "Clearing read-only flag on source-write rootfs"
+        tune2fs -O ^read-only "${source_write_rootfs_part}" >/dev/null 2>&1 || true
+
+        mkdir -p "${rootfs_mount_point}"
+
+        # Mount rootfs from source-write
+        mount "${source_write_rootfs_part}" "${rootfs_mount_point}"
+        proc::hook_exit "mountpoint -q ${rootfs_mount_point} && disk::umount_wait_busy ${rootfs_mount_point}"
+
+        # Mount required pseudo-filesystems
+        for dir in dev dev/pts proc run sys tmp; do
+            local target="${rootfs_mount_point}/$dir"
+            mkdir -p "$target"
+            proc::hook_exit "mountpoint -q '$target' && disk::umount_wait_busy '$target'"
+            case "$dir" in
+            dev) mount -t devtmpfs devtmpfs "$target" ;;
+            dev/pts) mount -t devpts devpts "$target" ;;
+            proc) mount -t proc proc "$target" ;;
+            run) mount -t tmpfs tmpfs "$target" ;;
+            sys) mount -t sysfs sysfs "$target" ;;
+            tmp) mount -t tmpfs tmpfs "$target" ;;
+            esac
+        done
+
+        # Mount /boot (from output boot partition or from source-write rootfs)
+        local boot_target="${rootfs_mount_point}/boot"
+        mkdir -p "$boot_target"
+        if [ "$uki" = false ] && [ -n "${boot_part_num:-}" ]; then
+            # Boot partition exists on output - mount it so dracut can find kernel files
+            mount "${output_device}p${boot_part_num}" "$boot_target"
+            proc::hook_exit "mountpoint -q '$boot_target' && disk::umount_wait_busy '$boot_target'"
+        fi
+
+        # Mount EFI from output
+        if [ "$efi_part_exist" = "true" ]; then
+            local efi_target="${rootfs_mount_point}/boot/efi"
+            mkdir -p "$efi_target"
+            mount "${output_device}p${efi_part_num}" "$efi_target"
+            proc::hook_exit "mountpoint -q '$efi_target' && disk::umount_wait_busy '$efi_target'"
+        fi
+
+        # Bind-mount network config
+        for file in resolv.conf hosts; do
+            local src="/etc/$file"
+            local dst="${rootfs_mount_point}/etc/$file"
+            local backup="${dst}.cryptpilot"
+            mv "$dst" "$backup" 2>/dev/null || true
+            touch "$dst"
+            proc::hook_exit "mountpoint -q '$dst' && disk::umount_wait_busy '$dst'"
+            mount -o bind,ro "$(realpath "$src")" "$dst"
+        done
+
+        # Run dracut
+        log::info "Executing dracut in chroot"
+        update_initrd_inner "${rootfs_mount_point}" "${uki}" "${uki_append_cmdline}"
+
+        # Cleanup mounts (reverse order)
+        for dir in etc/hosts etc/resolv.conf boot/efi boot sys run proc dev/pts dev; do
+            disk::umount_wait_busy "${rootfs_mount_point}/$dir" 2>/dev/null || true
+        done
+        for file in resolv.conf hosts; do
+            local dst="${rootfs_mount_point}/etc/$file"
+            local backup="${dst}.cryptpilot"
+            if [ -f "$backup" ]; then
+                rm -f "$dst"
+                mv "$backup" "$dst"
+            fi
+        done
+        disk::umount_wait_busy "${rootfs_mount_point}"
+    else
+        # Device mode: use run_in_chroot_mounts
+        run_in_chroot_mounts "/dev/mapper/rootfs" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline"
+    fi
 }
 
-step::shrink_and_extract_rootfs_part() {
+step::shrink_rootfs() {
     local rootfs_orig_part=$1
 
     # Mark the rootfs partition as read-only
     tune2fs -O read-only "${rootfs_orig_part}"
-    
+
     # Adjust file system content, all move to front
     local before_shrink_size_in_bytes
     before_shrink_size_in_bytes=$(blockdev --getsize64 "${rootfs_orig_part}")
@@ -1145,7 +1236,6 @@ step::shrink_and_extract_rootfs_part() {
     after_shrink_block_size=$(dumpe2fs "${rootfs_orig_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
     local after_shrink_block_count
     after_shrink_block_count=$(dumpe2fs "${rootfs_orig_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
-    local after_shrink_size_in_bytes
     after_shrink_size_in_bytes=$((after_shrink_block_size * after_shrink_block_count))
     local after_shrink_size_in_sector
     after_shrink_size_in_sector=$((after_shrink_block_size * after_shrink_block_count / sector_size))
@@ -1155,111 +1245,242 @@ step::shrink_and_extract_rootfs_part() {
     echo "    Size in Bytes: $after_shrink_size_in_bytes"
     echo "    Size in Sector: $after_shrink_size_in_sector"
 
-    # Extract rootfs to file on disk
-    rootfs_file_path="${workdir}/rootfs.img"
-    log::info "Extract rootfs to file on disk ${rootfs_file_path}"
-    dd status=progress if="${rootfs_orig_part}" of="${rootfs_file_path}" "count=${after_shrink_size_in_bytes}" iflag=count_bytes bs=256M
     if [ "${wipe_freed_space}" = true ]; then
         log::info "Wipe rootfs partition on device ${before_shrink_size_in_bytes} bytes"
-        dd status=progress if=/dev/zero of="${rootfs_orig_part}" count="${before_shrink_size_in_bytes}" iflag=count_bytes bs=64M # Clean the freed space with zero, so that the qemu-img convert would generate smaller image
+        dd status=progress if=/dev/zero of="${rootfs_orig_part}" count="${before_shrink_size_in_bytes}" iflag=count_bytes bs=64M
     fi
 
-    # Delete the original rootfs partition
-    log::info "Deleting original rootfs partition"
-    parted "$device" --script -- rm "${rootfs_orig_part_num}"
-    partprobe "$device" # Inform the OS of partition table changes
+    # In file mode, do NOT delete the rootfs partition — we need it for dd from source-read.
+    # In device mode, delete it to make room for LUKS/LVM.
+    if [ "${operate_on_device}" = true ]; then
+        log::info "Deleting original rootfs partition"
+        parted "$device" --script -- rm "${rootfs_orig_part_num}"
+        partprobe "$device"
+    fi
 }
 
-step::create_boot_part() {
-    local boot_file_path=$1
-    local boot_start_sector=$2
+step::prepare_output_and_snapshots() {
+    log::step "[ 5 ] Preparing output file and snapshots"
 
-    local boot_part_num="${rootfs_orig_part_num}"
-    local boot_size_in_bytes
-    boot_size_in_bytes=$(stat --printf="%s" "$boot_file_path")
-    local boot_size_in_sector=$((boot_size_in_bytes / sector_size))
-    boot_start_sector=$(disk::align_start_sector "${boot_start_sector}")
-    boot_part_end_sector=$((boot_start_sector + boot_size_in_sector - 1))
-    log::info "Creating boot partition ($boot_start_sector ... $boot_part_end_sector sectors)"
-    parted "$device" --script -- mkpart boot ext4 "${boot_start_sector}"s ${boot_part_end_sector}s
-    partprobe "$device"
+    # Save the source rootfs partition number before any output modifications.
+    # source-read/source-write keep the original partition layout; only output changes.
+    source_rootfs_part_num="${rootfs_orig_part_num}"
+
+    # Disconnect source-mod NBD (release lock for snapshot creation)
+    log::info "Disconnecting source-mod to create snapshots"
+    qemu-nbd -d "${source_mod_device}"
+    sleep 3
+
+    # Create two snapshots from the same backing file (source-mod)
+    log::info "Creating source-read (read-only) and source-write (writable) snapshots"
+    source_read_file="${input_file}.source-read"
+    source_write_file="${input_file}.source-write"
+    qemu-img create -f qcow2 -b "${source_mod_file}" -F qcow2 "${source_read_file}" >/dev/null
+    qemu-img create -f qcow2 -b "${source_mod_file}" -F qcow2 "${source_write_file}" >/dev/null
+    proc::hook_exit "rm -f ${source_read_file} ${source_write_file}"
+
+    # Connect snapshots using disk::nbd_connect (allocates + connects + registers hook atomically)
+    log::info "Connecting source-read snapshot"
+    disk::nbd_connect "${source_read_file}" source_read_device
+    log::info "Connecting source-write snapshot"
+    disk::nbd_connect "${source_write_file}" source_write_device
+    partprobe "${source_read_device}"
+    partprobe "${source_write_device}"
+    partprobe "${output_device}"
     udevadm settle --timeout=10
-    boot_part="${device}p${boot_part_num}"
-    [[ $boot_size_in_bytes == $(blockdev --getsize64 "$boot_part") ]] || log::error "Wrong size, something wrong in the script"
-    log::info "Writing boot filesystem to partition"
-    dd status=progress if="$boot_file_path" of="$boot_part" bs=4M
+
+    # Copy the partition table from source-read to output
+    # (rootfs partition is preserved since we didn't delete it in shrink)
+    log::info "Copying partition table to output file"
+    sfdisk -d "${source_read_device}" > "${workdir}/partition_table.sfdisk"
+    sfdisk "${output_device}" < "${workdir}/partition_table.sfdisk"
+
+    # If source had no separate boot partition, we need to create one on output
+    # (boot content was extracted to boot.img during step 2)
+    if [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
+        # Delete the rootfs partition first to free up space for the new boot partition.
+        # The data is safe on source-read — we only modify the output partition table.
+        log::info "Deleting rootfs partition on output to make room for boot partition"
+        parted "${output_device}" --script -- rm "${rootfs_orig_part_num}"
+        partprobe "${output_device}"
+        udevadm settle --timeout=10
+
+        # Create boot partition at original rootfs start with exact BOOT_PART_SIZE
+        local boot_start_sector
+        boot_start_sector=$(disk::align_start_sector "${rootfs_orig_start_sector}")
+        local boot_size_sectors=$(( ${BOOT_PART_SIZE%M} * 1024 * 1024 / sector_size ))
+        local boot_end_sector=$((boot_start_sector + boot_size_sectors - 1))
+        log::info "Creating boot partition: ${boot_start_sector}s - ${boot_end_sector}s (${BOOT_PART_SIZE})"
+        parted "${output_device}" --script -- mkpart boot ext4 "${boot_start_sector}s" "${boot_end_sector}s"
+
+        # Recreate rootfs partition to fill remaining space (from after boot to end of disk)
+        local rootfs_new_start=$((boot_end_sector + 1))
+        rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
+        log::info "Recreating rootfs partition: ${rootfs_new_start}s to end of disk"
+        parted "${output_device}" --script -- mkpart primary ext4 "${rootfs_new_start}s" '100%'
+
+        # Re-detect partitions
+        partprobe "${output_device}"
+        udevadm settle --timeout=10
+
+        # Re-detect partition numbers on output.
+        # Since we deleted the old rootfs and created boot + new rootfs,
+        # the two highest-numbered partitions are boot and rootfs.
+        local all_parts
+        all_parts=$(parted "${output_device}" --script -- print 2>/dev/null | awk 'NR>7 && /^[[:space:]]*[0-9]+/ {print $1}')
+        local max_part=0
+        for p in $all_parts; do
+            [[ $p -gt $max_part ]] && max_part=$p
+        done
+        rootfs_orig_part_num=$max_part
+        boot_part_num=$((max_part - 1))
+
+        if [ -z "$boot_part_num" ] || [ -z "$rootfs_orig_part_num" ]; then
+            proc::fatal "Failed to detect new partition numbers on output device"
+        fi
+
+        # Set boot flag
+        parted "${output_device}" --script -- set "${boot_part_num}" boot on
+
+        # Format the newly created boot partition with ext4
+        log::info "Formatting output boot partition"
+        mkfs.ext4 -F "${output_device}p${boot_part_num}" >/dev/null 2>&1
+
+        # Track output boot partition number separately from the original source detection.
+        # boot_part_exist reflects whether the SOURCE had a boot partition.
+        output_boot_part_num="${boot_part_num}"
+    else
+        partprobe "${output_device}"
+        udevadm settle --timeout=10
+    fi
+
+    log::info "source-read device: ${source_read_device}"
+    log::info "source-write device: ${source_write_device}"
+    log::info "output device: ${output_device}"
+    lsblk "${output_device}"
 }
 
-step::create_lvm_part() {
-    local lvm_start_sector=$1
-    local lvm_part_num=$2
+step::copy_partitions() {
+    log::step "[ 6 ] Copying EFI and boot partitions"
 
-    local lvm_part="${device}p${lvm_part_num}"
-    lvm_start_sector=$(disk::align_start_sector "${lvm_start_sector}")
-    log::info "Creating lvm partition as LVM PV ($lvm_start_sector ... last sector)"
-    parted "$device" --script -- mkpart primary "${lvm_start_sector}s" "100%"
-    parted "$device" --script -- set "${lvm_part_num}" lvm on
-    partprobe "$device"
+    # dd EFI partition (preserve UUID, labels, all metadata)
+    log::info "Copying EFI partition"
+    dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
 
-    log::info "Initializing LVM physical volume and volume group"
-    proc::exec_subshell_flose_fds pvcreate --force "$lvm_part"
-    proc::exec_subshell_flose_fds vgcreate --force cryptpilot "$lvm_part" --setautoactivation n # disable auto activation of LVM volumes to prevent it from being activated unexpectedly
-    proc::exec_subshell_flose_fds vgchange -a y cryptpilot  # activate the volume group
+    # Populate the output boot partition.
+    # Two cases:
+    # 1. Source already had a boot partition → dd from source-read (raw copy, preserves filesystem)
+    # 2. Source had /boot inside rootfs → copy kernel files from boot.img to the ext4-formatted output partition
+    if [ "$uki" = false ]; then
+        if [ "$boot_part_exist" = "true" ]; then
+            # Source already had a separate boot partition — raw copy preserves UUID and filesystem
+            log::info "Copying boot partition from source"
+            dd if="${source_read_device}p${boot_part_num}" of="${output_device}p${boot_part_num}" bs=4M status=progress
+        else
+            # Boot partition was created in step 5, formatted with ext4 — copy kernel files from boot.img
+            log::info "Copying kernel files to boot partition"
+            local boot_img_mount="${workdir}/boot_img"
+            local boot_part_mount="${workdir}/boot_part"
+            mkdir -p "$boot_img_mount" "$boot_part_mount"
+
+            mount -o ro "${boot_file_path}" "$boot_img_mount"
+            mount "${output_device}p${boot_part_num}" "$boot_part_mount"
+            # Only copy vmlinuz kernel images — dracut will regenerate initramfs and other
+            # boot files. Skip old initramfs, grub modules, rescue images to save space.
+            find "${boot_img_mount}" -maxdepth 1 -type f -name 'vmlinuz-*' -print0 | while IFS= read -r -d '' src_file; do
+                cp -f "$src_file" "$boot_part_mount/"
+            done
+            disk::umount_wait_busy "$boot_part_mount"
+            disk::umount_wait_busy "$boot_img_mount"
+        fi
+    fi
 }
 
 step::setup_rootfs_lv_with_encrypt() {
-    local rootfs_file_path=$1
-    local rootfs_passphrase=$2
+    local rootfs_passphrase=$1
 
-    local rootfs_size_in_byte
-    rootfs_size_in_byte=$(stat --printf="%s" "${rootfs_file_path}")
-    local rootfs_lv_size_in_bytes=$((rootfs_size_in_byte + 16 * 1024 * 1024)) # original rootfs partition size plus LUKS2 header size
-    log::info "Creating rootfs logical volume"
-    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${device}"
-    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B cryptpilot # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
-    # Create a encrypted volume
-    log::info "Encrypting rootfs logical volume with LUKS2"
-    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --subsystem cryptpilot /dev/mapper/cryptpilot-rootfs --key-file=-
+    if [ "${operate_on_device}" = false ]; then
+        local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
+        local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
+    else
+        local output_rootfs_part="${rootfs_orig_part}"
+        local source_rootfs_part="${rootfs_read_device}"
+    fi
+
+    # LUKS directly on the target partition
+    log::info "Encrypting rootfs partition with LUKS2"
+    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat \
+        --type luks2 --cipher aes-xts-plain64 --subsystem cryptpilot \
+        "${output_rootfs_part}" --key-file=-
     proc::hook_exit "[[ -e /dev/mapper/rootfs ]] && disk::dm_remove_wait_busy rootfs"
 
     log::info "Opening encrypted rootfs volume"
-    echo -n "${rootfs_passphrase}" | cryptsetup open /dev/mapper/cryptpilot-rootfs rootfs --key-file=-
-    # Copy rootfs content to the encrypted volume
-    log::info "Copying rootfs content to the encrypted volume"
-    dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/rootfs bs=4M
+    echo -n "${rootfs_passphrase}" | cryptsetup open "${output_rootfs_part}" rootfs --key-file=-
+    # Copy rootfs content to the encrypted volume (the ONLY full rootfs copy).
+    # Use the shrunk filesystem size — the partition on the source may be larger
+    # than the output (e.g., when a boot partition is carved out).
+    local fs_block_size fs_block_count rootfs_size
+    fs_block_size=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
+    fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
+    rootfs_size=$((fs_block_size * fs_block_count))
+    log::info "Copying rootfs content to the encrypted volume (filesystem: ${rootfs_size} bytes, partition: $(blockdev --getsize64 "${source_rootfs_part}") bytes)"
+    dd status=progress "if=${source_rootfs_part}" of=/dev/mapper/rootfs bs=4M count="${rootfs_size}" iflag=count_bytes
     disk::dm_remove_wait_busy rootfs
 }
 
 step::setup_rootfs_lv_without_encrypt() {
-    local rootfs_file_path=$1
+    if [ "${operate_on_device}" = false ]; then
+        local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
+        local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
+    else
+        local output_rootfs_part="${rootfs_orig_part}"
+        local source_rootfs_part="${rootfs_read_device}"
+    fi
 
-    local rootfs_size_in_byte
-    rootfs_size_in_byte=$(stat --printf="%s" "${rootfs_file_path}")
-    local rootfs_lv_size_in_bytes=$((rootfs_size_in_byte + 16 * 1024 * 1024)) # original rootfs partition size plus LUKS2 header size
-    log::info "Creating rootfs logical volume"
-    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${device}"
-    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B cryptpilot # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
-    # Copy rootfs content to the lvm volume
-    log::info "Copying rootfs content to the logical volume"
-    dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/cryptpilot-rootfs bs=4M
+    # Copy only the shrunk filesystem (partition may be larger than actual filesystem)
+    local fs_block_size fs_block_count rootfs_size
+    fs_block_size=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
+    fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
+    rootfs_size=$((fs_block_size * fs_block_count))
+    log::info "Copying rootfs content to the target partition (filesystem: ${rootfs_size} bytes)"
+    dd status=progress "if=${source_rootfs_part}" of="${output_rootfs_part}" bs=4M count="${rootfs_size}" iflag=count_bytes
 }
 
 step::setup_rootfs_hash_lv() {
-    local rootfs_file_path=$1
+    if [ "${operate_on_device}" = false ]; then
+        local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
+    else
+        local source_rootfs_part="${rootfs_read_device}"
+    fi
     local rootfs_hash_file_path="${workdir}/rootfs_hash.img"
-    veritysetup format "${rootfs_file_path}" "${rootfs_hash_file_path}" --format=1 --hash=sha256 |
+
+    # Calculate filesystem size for verity (partition may be larger than actual filesystem)
+    local fs_block_size fs_block_count fs_size_bytes data_blocks
+    fs_block_size=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
+    fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
+    fs_size_bytes=$((fs_block_size * fs_block_count))
+    data_blocks=$((fs_size_bytes / 4096))  # verity default data block size
+
+    veritysetup format "${source_rootfs_part}" "${rootfs_hash_file_path}" \
+        --format=1 --hash=sha256 --data-blocks "${data_blocks}" |
         tee "${workdir}/rootfs_hash.status" |
         gawk '(/^Root hash:/ && $NF ~ /^[0-9a-fA-F]+$/) { print $NF; }' \
             >"${workdir}/rootfs_hash.roothash"
     cat "${workdir}/rootfs_hash.status"
 
-    local rootfs_hash_size_in_byte
-    rootfs_hash_size_in_byte=$(stat --printf="%s" "${rootfs_hash_file_path}")
-    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs_hash ]] && disk::dm_remove_all ${device}"
-    proc::exec_subshell_flose_fds lvcreate -n rootfs_hash --size "${rootfs_hash_size_in_byte}"B cryptpilot
-    dd status=progress "if=${rootfs_hash_file_path}" of=/dev/mapper/cryptpilot-rootfs_hash bs=4M
-    rm -f "${rootfs_hash_file_path}"
-    disk::dm_remove_all "${device}"
+    if [ "${operate_on_device}" = true ]; then
+        # Device mode: store hash in LVM partition inside the encrypted container
+        local rootfs_hash_size_in_byte
+        rootfs_hash_size_in_byte=$(stat --printf="%s" "${rootfs_hash_file_path}")
+        proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs_hash ]] && disk::dm_remove_all ${device}"
+        proc::exec_subshell_flose_fds lvcreate -n rootfs_hash --size "${rootfs_hash_size_in_byte}"B cryptpilot
+        dd status=progress "if=${rootfs_hash_file_path}" of=/dev/mapper/cryptpilot-rootfs_hash bs=4M
+        rm -f "${rootfs_hash_file_path}"
+        disk::dm_remove_all "${device}"
+    else
+        # File mode: keep hash in workdir (will be included in initrd via --include)
+        log::info "Verity hash file stored at ${rootfs_hash_file_path}"
+    fi
 
     # Recording rootfs hash in metadata file
     log::info "Generate metadata file"
@@ -1296,6 +1517,7 @@ main() {
     local rootfs_orig_part
     local rootfs_orig_part_num
     local rootfs_orig_part_exist=false
+    local source_rootfs_part_num  # Source partition number (unchanged; differs from output when boot partition is added)
     local wipe_freed_space=false
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
@@ -1455,39 +1677,42 @@ main() {
     else
         log::info "Using input file: $input_file"
         qemu-img info "${input_file}"
-        device="$(disk::get_available_nbd)" || proc::fatal "no free NBD device"
 
-        local work_file="${input_file}.work"
-        if [ -f "${work_file}" ]; then
-            if flock --exclusive --nonblock "${work_file}"; then
-                log::error "File ${work_file} is locked by another process, maybe another cryptpilot instance is using it. Please stop it and try again."
-                exit 1
-            else
-                log::warn "Temporary file ${work_file} already exists, delete it now"
-                rm -f "${work_file}"
+        # Clean up any leftover overlay files from previous runs
+        for overlay_file in "${input_file}.source-mod" "${input_file}.source-read" "${input_file}.source-write"; do
+            if [ -f "${overlay_file}" ]; then
+                log::warn "Temporary file ${overlay_file} already exists from a previous run, deleting it"
+                rm -f "${overlay_file}"
             fi
-        fi
+        done
 
         # Try to detect input file format
         local input_format
         input_format=$(qemu-img info "${input_file}" | grep '^file format:' | awk '{print $3}')
-        
-        # Try to create work file with backing file for faster processing
-        log::info "Detected input format: ${input_format}"
-        proc::hook_exit "rm -f ${work_file}"
-        if qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${work_file}" 2>/dev/null; then
-            log::info "Created work file ${work_file} with backing file ${input_file}"
-        else
-            log::warn "Failed to create work file with backing file, falling back to direct copy"
-            log::info "Copying ${input_file} to ${work_file}"
-            cp "${input_file}" "${work_file}"
-        fi
 
-        proc::hook_exit "qemu-nbd --disconnect ${device} >/dev/null"
-        qemu-nbd --connect="${device}" --discard=on --detect-zeroes=unmap "${work_file}"
-        sleep 2
-        log::info "Mapped to NBD device ${device}:"
-        fdisk -l "${device}"
+        # Create source-mod overlay: all modifications (yum, grub, shrink) go here
+        source_mod_file="${input_file}.source-mod"
+        proc::hook_exit "rm -f ${source_mod_file}"
+        qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${source_mod_file}" >/dev/null
+        log::info "Created source-mod overlay: ${source_mod_file}"
+
+        # Create output file upfront (same virtual size as input)
+        local virtual_size_bytes
+        virtual_size_bytes=$(qemu-img info --output=json "${input_file}" | grep '"virtual-size"' | grep -o '[0-9]\+')
+        qemu-img create -f qcow2 -o size="${virtual_size_bytes}" "${output_file}" >/dev/null
+        log::info "Created output file: ${output_file} (virtual size: ${virtual_size_bytes} bytes)"
+
+        # Allocate and connect NBD devices one at a time
+        disk::nbd_connect "${source_mod_file}" source_mod_device --discard=on --detect-zeroes=unmap
+        log::info "Mapped source-mod to NBD device ${source_mod_device}:"
+        fdisk -l "${source_mod_device}"
+
+        disk::nbd_connect "${output_file}" output_device --discard=on --detect-zeroes=unmap
+        log::info "Mapped output to NBD device ${output_device}:"
+        fdisk -l "${output_device}"
+
+        # For backward compatibility in partition detection functions, alias device to source_mod_device
+        device="${source_mod_device}"
     fi
 
     disk::assert_disk_not_busy "${device}"
@@ -1537,36 +1762,33 @@ main() {
     step:update_rootfs "${efi_part}" "${boot_file_path}" "${uki}"
 
     #
-    # 4. Shrinking rootfs and extract
+    # 4. Shrinking rootfs
     #
-    log::step "[ 4 ] Shrinking rootfs and extract"
-    step::shrink_and_extract_rootfs_part "${rootfs_orig_part}"
+    log::step "[ 4 ] Shrinking rootfs"
+    step::shrink_rootfs "${rootfs_orig_part}"
 
     #
-    # 5. Create a boot partition
+    # 5. Preparing output file and snapshots
     #
-    log::step "[ 5 ] Creating boot partition"
-    if [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
-        local boot_part_end_sector
-        step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
-    elif [ "$boot_part_exist" = "false" ] && [ "$uki" = true ]; then
-        log::info "Skipped since UKI mode does not require a separate boot partition"
+    if [ "${operate_on_device}" = false ]; then
+        # File-based mode: use qcow2 overlays
+        log::step "[ 5 ] Preparing output file and snapshots"
+        step::prepare_output_and_snapshots
     else
-        log::info "Skipped since boot partition already exist"
+        # Device mode: create read-only loop device on source partition
+        # as a replacement for rootfs.img
+        log::step "[ 5 ] Creating read-only snapshot of source partition"
+        rootfs_read_device=$(losetup -r --sizelimit "${after_shrink_size_in_bytes}" --show -f "${rootfs_orig_part}")
+        log::info "Created read-only loop device: ${rootfs_read_device}"
+        proc::hook_exit "losetup -d ${rootfs_read_device} 2>/dev/null || true"
     fi
 
     #
-    # 6. Creating lvm partition
+    # 6. Copying EFI and boot partitions
     #
-    log::step "[ 6 ] Creating lvm partition"
-    if [ "$boot_part_exist" = "true" ]; then
-        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_part_num"
-    elif [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
-        step::create_lvm_part "$((boot_part_end_sector + 1))" "$((rootfs_orig_part_num + 1))"
-    else
-        # In UKI mode with no boot partition, we start right after the EFI partition
-        # or at the beginning of the available space
-        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_part_num"
+    log::step "[ 6 ] Copying EFI and boot partitions"
+    if [ "${operate_on_device}" = false ]; then
+        step::copy_partitions
     fi
 
     #
@@ -1574,16 +1796,20 @@ main() {
     #
     log::step "[ 7 ] Setting up rootfs logical volume"
     if [ "${rootfs_no_encryption}" = false ]; then
-        step::setup_rootfs_lv_with_encrypt "${rootfs_file_path}" "${rootfs_passphrase}"
+        if [ "${operate_on_device}" = false ]; then
+            step::setup_rootfs_lv_with_encrypt "${rootfs_passphrase}"
+        else
+            step::setup_rootfs_lv_with_encrypt "${rootfs_passphrase}"
+        fi
     else
-        step::setup_rootfs_lv_without_encrypt "${rootfs_file_path}"
+        step::setup_rootfs_lv_without_encrypt
     fi
 
     #
     # 8. Setting up rootfs hash volume
     #
     log::step "[ 8 ] Setting up rootfs hash volume"
-    step::setup_rootfs_hash_lv "${rootfs_file_path}"
+    step::setup_rootfs_hash_lv
 
     #
     # 9. Update initrd
@@ -1595,7 +1821,7 @@ main() {
         if [ "$uki" = true ]; then
             step:update_initrd "${efi_part}" "" "${uki}" "${uki_append_cmdline}"
         else
-            step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
+            step:update_initrd "${efi_part}" "${boot_file_path}" "${uki}" "${uki_append_cmdline}"
         fi
     fi
 
@@ -1603,32 +1829,23 @@ main() {
     # 10. Cleaning up
     #
     log::step "[ 10 ] Cleaning up"
-    disk::dm_remove_all "${device}"
-    blockdev --flushbufs "${device}"
+    if [ "${operate_on_device}" = true ]; then
+        disk::dm_remove_all "${device}"
+        blockdev --flushbufs "${device}"
+    fi
 
-    if [ "${operate_on_device}" == true ]; then
+    if [ "${operate_on_device}" = true ]; then
         log::success "--------------------------------"
         log::success "Everything done, the device is ready to use: ${device}"
     else
         #
-        # 11. Generating new image file
+        # 11. Finalizing
         #
-        log::step "[ 11 ] Generating new image file"
-        qemu-nbd --disconnect "${device}"
-        sleep 2 # wait for the qemu-nbd daemon to release the file lock
-
-        # check suffix of the output file
-        local output_file_suffix=${output_file##*.}
-        if [[ "${output_file_suffix}" == "vhd" ]]; then
-            qemu-img convert -p -O vpc "${work_file}" "${output_file}"
-        elif [[ ${output_file_suffix} == "qcow2" ]]; then
-            # It is not worth to enable the compression option "-c", since it does increase the compression time.
-            qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
-        else
-            log::warn "Unknown output file suffix: ${output_file_suffix}"
-            log::info "Generating qcow2 file by default"
-            qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
-        fi
+        log::step "[ 11 ] Finalizing"
+        qemu-nbd -d "${source_read_device}"
+        qemu-nbd -d "${source_write_device}"
+        qemu-nbd -d "${output_device}"
+        sleep 2
 
         log::success "--------------------------------"
         log::success "Everything done, the new disk image is ready to use: ${output_file}"
