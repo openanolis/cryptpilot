@@ -55,7 +55,7 @@ In CryptPilot, data is encrypted in units of volumes. The confidential system di
 
 The core components of the system disk encryption solution include:
 - **cryptpilot-convert**: Prepares encrypted disk layout during the image conversion phase
-- **cryptpilot-fde**: Performs decryption and mounting operations during system boot
+- **cryptpilot-fde-host**: Performs decryption and mounting operations during system boot
 
 The entire process is divided into the image preparation phase and the system startup phase. The image preparation phase completes disk layout conversion in an offline environment, while the system startup phase completes device activation and filesystem mounting on each boot.
 
@@ -98,7 +98,7 @@ flowchart LR
     G --> H[System Startup]
 ```
 
-GRUB mode supports multi-kernel version management, allowing users to select different kernel versions through the menu during boot. `cryptpilot-fde` parses saved_entry in grubenv when calculating reference values, reading the corresponding kernel version for measurement.
+GRUB mode supports multi-kernel version management, allowing users to select different kernel versions through the menu during boot. `cryptpilot-fde-host` parses saved_entry in grubenv when calculating reference values, reading the corresponding kernel version for measurement.
 
 ### 3.2 UKI Mode (`--uki`)
 
@@ -124,7 +124,7 @@ flowchart LR
     E --> F[System Startup]
 ```
 
-UKI generation uses dracut's `--uefi` parameter. The default kernel command line is `console=tty0 console=ttyS0,115200n8`, and custom parameters can be appended via `--uki-append-cmdline`. `cryptpilot-fde` parses segments in the UKI image directly when calculating reference values.
+UKI generation uses dracut's `--uefi` parameter. The default kernel command line is `console=tty0 console=ttyS0,115200n8`, and custom parameters can be appended via `--uki-append-cmdline`. `cryptpilot-fde-host` parses segments in the UKI image directly when calculating reference values.
 
 ### 3.3 Mode Comparison
 

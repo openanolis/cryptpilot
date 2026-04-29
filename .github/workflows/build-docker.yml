@@ -125,7 +125,7 @@ jobs:
       - name: Load and test cryptpilot-fde
         run: |
           docker load --input ${{ runner.temp }}/cryptpilot-fde.tar
-          docker run --rm cryptpilot-fde:test cryptpilot-fde --version
+          docker run --rm cryptpilot-fde:test cryptpilot-fde-host --version
 
       - name: Load and test cryptpilot-crypt
         run: |

@@ -60,4 +60,4 @@ RUN yum install -y /tmp/cryptpilot-fde-host-*.rpm && \
     yum clean all && \
     rm -rf /var/cache/yum /tmp/*.rpm
 
-CMD ["cryptpilot-fde"]
+CMD ["cryptpilot-fde-host"]

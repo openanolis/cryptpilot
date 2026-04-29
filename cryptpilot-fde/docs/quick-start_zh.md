@@ -58,7 +58,7 @@ tree ./config_dir
 检查配置是否有效：
 
 ```sh
-cryptpilot-fde -c ./config_dir/ config check --keep-checking
+cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 ```
 
 ## 示例 1：加密磁盘镜像文件
@@ -89,7 +89,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 1. 读取原始磁盘镜像
 2. 创建带有 dm-verity 的加密 rootfs 分区
 3. 创建带有 dm-integrity 的加密 delta 分区
-4. 将 cryptpilot-fde 安装到 initrd
+4. 将 cryptpilot-fde-guest 安装到 initrd
 5. 配置引导加载程序以支持加密启动
 6. 将加密磁盘写入输出文件
 
@@ -131,7 +131,7 @@ wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/seed.img
 为了证明目的，计算加密参考值：
 
 ```sh
-cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
+cryptpilot-fde-host show-reference-value --disk ./encrypted.qcow2
 ```
 
 这将输出可上传到[参考值提供服务（RVPS）](https://github.com/confidential-containers/trustee/tree/main/rvps)的度量值。
@@ -212,7 +212,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 计算仅度量模式的参考值：
 
 ```sh
-cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
+cryptpilot-fde-host show-reference-value --disk ./encrypted.qcow2
 ```
 
 输出包含多个度量值（kernel、initrd、cmdline 等），需要全部导入到 RVPS。
@@ -276,7 +276,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 UKI 模式的参考值仅包含 UKI 度量值，验证更简单：
 
 ```sh
-cryptpilot-fde show-reference-value --disk ./uki-encrypted.qcow2
+cryptpilot-fde-host show-reference-value --disk ./uki-encrypted.qcow2
 ```
 
 输出示例：
@@ -328,7 +328,7 @@ EOF
 2. **验证配置**：
 
 ```sh
-cryptpilot-fde -c ./config_dir/ config check --keep-checking
+cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 ```
 
 3. **加密磁盘**（假设磁盘是 `/dev/nvme2n1`）：
@@ -443,16 +443,16 @@ docker run -it --privileged --ipc=host \
 
 > **注意：** 额外的参数（`--privileged --ipc=host -v /run/udev/control:/run/udev/control -v /dev:/dev`）是为了使 `/dev` 在容器中正常工作。
 
-### 步骤 3：安装 cryptpilot-fde
+### 步骤 3：安装 cryptpilot-fde-host
 
-在容器内，从 [Release 页面](https://github.com/openanolis/cryptpilot/releases) 下载并安装 cryptpilot-fde：
+在容器内，从 [Release 页面](https://github.com/openanolis/cryptpilot/releases) 下载并安装 cryptpilot-fde-host：
 
 ```sh
 # 下载最新版本的 RPM 包
-wget https://github.com/openanolis/cryptpilot/releases/download/vX.Y.Z/cryptpilot-fde-X.Y.Z-1.x86_64.rpm
+wget https://github.com/openanolis/cryptpilot/releases/download/vX.Y.Z/cryptpilot-fde-host-X.Y.Z-1.x86_64.rpm
 
 # 安装
-rpm -ivh cryptpilot-fde-X.Y.Z-1.x86_64.rpm
+rpm -ivh cryptpilot-fde-host-X.Y.Z-1.x86_64.rpm
 ```
 
 > **提示：** 将 `X.Y.Z` 替换为实际的版本号。
@@ -460,11 +460,11 @@ rpm -ivh cryptpilot-fde-X.Y.Z-1.x86_64.rpm
 ### 步骤 4：运行 cryptpilot 命令
 
 ```sh
-cryptpilot-fde --help
+cryptpilot-fde-host --help
 cryptpilot-convert --help
 ```
 
-现在你可以在容器内运行任何 cryptpilot-fde 命令。
+现在你可以在容器内运行任何 cryptpilot-fde-host 命令。
 
 ## 故障排除
 
@@ -473,7 +473,7 @@ cryptpilot-convert --help
 如果 `config check` 报告错误：
 
 ```sh
-cryptpilot-fde -c ./config_dir/ config check --keep-checking
+cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 ```
 
 常见问题：

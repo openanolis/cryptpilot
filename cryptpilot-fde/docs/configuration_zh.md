@@ -11,7 +11,7 @@
 
 ## FDE 配置
 
-系统盘加密（全盘加密）是指将整个系统盘进行加密，该方案能够通过加密和完整性保护机制对根分区提供保护，并且 cryptpilot-fde 还能够实现对根文件系统的度量，用于远程证明。
+系统盘加密（全盘加密）是指将整个系统盘进行加密，该方案能够通过加密和完整性保护机制对根分区提供保护，并且 cryptpilot-fde-host 还能够实现对根文件系统的度量，用于远程证明。
 
 加密后的系统盘包含两个主要卷：
 - **Rootfs 卷**：只读的根文件系统
@@ -61,7 +61,7 @@ resource_path = "/secrets/rootfs-key"
 
 ##### 度量原理
 
-cryptpilot-fde 使用远程证明（Remote Attestation）技术来实现对根文件系统的度量：
+cryptpilot-fde-host 使用远程证明（Remote Attestation）技术来实现对根文件系统的度量：
 
 1. 根文件系统的预期值被记录在 initrd 镜像中
 2. initrd 自身的度量值被记录在不可回滚的 EventLog (CCEL) 中
@@ -103,7 +103,7 @@ resource_path = "/secrets/data-key"
 在使用前检查配置有效性：
 
 ```sh
-cryptpilot-fde -c /path/to/config config check --keep-checking
+cryptpilot-fde-host -c /path/to/config config check --keep-checking
 ```
 
 选项：

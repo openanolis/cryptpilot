@@ -125,7 +125,7 @@ jobs:
 
           # Check binary versions
           cryptpilot-fde-host --version
-          cryptpilot-fde --version
+          cryptpilot-fde-host --version
           cryptpilot-crypt --version
           cryptpilot-verity --version
 

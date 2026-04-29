@@ -11,7 +11,7 @@ The default configuration directory is `/etc/cryptpilot/`:
 
 ## FDE Configuration
 
-System disk encryption (Full Disk Encryption) encrypts the entire system disk, providing protection for the root partition through encryption and integrity mechanisms. cryptpilot-fde also measures the root filesystem for remote attestation.
+System disk encryption (Full Disk Encryption) encrypts the entire system disk, providing protection for the root partition through encryption and integrity mechanisms. cryptpilot-fde-host also measures the root filesystem for remote attestation.
 
 An encrypted system disk contains two main volumes:
 - **Rootfs volume**: Read-only root filesystem
@@ -61,7 +61,7 @@ resource_path = "/secrets/rootfs-key"
 
 ##### Measurement Principle
 
-cryptpilot-fde uses Remote Attestation to measure the root filesystem:
+cryptpilot-fde-host uses Remote Attestation to measure the root filesystem:
 
 1. Expected values are stored in initrd image
 2. Initrd measurement is recorded in non-rewritable Event Log (CCEL)
@@ -103,7 +103,7 @@ resource_path = "/secrets/data-key"
 Check configuration validity before use:
 
 ```sh
-cryptpilot-fde -c /path/to/config config check --keep-checking
+cryptpilot-fde-host -c /path/to/config config check --keep-checking
 ```
 
 Options:

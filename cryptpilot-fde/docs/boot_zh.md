@@ -55,7 +55,7 @@ CryptPilot系统盘加密方案通过Linux内核的dm-verity和LUKS2技术实现
 
 系统盘加密方案的核心组件包括：
 - **cryptpilot-convert**：在镜像转换阶段准备加密磁盘布局
-- **cryptpilot-fde**：在系统启动时执行解密和挂载操作
+- **cryptpilot-fde-host**：在系统启动时执行解密和挂载操作
 
 整个流程分为镜像准备阶段和系统启动阶段。镜像准备阶段在离线环境中完成磁盘布局转换，系统启动阶段在每次开机时完成设备激活和文件系统挂载。
 
@@ -98,7 +98,7 @@ flowchart LR
     G --> H[系统启动]
 ```
 
-GRUB模式支持多内核版本管理，用户可在启动时通过菜单选择不同内核版本。`cryptpilot-fde`在计算参考值时解析grubenv中的saved_entry，读取对应内核版本进行度量。
+GRUB模式支持多内核版本管理，用户可在启动时通过菜单选择不同内核版本。`cryptpilot-fde-host`在计算参考值时解析grubenv中的saved_entry，读取对应内核版本进行度量。
 
 ### 3.2 UKI模式（`--uki`）
 
@@ -124,7 +124,7 @@ flowchart LR
     E --> F[系统启动]
 ```
 
-UKI生成使用dracut的`--uefi`参数，默认内核命令行为`console=tty0 console=ttyS0,115200n8`，可通过`--uki-append-cmdline`追加自定义参数。`cryptpilot-fde`在计算参考值时直接解析UKI镜像中的各段进行度量。
+UKI生成使用dracut的`--uefi`参数，默认内核命令行为`console=tty0 console=ttyS0,115200n8`，可通过`--uki-append-cmdline`追加自定义参数。`cryptpilot-fde-host`在计算参考值时直接解析UKI镜像中的各段进行度量。
 
 ### 3.3 模式对比
 

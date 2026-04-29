@@ -14,10 +14,10 @@
 
 ### 计算命令
 
-使用 `cryptpilot-fde show-reference-value` 命令计算加密镜像的参考值：
+使用 `cryptpilot-fde-host show-reference-value` 命令计算加密镜像的参考值：
 
 ```sh
-cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
+cryptpilot-fde-host show-reference-value --disk ./encrypted.qcow2
 ```
 
 ### GRUB 模式参考值

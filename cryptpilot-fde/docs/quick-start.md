@@ -4,7 +4,7 @@ This guide walks you through encrypting a bootable OS disk with full disk encryp
 
 ## Prerequisites
 
-- cryptpilot-fde installed on your system
+- cryptpilot-fde-host installed on your system
 - A bootable qcow2 disk image, or an unmounted real disk
 
 ## Prepare Configuration
@@ -58,7 +58,7 @@ The configuration directory structure:
 Check if your configuration is valid:
 
 ```sh
-cryptpilot-fde -c ./config_dir/ config check --keep-checking
+cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 ```
 
 ## Example 1: Encrypt a Disk Image File
@@ -89,7 +89,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 1. Reads the original disk image
 2. Creates encrypted rootfs partition with dm-verity
 3. Creates encrypted delta partition with dm-integrity
-4. Installs cryptpilot-fde into initrd
+4. Installs cryptpilot-fde-guest into initrd
 5. Configures boot loader for encrypted boot
 6. Writes the encrypted disk to output file
 
@@ -131,7 +131,7 @@ wget https://alinux3.oss-cn-hangzhou.aliyuncs.com/seed.img
 For attestation purposes, calculate cryptographic reference values:
 
 ```sh
-cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
+cryptpilot-fde-host show-reference-value --disk ./encrypted.qcow2
 ```
 
 This outputs measurement values that can be uploaded to [Reference Value Provider Service (RVPS)](https://github.com/confidential-containers/trustee/tree/main/rvps).
@@ -212,7 +212,7 @@ This configuration is suitable for:
 Calculate reference values for measure-only mode:
 
 ```sh
-cryptpilot-fde show-reference-value --disk ./encrypted.qcow2
+cryptpilot-fde-host show-reference-value --disk ./encrypted.qcow2
 ```
 
 The output contains multiple measurement values (kernel, initrd, cmdline, etc.), all of which need to be imported to RVPS.
@@ -276,7 +276,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 UKI mode reference values contain only UKI measurement, making verification simpler:
 
 ```sh
-cryptpilot-fde show-reference-value --disk ./uki-encrypted.qcow2
+cryptpilot-fde-host show-reference-value --disk ./uki-encrypted.qcow2
 ```
 
 Example output:
@@ -328,7 +328,7 @@ EOF
 2. **Validate configuration**:
 
 ```sh
-cryptpilot-fde -c ./config_dir/ config check --keep-checking
+cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 ```
 
 3. **Encrypt the disk** (assuming the disk is `/dev/nvme2n1`):
@@ -460,11 +460,11 @@ rpm -ivh cryptpilot-fde-X.Y.Z-1.x86_64.rpm
 ### Step 4: Run cryptpilot Commands
 
 ```sh
-cryptpilot-fde --help
+cryptpilot-fde-host --help
 cryptpilot-convert --help
 ```
 
-Now you can run any cryptpilot-fde commands inside the container.
+Now you can run any cryptpilot-fde-host commands inside the container.
 
 ## Troubleshooting
 
@@ -473,7 +473,7 @@ Now you can run any cryptpilot-fde commands inside the container.
 If `config check` reports errors:
 
 ```sh
-cryptpilot-fde -c ./config_dir/ config check --keep-checking
+cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 ```
 
 Common issues:

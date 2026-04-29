@@ -36,7 +36,7 @@ readonly TEST_PASSPHRASE="test-passphrase-12345"
 # Source image path (can be overridden via --input)
 SOURCE_IMAGE=""
 
-# Path to cryptpilot-fde RPM package (required)
+# Path to cryptpilot-fde-guest RPM package (required)
 CRYPTPILOT_FDE_RPM=""
 
 # Script directory (where this script is located)
@@ -386,10 +386,10 @@ verify_converted_image() {
 
     # Test reference value calculation
     log::info "Testing reference value calculation..."
-    if command -v cryptpilot-fde &>/dev/null; then
+    if command -v cryptpilot-fde-host &>/dev/null; then
         local reference_value_file="${WORKDIR}/reference_value-${test_name}.json"
         local reference_value_stderr="${WORKDIR}/reference_value-${test_name}.stderr"
-        if cryptpilot-fde show-reference-value --disk "${output_image}" 1>"${reference_value_file}" 2>"${reference_value_stderr}"; then
+        if cryptpilot-fde-host show-reference-value --disk "${output_image}" 1>"${reference_value_file}" 2>"${reference_value_stderr}"; then
             log::info "Reference value calculation succeeded"
             cat "${reference_value_file}"
         else
@@ -398,7 +398,7 @@ verify_converted_image() {
             verify_failed=1
         fi
     else
-        log::warn "cryptpilot-fde not found, skipping reference value test"
+        log::warn "cryptpilot-fde-host not found, skipping reference value test"
     fi
 
     # Connect image via NBD
@@ -661,7 +661,7 @@ Usage: $(basename "$0") --rpm <path> --bootloader <uki|grub> --rootfs-enc|--root
 Integration tests for cryptpilot-convert
 
 Required:
-    --rpm <path>              Path to cryptpilot-fde RPM package
+    --rpm <path>              Path to cryptpilot-fde-guest RPM package
     --bootloader <uki|grub>   Boot mode
     --rootfs-enc              Enable rootfs encryption
     --rootfs-noenc            Disable rootfs encryption
@@ -726,9 +726,9 @@ main() {
         fatal "Missing required argument: --rpm <path>"
     fi
     if [[ ! -f "${CRYPTPILOT_FDE_RPM}" ]]; then
-        fatal "cryptpilot-fde RPM package not found: ${CRYPTPILOT_FDE_RPM}"
+        fatal "cryptpilot-fde-guest RPM package not found: ${CRYPTPILOT_FDE_RPM}"
     fi
-    log::info "Using cryptpilot-fde RPM: ${CRYPTPILOT_FDE_RPM}"
+    log::info "Using cryptpilot-fde-guest RPM: ${CRYPTPILOT_FDE_RPM}"
 
     # Validate --bootloader
     if [[ "${bootloader}" != "uki" && "${bootloader}" != "grub" ]]; then
