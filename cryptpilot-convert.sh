@@ -178,7 +178,6 @@ disk::nbd_connect() {
     local image_file=$1
     local var_name=$2
     shift 2
-    local qemu_nbd_opts=(--connect="PLACEHOLDER" "$image_file" "$@")
 
     local nbd_dev
     nbd_dev="$(disk::get_available_nbd)" || proc::fatal "no free NBD device for ${var_name}"
@@ -1041,6 +1040,7 @@ EOF
 
 }
 
+# shellcheck disable=SC2154
 step:update_initrd() {
     local efi_part=$1
     local boot_file_path=$2
@@ -1165,8 +1165,6 @@ step::shrink_rootfs() {
     tune2fs -O read-only "${rootfs_orig_part}"
 
     # Adjust file system content, all move to front
-    local before_shrink_size_in_bytes
-    before_shrink_size_in_bytes=$(blockdev --getsize64 "${rootfs_orig_part}")
     log::info "Checking and shrinking rootfs filesystem"
 
     if e2fsck -y -f "${rootfs_orig_part}"; then
@@ -1197,8 +1195,8 @@ step::shrink_rootfs() {
     echo "    Size in Sector: $after_shrink_size_in_sector"
 }
 
+# shellcheck disable=SC2154
 step::prepare_output_and_snapshots() {
-    log::step "[ 5 ] Preparing output file and snapshots"
 
     # Save the source rootfs partition number before any output modifications.
     # source-read/source-write keep the original partition layout; only output changes.
@@ -1286,7 +1284,6 @@ step::prepare_output_and_snapshots() {
 
         # Track output boot partition number separately from the original source detection.
         # boot_part_exist reflects whether the SOURCE had a boot partition.
-        output_boot_part_num="${boot_part_num}"
     else
         partprobe "${output_device}"
         udevadm settle --timeout=10
@@ -1299,7 +1296,6 @@ step::prepare_output_and_snapshots() {
 }
 
 step::copy_partitions() {
-    log::step "[ 6 ] Copying EFI and boot partitions"
 
     # dd EFI partition (preserve UUID, labels, all metadata)
     log::info "Copying EFI partition"
