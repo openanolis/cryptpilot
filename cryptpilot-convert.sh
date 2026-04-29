@@ -1156,6 +1156,8 @@ EOF
     update_initrd_inner "${rootfs_mount_point}" "${uki}" "${uki_append_cmdline}"
 
     cleanup_chroot_mounts "${rootfs_mount_point}"
+
+    sync
 }
 
 step::shrink_rootfs() {
@@ -1231,6 +1233,59 @@ step::prepare_output_and_snapshots() {
     sfdisk -d "${source_read_device}" > "${workdir}/partition_table.sfdisk"
     sfdisk "${output_device}" < "${workdir}/partition_table.sfdisk"
 
+    # In UKI mode, resize the EFI partition to accommodate the UKI image (~250MB).
+    # The source image may have a small EFI partition that's too small for the UKI.
+    if [ "$uki" = true ]; then
+        local uki_efi_size="512M"
+        log::info "UKI mode: resizing EFI partition to ${uki_efi_size}"
+        # Must delete rootfs partition first to avoid overlap, then resize EFI,
+        # then recreate rootfs. All partition table modifications must complete
+        # BEFORE formatting the EFI partition, because partprobe re-reading the
+        # partition table invalidates the kernel page cache for all partitions
+        # on the device, discarding any unsynced filesystem data.
+        parted "${output_device}" --script -- rm "${rootfs_orig_part_num}"
+        parted "${output_device}" --script -- resizepart "${efi_part_num}" "${uki_efi_size}"
+
+        # Recreate rootfs partition to fill remaining space
+        local rootfs_new_start
+        rootfs_new_start=$(parted "${output_device}" --script -- unit s print | awk '/^ *'"${efi_part_num}"' / {gsub(/s$/,"",$3); print $3; exit}')
+        rootfs_new_start=$((rootfs_new_start + 1))
+        rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
+        log::info "Recreating rootfs partition from sector ${rootfs_new_start} to end"
+        parted "${output_device}" --script -- mkpart primary ext4 "${rootfs_new_start}s" '100%'
+
+        # Now that all partition table modifications are done, format the EFI
+        # partition and copy EFI content from the source immediately.
+        # This must happen before any further parted operations that would
+        # trigger partprobe (which invalidates the kernel page cache).
+        local efi_part_size
+        efi_part_size=$(parted "${output_device}" --script -- unit B print | awk '/^ *'"${efi_part_num}"' / {gsub(/B$/,"",$4); print $4; exit}')
+        log::info "Formatting EFI partition with FAT32 (${efi_part_size} bytes)"
+
+        # Run partprobe to make the new partition visible
+        partprobe "${output_device}"
+        udevadm settle --timeout=10
+
+        # Format the EFI partition
+        mkfs.vfat -F 32 "${output_device}p${efi_part_num}" >/dev/null
+
+        # Immediately mount source EFI and output EFI, then copy content
+        local src_efi_mount="${workdir}/src_efi_prepare"
+        local dst_efi_mount="${workdir}/dst_efi_prepare"
+        mkdir -p "$src_efi_mount" "$dst_efi_mount"
+        mount -o ro "${source_read_device}p${efi_part_num}" "$src_efi_mount"
+        mount "${output_device}p${efi_part_num}" "$dst_efi_mount"
+        cp -a "$src_efi_mount/." "$dst_efi_mount/"
+        disk::umount_wait_busy "$dst_efi_mount"
+        disk::umount_wait_busy "$src_efi_mount"
+        rmdir "$src_efi_mount" "$dst_efi_mount" 2>/dev/null || true
+
+        # Explicit sync to flush NBD page cache to the qcow2 file.
+        sync
+
+        log::info "EFI partition formatted and content copied"
+    fi
+
     # If source had no separate boot partition, we need to create one on output
     # (boot content was extracted to boot.img during step 2)
     if [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
@@ -1281,12 +1336,17 @@ step::prepare_output_and_snapshots() {
         # Format the newly created boot partition with ext4
         log::info "Formatting output boot partition"
         mkfs.ext4 -F "${output_device}p${boot_part_num}" >/dev/null 2>&1
+        blockdev --flushbufs "${output_device}"
 
         # Track output boot partition number separately from the original source detection.
         # boot_part_exist reflects whether the SOURCE had a boot partition.
     else
-        partprobe "${output_device}"
-        udevadm settle --timeout=10
+        # In UKI mode, EFI was already formatted and populated above;
+        # skip partprobe to avoid invalidating its page cache.
+        if [ "$uki" = false ]; then
+            partprobe "${output_device}"
+            udevadm settle --timeout=10
+        fi
     fi
 
     log::info "source-read device: ${source_read_device}"
@@ -1297,9 +1357,14 @@ step::prepare_output_and_snapshots() {
 
 step::copy_partitions() {
 
-    # dd EFI partition (preserve UUID, labels, all metadata)
-    log::info "Copying EFI partition"
-    dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
+    # Copy EFI partition
+    # In UKI mode, the EFI partition was already formatted and populated in
+    # step::prepare_output_and_snapshots.
+    if [ "$uki" = false ]; then
+        # dd EFI partition (preserve UUID, labels, all metadata)
+        log::info "Copying EFI partition"
+        dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
+    fi
 
     # Populate the output boot partition.
     # Two cases:
@@ -1330,44 +1395,66 @@ step::copy_partitions() {
     fi
 }
 
+step::setup_lvm() {
+    local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
+
+    # Set LVM flag on the rootfs partition
+    log::info "Setting LVM flag on rootfs partition"
+    parted "${output_device}" --script -- set "${rootfs_orig_part_num}" lvm on
+    partprobe "${output_device}"
+    udevadm settle --timeout=10
+
+    # Initialize LVM physical volume and volume group
+    log::info "Initializing LVM physical volume and volume group 'cryptpilot'"
+    pvcreate --force "${output_rootfs_part}"
+    vgcreate --force cryptpilot "${output_rootfs_part}" --setautoactivation n
+}
+
 step::setup_rootfs_lv_with_encrypt() {
     local rootfs_passphrase=$1
 
-    local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
     local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
 
-    # LUKS directly on the target partition
-    log::info "Encrypting rootfs partition with LUKS2"
-    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat \
-        --type luks2 --cipher aes-xts-plain64 --subsystem cryptpilot \
-        "${output_rootfs_part}" --key-file=-
-    proc::hook_exit "[[ -e /dev/mapper/rootfs ]] && disk::dm_remove_wait_busy rootfs"
-
-    log::info "Opening encrypted rootfs volume"
-    echo -n "${rootfs_passphrase}" | cryptsetup open "${output_rootfs_part}" rootfs --key-file=-
-    # Copy rootfs content to the encrypted volume (the ONLY full rootfs copy).
-    # Use the shrunk filesystem size — the partition on the source may be larger
-    # than the output (e.g., when a boot partition is carved out).
+    # Calculate filesystem size for LV allocation
     local fs_block_size fs_block_count rootfs_size
     fs_block_size=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
     fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
     rootfs_size=$((fs_block_size * fs_block_count))
-    log::info "Copying rootfs content to the encrypted volume (filesystem: ${rootfs_size} bytes, partition: $(blockdev --getsize64 "${source_rootfs_part}") bytes)"
+    # Add 16MB for LUKS2 header overhead
+    local rootfs_lv_size=$((rootfs_size + 16 * 1024 * 1024))
+
+    log::info "Creating rootfs logical volume (size: ${rootfs_lv_size} bytes)"
+    lvcreate -n rootfs --size "${rootfs_lv_size}"B cryptpilot
+
+    # LUKS on the logical volume
+    log::info "Encrypting rootfs logical volume with LUKS2"
+    echo -n "${rootfs_passphrase}" | cryptsetup luksFormat \
+        --type luks2 --cipher aes-xts-plain64 --subsystem cryptpilot \
+        /dev/mapper/cryptpilot-rootfs --key-file=-
+    proc::hook_exit "[[ -e /dev/mapper/rootfs ]] && disk::dm_remove_wait_busy rootfs"
+
+    log::info "Opening encrypted rootfs volume"
+    echo -n "${rootfs_passphrase}" | cryptsetup open /dev/mapper/cryptpilot-rootfs rootfs --key-file=-
+
+    log::info "Copying rootfs content to the encrypted volume (filesystem: ${rootfs_size} bytes)"
     dd status=progress "if=${source_rootfs_part}" of=/dev/mapper/rootfs bs=4M count="${rootfs_size}" iflag=count_bytes
     disk::dm_remove_wait_busy rootfs
 }
 
 step::setup_rootfs_lv_without_encrypt() {
-    local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
     local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
 
-    # Copy only the shrunk filesystem (partition may be larger than actual filesystem)
+    # Calculate filesystem size for LV allocation
     local fs_block_size fs_block_count rootfs_size
     fs_block_size=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
     fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
     rootfs_size=$((fs_block_size * fs_block_count))
-    log::info "Copying rootfs content to the target partition (filesystem: ${rootfs_size} bytes)"
-    dd status=progress "if=${source_rootfs_part}" of="${output_rootfs_part}" bs=4M count="${rootfs_size}" iflag=count_bytes
+
+    log::info "Creating rootfs logical volume (size: ${rootfs_size} bytes)"
+    lvcreate -n rootfs --size "${rootfs_size}"B cryptpilot
+
+    log::info "Copying rootfs content to the logical volume"
+    dd status=progress "if=${source_rootfs_part}" of=/dev/mapper/cryptpilot-rootfs bs=4M count="${rootfs_size}" iflag=count_bytes
 }
 
 step::setup_rootfs_hash_lv() {
@@ -1388,8 +1475,15 @@ step::setup_rootfs_hash_lv() {
             >"${workdir}/rootfs_hash.roothash"
     cat "${workdir}/rootfs_hash.status"
 
-    # File mode: keep hash in workdir (will be included in initrd via --include)
-    log::info "Verity hash file stored at ${rootfs_hash_file_path}"
+    local rootfs_hash_size_in_byte
+    rootfs_hash_size_in_byte=$(stat --printf="%s" "${rootfs_hash_file_path}")
+
+    log::info "Creating rootfs_hash logical volume (size: ${rootfs_hash_size_in_byte} bytes)"
+    lvcreate -n rootfs_hash --size "${rootfs_hash_size_in_byte}"B cryptpilot
+    dd status=progress "if=${rootfs_hash_file_path}" of=/dev/mapper/cryptpilot-rootfs_hash bs=4M
+    rm -f "${rootfs_hash_file_path}"
+
+    log::info "Verity hash stored in logical volume cryptpilot/rootfs_hash"
 
     # Recording rootfs hash in metadata file
     log::info "Generate metadata file"
@@ -1400,7 +1494,6 @@ step::setup_rootfs_hash_lv() {
 type = 1
 root_hash = "${roothash}"
 EOF
-
 }
 
 main() {
@@ -1585,7 +1678,16 @@ main() {
     # Alias device to source_mod_device for backward compatibility with partition detection functions
     device="${source_mod_device}"
 
+    # Ensure kernel has partition devices ready for both NBD devices
+    partprobe "${source_mod_device}"
+    partprobe "${output_device}"
+    udevadm settle --timeout=10
+
     disk::assert_disk_not_busy "${device}"
+
+    # Debug: show what lsblk sees
+    log::info "lsblk output for source device:"
+    lsblk -lnpo NAME "${source_mod_device}"
 
     disk::find_efi_partition "${device}"
     [ "${efi_part_exist}" = true ] || proc::fatal "Cannot find EFI partition on $device"
@@ -1653,6 +1755,7 @@ main() {
     # 7. Setting up rootfs logical volume
     #
     log::step "[ 7 ] Setting up rootfs logical volume"
+    step::setup_lvm
     if [ "${rootfs_no_encryption}" = false ]; then
         step::setup_rootfs_lv_with_encrypt "${rootfs_passphrase}"
     else
@@ -1688,10 +1791,54 @@ main() {
     # 11. Finalizing
     #
     log::step "[ 11 ] Finalizing"
-    qemu-nbd -d "${source_read_device}"
-    qemu-nbd -d "${source_write_device}"
+
+    # Deactivate LVM volume group before disconnecting NBD
+    vgchange -an cryptpilot 2>/dev/null || true
+    sleep 1
+
+    # Flush pending writes
+    sync
+
+    # Save EFI content to a temp file before NBD disconnect.
+    # NBD disconnect can lose FAT32 filesystem data written through mount+copy.
+    # We restore it afterwards using guestfish which writes directly to qcow2.
+    local efi_backup="${workdir}/efi_backup.tar"
+    local efi_backup_mount="${workdir}/efi_backup_mnt"
+    mkdir -p "$efi_backup_mount"
+    if mount "${output_device}p${efi_part_num}" "$efi_backup_mount" 2>/dev/null; then
+        tar cf "$efi_backup" -C "$efi_backup_mount" .
+        disk::umount_wait_busy "$efi_backup_mount"
+        rmdir "$efi_backup_mount" 2>/dev/null || true
+    fi
+
     qemu-nbd -d "${output_device}"
-    sleep 2
+    sleep 3
+
+    # Restore EFI partition using guestfish, which writes directly to the qcow2
+    # file and handles sync properly on close, avoiding the NBD data loss issue.
+    if [ -f "$efi_backup" ]; then
+        local extract_dir="${workdir}/efi_extract"
+        mkdir -p "$extract_dir"
+        tar xf "$efi_backup" -C "$extract_dir"
+
+        if guestfish -a "${output_file}" -- <<GUESTFISH_EOF
+run
+mkfs vfat /dev/sda${efi_part_num}
+mount /dev/sda${efi_part_num} /
+copy-in ${extract_dir}/. /
+sync
+GUESTFISH_EOF
+        then
+            log::info "EFI partition restored using guestfish"
+        else
+            log::warn "guestfish failed to restore EFI partition"
+        fi
+
+        rm -rf "$extract_dir"
+    fi
+
+    qemu-nbd -d "${source_read_device}" 2>/dev/null || true
+    qemu-nbd -d "${source_write_device}" 2>/dev/null || true
 
     log::success "--------------------------------"
     log::success "Everything done, the new disk image is ready to use: ${output_file}"
