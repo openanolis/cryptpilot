@@ -179,7 +179,7 @@ jobs:
           # test rpm package install
           yum install -y ./rpm-packages/RPMS/*/cryptpilot-fde-host-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-fde-guest-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-crypt-[0-9]*.rpm ./rpm-packages/RPMS/*/cryptpilot-verity-[0-9]*.rpm
           cryptpilot-fde-host --version
-          cryptpilot-fde-host --version
+          cryptpilot-fde-guest --version
           cryptpilot-crypt --version
           cryptpilot-verity --version
 

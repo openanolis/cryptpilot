@@ -125,13 +125,13 @@ jobs:
 
           # Check binary versions
           cryptpilot-fde-host --version
-          cryptpilot-fde-host --version
+          cryptpilot-fde-guest --version
           cryptpilot-crypt --version
           cryptpilot-verity --version
 
           # Check that binaries exist
           test -x /usr/bin/cryptpilot-fde-host
-          test -L /usr/bin/cryptpilot-fde
+          test -x /usr/bin/cryptpilot-fde-guest
           test -x /usr/bin/cryptpilot-crypt
           test -x /usr/bin/cryptpilot-verity
           test -x /usr/bin/cryptpilot-convert
