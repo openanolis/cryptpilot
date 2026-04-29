@@ -4,6 +4,8 @@
 install/
 cryptpilot/
 cryptpilot-fde/
+cryptpilot-fde-host/
+cryptpilot-fde-guest/
 cryptpilot-crypt/
 cryptpilot-verity/
 *.substvars
