@@ -253,19 +253,21 @@ jobs:
       - name: Install RPM packages
         id: install-rpm
         run: |
-          # Find the RPM path and export it (host path)
-          RPM_PATH=$(ls ./rpm-packages/RPMS/*/cryptpilot-fde-host-[0-9]*.rpm | head -1)
-          echo "Found RPM: ${RPM_PATH}"
-          # Convert to container path (workspace is mounted at /workspace)
-          RPM_PATH_IN_CONTAINER="/workspace/${RPM_PATH#./}"
-          echo "RPM path in container: ${RPM_PATH_IN_CONTAINER}"
-          # Export both host path and container path
-          echo "cryptpilot_fde_rpm=${RPM_PATH}" >> $GITHUB_OUTPUT
-          echo "cryptpilot_fde_rpm_container=${RPM_PATH_IN_CONTAINER}" >> $GITHUB_OUTPUT
+          # Install host RPM in test container
+          HOST_RPM_PATH=$(ls ./rpm-packages/RPMS/*/cryptpilot-fde-host-[0-9]*.rpm | head -1)
+          echo "Found host RPM: ${HOST_RPM_PATH}"
+          HOST_RPM_PATH_IN_CONTAINER="/workspace/${HOST_RPM_PATH#./}"
           docker exec test-container bash -c "
-            yum install -y ${RPM_PATH_IN_CONTAINER}
+            yum install -y ${HOST_RPM_PATH_IN_CONTAINER}
             cryptpilot-fde-host --version
           "
+
+          # Export guest RPM path for convert test (--package installs into guest rootfs)
+          GUEST_RPM_PATH=$(ls ./rpm-packages/RPMS/*/cryptpilot-fde-guest-[0-9]*.rpm | head -1)
+          echo "Found guest RPM: ${GUEST_RPM_PATH}"
+          GUEST_RPM_PATH_IN_CONTAINER="/workspace/${GUEST_RPM_PATH#./}"
+          echo "cryptpilot_fde_rpm=${GUEST_RPM_PATH}" >> $GITHUB_OUTPUT
+          echo "cryptpilot_fde_rpm_container=${GUEST_RPM_PATH_IN_CONTAINER}" >> $GITHUB_OUTPUT
 
       - name: Checkout repository
         uses: actions/checkout@v4
