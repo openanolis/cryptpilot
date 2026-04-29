@@ -89,7 +89,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 1. 读取原始磁盘镜像
 2. 创建带有 dm-verity 的加密 rootfs 分区
 3. 创建带有 dm-integrity 的加密 delta 分区
-4. 将 cryptpilot-fde-guest 安装到 initrd
+4. 在 guest rootfs 中安装 cryptpilot-fde-guest RPM（含 dracut 模块，用于构建 initrd）
 5. 配置引导加载程序以支持加密启动
 6. 将加密磁盘写入输出文件
 

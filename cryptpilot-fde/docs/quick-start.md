@@ -89,7 +89,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 1. Reads the original disk image
 2. Creates encrypted rootfs partition with dm-verity
 3. Creates encrypted delta partition with dm-integrity
-4. Installs cryptpilot-fde-guest into initrd
+4. Installs the cryptpilot-fde-guest RPM into the guest rootfs (includes dracut module for initrd)
 5. Configures boot loader for encrypted boot
 6. Writes the encrypted disk to output file
 
