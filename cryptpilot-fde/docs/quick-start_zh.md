@@ -331,15 +331,18 @@ EOF
 cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 ```
 
-3. **加密磁盘**（假设磁盘是 `/dev/nvme2n1`）：
+3. **加密磁盘镜像**：
 
 ```sh
-cryptpilot-convert --device /dev/nvme2n1 \
+cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
     -c ./config_dir/ \
     --rootfs-passphrase AAAaaawewe222
 ```
 
-4. **重新绑定磁盘**到原始实例并从其启动。
+> **注意**：自 v0.7.0 起，`--device` 选项（就地磁盘加密）已被移除。
+> 请改用 `--in`/`--out` 进行基于文件的转换。
+
+4. **将加密后的磁盘镜像**挂载到原始实例并从中启动。
 
 ## 示例 6：使用 KBS 提供者（生产环境）
 
@@ -371,10 +374,6 @@ EOF
 ```sh
 # 磁盘镜像
 cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
-    -c ./config_dir/ --rootfs-passphrase <实际-rootfs-密钥>
-
-# 真实磁盘
-cryptpilot-convert --device /dev/nvme2n1 \
     -c ./config_dir/ --rootfs-passphrase <实际-rootfs-密钥>
 ```
 

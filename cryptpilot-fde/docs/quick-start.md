@@ -331,15 +331,18 @@ EOF
 cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 ```
 
-3. **Encrypt the disk** (assuming the disk is `/dev/nvme2n1`):
+3. **Encrypt the disk image**:
 
 ```sh
-cryptpilot-convert --device /dev/nvme2n1 \
+cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
     -c ./config_dir/ \
     --rootfs-passphrase AAAaaawewe222
 ```
 
-4. **Re-bind the disk** to the original instance and boot from it.
+> **Note**: The `--device` option for in-place disk encryption was removed since v0.7.0.
+> Use `--in`/`--out` for file-based conversion instead.
+
+4. **Attach the encrypted disk image** to the original instance and boot from it.
 
 ## Example 6: Using KBS Provider (Production)
 
@@ -371,10 +374,6 @@ EOF
 ```sh
 # For disk images
 cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
-    -c ./config_dir/ --rootfs-passphrase <actual-rootfs-key>
-
-# For real disks
-cryptpilot-convert --device /dev/nvme2n1 \
     -c ./config_dir/ --rootfs-passphrase <actual-rootfs-key>
 ```
 
