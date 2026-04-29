@@ -222,10 +222,9 @@ proc::print_help_and_exit() {
     echo "Usage:"
     echo "    $0 --in <input_file> --out <output_file> --config-dir <cryptpilot_config_dir> --rootfs-passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
     echo "    $0 --in <input_file> --out <output_file> --config-dir <cryptpilot_config_dir> --rootfs-no-encryption [--package <rpm_package>...]"
-    echo "    $0 --device <device> --config-dir <cryptpilot_config_dir> --rootfs-passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
     echo ""
     echo "Options:"
-    echo "  -d, --device <device>                                   The device to operate on."
+    echo "  -d, --device <device>                                   Deprecated: operating on devices is no longer supported. Use --in/--out instead."
     echo "      --in <input_file>                                   The input OS image file (vhd or qcow2)."
     echo "      --out <output_file>                                 The output OS image file (vhd or qcow2)."
     echo "  -c, --config-dir <cryptpilot_config_dir>                The directory containing cryptpilot configuration files."
@@ -237,7 +236,6 @@ proc::print_help_and_exit() {
     echo "      --package <rpm_package>                             Specify an RPM package name or path to the RPM file to install in to the disk before"
     echo "  -b, --boot_part_size <size>                             Instead of using the default partition size(512MB), specify the size of the boot partition"
     echo "                                                          converting. This can be specified multiple times."
-    echo "      --wipe-freed-space                                  Wipe the freed space with zero, so that the qemu-img convert would generate smaller image"
     echo "      --uki                                               Generate a Unified Kernel Image image and boot from it instead of boot with GRUB"
     echo "      --uki-append-cmdline <cmdline>                      Append custom command line parameters when generating a UKI image. By default, only essential"
     echo "                                                          parameters are included. This option allows you to extend the kernel command line. The default"
@@ -1126,10 +1124,9 @@ EOF
 
     }
 
-    if [ "${operate_on_device}" = false ]; then
-        # File mode: mount rootfs from source-write, EFI/boot from output
-        local rootfs_mount_point="${workdir}/rootfs"
-        local source_write_rootfs_part="${source_write_device}p${source_rootfs_part_num}"
+    # File mode: mount rootfs from source-write, EFI/boot from output
+    local rootfs_mount_point="${workdir}/rootfs"
+    local source_write_rootfs_part="${source_write_device}p${source_rootfs_part_num}"
 
         # Clear the read-only flag set by tune2fs during shrink, so we can mount rw for dracut
         log::info "Clearing read-only flag on source-write rootfs"
@@ -1201,10 +1198,6 @@ EOF
             fi
         done
         disk::umount_wait_busy "${rootfs_mount_point}"
-    else
-        # Device mode: use run_in_chroot_mounts
-        run_in_chroot_mounts "/dev/mapper/rootfs" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline"
-    fi
 }
 
 step::shrink_rootfs() {
@@ -1244,19 +1237,6 @@ step::shrink_rootfs() {
     echo "    Block count: $after_shrink_block_count"
     echo "    Size in Bytes: $after_shrink_size_in_bytes"
     echo "    Size in Sector: $after_shrink_size_in_sector"
-
-    if [ "${wipe_freed_space}" = true ]; then
-        log::info "Wipe rootfs partition on device ${before_shrink_size_in_bytes} bytes"
-        dd status=progress if=/dev/zero of="${rootfs_orig_part}" count="${before_shrink_size_in_bytes}" iflag=count_bytes bs=64M
-    fi
-
-    # In file mode, do NOT delete the rootfs partition — we need it for dd from source-read.
-    # In device mode, delete it to make room for LUKS/LVM.
-    if [ "${operate_on_device}" = true ]; then
-        log::info "Deleting original rootfs partition"
-        parted "$device" --script -- rm "${rootfs_orig_part_num}"
-        partprobe "$device"
-    fi
 }
 
 step::prepare_output_and_snapshots() {
@@ -1399,13 +1379,8 @@ step::copy_partitions() {
 step::setup_rootfs_lv_with_encrypt() {
     local rootfs_passphrase=$1
 
-    if [ "${operate_on_device}" = false ]; then
-        local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
-        local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
-    else
-        local output_rootfs_part="${rootfs_orig_part}"
-        local source_rootfs_part="${rootfs_read_device}"
-    fi
+    local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
+    local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
 
     # LUKS directly on the target partition
     log::info "Encrypting rootfs partition with LUKS2"
@@ -1429,13 +1404,8 @@ step::setup_rootfs_lv_with_encrypt() {
 }
 
 step::setup_rootfs_lv_without_encrypt() {
-    if [ "${operate_on_device}" = false ]; then
-        local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
-        local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
-    else
-        local output_rootfs_part="${rootfs_orig_part}"
-        local source_rootfs_part="${rootfs_read_device}"
-    fi
+    local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
+    local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
 
     # Copy only the shrunk filesystem (partition may be larger than actual filesystem)
     local fs_block_size fs_block_count rootfs_size
@@ -1447,11 +1417,7 @@ step::setup_rootfs_lv_without_encrypt() {
 }
 
 step::setup_rootfs_hash_lv() {
-    if [ "${operate_on_device}" = false ]; then
-        local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
-    else
-        local source_rootfs_part="${rootfs_read_device}"
-    fi
+    local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
     local rootfs_hash_file_path="${workdir}/rootfs_hash.img"
 
     # Calculate filesystem size for verity (partition may be larger than actual filesystem)
@@ -1468,19 +1434,8 @@ step::setup_rootfs_hash_lv() {
             >"${workdir}/rootfs_hash.roothash"
     cat "${workdir}/rootfs_hash.status"
 
-    if [ "${operate_on_device}" = true ]; then
-        # Device mode: store hash in LVM partition inside the encrypted container
-        local rootfs_hash_size_in_byte
-        rootfs_hash_size_in_byte=$(stat --printf="%s" "${rootfs_hash_file_path}")
-        proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs_hash ]] && disk::dm_remove_all ${device}"
-        proc::exec_subshell_flose_fds lvcreate -n rootfs_hash --size "${rootfs_hash_size_in_byte}"B cryptpilot
-        dd status=progress "if=${rootfs_hash_file_path}" of=/dev/mapper/cryptpilot-rootfs_hash bs=4M
-        rm -f "${rootfs_hash_file_path}"
-        disk::dm_remove_all "${device}"
-    else
-        # File mode: keep hash in workdir (will be included in initrd via --include)
-        log::info "Verity hash file stored at ${rootfs_hash_file_path}"
-    fi
+    # File mode: keep hash in workdir (will be included in initrd via --include)
+    log::info "Verity hash file stored at ${rootfs_hash_file_path}"
 
     # Recording rootfs hash in metadata file
     log::info "Generate metadata file"
@@ -1500,8 +1455,6 @@ main() {
         exit 1
     fi
 
-    local operate_on_device
-    local device
     local input_file
     local output_file
     local config_dir
@@ -1518,14 +1471,13 @@ main() {
     local rootfs_orig_part_num
     local rootfs_orig_part_exist=false
     local source_rootfs_part_num  # Source partition number (unchanged; differs from output when boot partition is added)
-    local wipe_freed_space=false
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
         -d | --device)
-            device="$2"
+            log::warn "--device is deprecated: operating on devices is no longer supported. Use --in/--out instead."
             shift 2
             ;;
         --in)
@@ -1561,7 +1513,7 @@ main() {
             shift 2
             ;;
         --wipe-freed-space)
-            wipe_freed_space=true
+            log::warn "--wipe-freed-space is deprecated: no longer needed with the new qcow2 overlay architecture"
             shift 1
             ;;
         --uki)
@@ -1581,15 +1533,8 @@ main() {
         esac
     done
 
-    if [ -n "${device:-}" ]; then
-        if [ -n "${input_file:-}" ] || [ -n "${output_file:-}" ]; then
-            proc::fatal "Cannot specify both --device and --in/--out"
-        fi
-        operate_on_device=true
-    elif [ -n "${input_file:-}" ] && [ -n "${output_file:-}" ]; then
-        operate_on_device=false
-    else
-        proc::fatal "Must specify either --device or --in/--out"
+    if [ -z "${input_file:-}" ] || [ -z "${output_file:-}" ]; then
+        proc::fatal "Must specify both --in and --out"
     fi
 
     if [ -z "${config_dir:-}" ]; then
@@ -1606,38 +1551,13 @@ main() {
         proc::fatal "Must specify either --rootfs-passphrase or --rootfs-no-encryption"
     fi
 
-    if [ "${operate_on_device}" = true ]; then
-        if [ ! -b "${device}" ]; then
-            proc::fatal "Input device $device does not exist"
-        fi
+    if [ ! -f "$input_file" ]; then
+        proc::fatal "Input file $input_file does not exist"
+    fi
 
-        # In a better way to notice user that the data on the device may be lost if the operation is failed or canceled.
-        log::warn "This operation will overwrite data on the device ($device), and may cause data loss if the operation is failed or canceled. Make sure you have create a backup of the data !!!"
-        while true; do
-            read -r -p "Are you sure you want to continue? (y/n) " yn
-            case $yn in
-            [y]*)
-                log::success "Starting to convert the disk ..."
-                break
-                ;;
-            [n]*)
-                log::info "Operation canceled."
-                exit
-                ;;
-            *) log::warn "Please answer 'y' or 'n'." ;;
-            esac
-        done
-    elif [ "${operate_on_device}" = false ]; then
-        if [ ! -f "$input_file" ]; then
-            proc::fatal "Input file $input_file does not exist"
-        fi
-
-        # Check if the input file is a vhd or qcow2
-        if [[ "$input_file" != *.vhd ]] && [[ "$input_file" != *.qcow2 ]] && [[ "$input_file" != *.img ]]; then
-            proc::fatal "Input file $input_file is not supported, should be a vhd or qcow2 file"
-        fi
-    else
-        proc::print_help_and_exit 1
+    # Check if the input file is a vhd or qcow2
+    if [[ "$input_file" != *.vhd ]] && [[ "$input_file" != *.qcow2 ]] && [[ "$input_file" != *.img ]]; then
+        proc::fatal "Input file $input_file is not supported, should be a vhd, qcow2, or img file"
     fi
 
     log::setup_log_file
@@ -1672,48 +1592,44 @@ main() {
     #
     log::step "[ 1 ] Prepare disk"
 
-    if [ "$operate_on_device" = true ]; then
-        log::info "Using device: $device"
-    else
-        log::info "Using input file: $input_file"
-        qemu-img info "${input_file}"
+    log::info "Using input file: $input_file"
+    qemu-img info "${input_file}"
 
-        # Clean up any leftover overlay files from previous runs
-        for overlay_file in "${input_file}.source-mod" "${input_file}.source-read" "${input_file}.source-write"; do
-            if [ -f "${overlay_file}" ]; then
-                log::warn "Temporary file ${overlay_file} already exists from a previous run, deleting it"
-                rm -f "${overlay_file}"
-            fi
-        done
+    # Clean up any leftover overlay files from previous runs
+    for overlay_file in "${input_file}.source-mod" "${input_file}.source-read" "${input_file}.source-write"; do
+        if [ -f "${overlay_file}" ]; then
+            log::warn "Temporary file ${overlay_file} already exists from a previous run, deleting it"
+            rm -f "${overlay_file}"
+        fi
+    done
 
-        # Try to detect input file format
-        local input_format
-        input_format=$(qemu-img info "${input_file}" | grep '^file format:' | awk '{print $3}')
+    # Try to detect input file format
+    local input_format
+    input_format=$(qemu-img info "${input_file}" | grep '^file format:' | awk '{print $3}')
 
-        # Create source-mod overlay: all modifications (yum, grub, shrink) go here
-        source_mod_file="${input_file}.source-mod"
-        proc::hook_exit "rm -f ${source_mod_file}"
-        qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${source_mod_file}" >/dev/null
-        log::info "Created source-mod overlay: ${source_mod_file}"
+    # Create source-mod overlay: all modifications (yum, grub, shrink) go here
+    source_mod_file="${input_file}.source-mod"
+    proc::hook_exit "rm -f ${source_mod_file}"
+    qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${source_mod_file}" >/dev/null
+    log::info "Created source-mod overlay: ${source_mod_file}"
 
-        # Create output file upfront (same virtual size as input)
-        local virtual_size_bytes
-        virtual_size_bytes=$(qemu-img info --output=json "${input_file}" | grep '"virtual-size"' | grep -o '[0-9]\+')
-        qemu-img create -f qcow2 -o size="${virtual_size_bytes}" "${output_file}" >/dev/null
-        log::info "Created output file: ${output_file} (virtual size: ${virtual_size_bytes} bytes)"
+    # Create output file upfront (same virtual size as input)
+    local virtual_size_bytes
+    virtual_size_bytes=$(qemu-img info --output=json "${input_file}" | grep '"virtual-size"' | grep -o '[0-9]\+')
+    qemu-img create -f qcow2 -o size="${virtual_size_bytes}" "${output_file}" >/dev/null
+    log::info "Created output file: ${output_file} (virtual size: ${virtual_size_bytes} bytes)"
 
-        # Allocate and connect NBD devices one at a time
-        disk::nbd_connect "${source_mod_file}" source_mod_device --discard=on --detect-zeroes=unmap
-        log::info "Mapped source-mod to NBD device ${source_mod_device}:"
-        fdisk -l "${source_mod_device}"
+    # Allocate and connect NBD devices one at a time
+    disk::nbd_connect "${source_mod_file}" source_mod_device --discard=on --detect-zeroes=unmap
+    log::info "Mapped source-mod to NBD device ${source_mod_device}:"
+    fdisk -l "${source_mod_device}"
 
-        disk::nbd_connect "${output_file}" output_device --discard=on --detect-zeroes=unmap
-        log::info "Mapped output to NBD device ${output_device}:"
-        fdisk -l "${output_device}"
+    disk::nbd_connect "${output_file}" output_device --discard=on --detect-zeroes=unmap
+    log::info "Mapped output to NBD device ${output_device}:"
+    fdisk -l "${output_device}"
 
-        # For backward compatibility in partition detection functions, alias device to source_mod_device
-        device="${source_mod_device}"
-    fi
+    # Alias device to source_mod_device for backward compatibility with partition detection functions
+    device="${source_mod_device}"
 
     disk::assert_disk_not_busy "${device}"
 
@@ -1770,37 +1686,21 @@ main() {
     #
     # 5. Preparing output file and snapshots
     #
-    if [ "${operate_on_device}" = false ]; then
-        # File-based mode: use qcow2 overlays
-        log::step "[ 5 ] Preparing output file and snapshots"
-        step::prepare_output_and_snapshots
-    else
-        # Device mode: create read-only loop device on source partition
-        # as a replacement for rootfs.img
-        log::step "[ 5 ] Creating read-only snapshot of source partition"
-        rootfs_read_device=$(losetup -r --sizelimit "${after_shrink_size_in_bytes}" --show -f "${rootfs_orig_part}")
-        log::info "Created read-only loop device: ${rootfs_read_device}"
-        proc::hook_exit "losetup -d ${rootfs_read_device} 2>/dev/null || true"
-    fi
+    log::step "[ 5 ] Preparing output file and snapshots"
+    step::prepare_output_and_snapshots
 
     #
     # 6. Copying EFI and boot partitions
     #
     log::step "[ 6 ] Copying EFI and boot partitions"
-    if [ "${operate_on_device}" = false ]; then
-        step::copy_partitions
-    fi
+    step::copy_partitions
 
     #
     # 7. Setting up rootfs logical volume
     #
     log::step "[ 7 ] Setting up rootfs logical volume"
     if [ "${rootfs_no_encryption}" = false ]; then
-        if [ "${operate_on_device}" = false ]; then
-            step::setup_rootfs_lv_with_encrypt "${rootfs_passphrase}"
-        else
-            step::setup_rootfs_lv_with_encrypt "${rootfs_passphrase}"
-        fi
+        step::setup_rootfs_lv_with_encrypt "${rootfs_passphrase}"
     else
         step::setup_rootfs_lv_without_encrypt
     fi
@@ -1829,27 +1729,18 @@ main() {
     # 10. Cleaning up
     #
     log::step "[ 10 ] Cleaning up"
-    if [ "${operate_on_device}" = true ]; then
-        disk::dm_remove_all "${device}"
-        blockdev --flushbufs "${device}"
-    fi
 
-    if [ "${operate_on_device}" = true ]; then
-        log::success "--------------------------------"
-        log::success "Everything done, the device is ready to use: ${device}"
-    else
-        #
-        # 11. Finalizing
-        #
-        log::step "[ 11 ] Finalizing"
-        qemu-nbd -d "${source_read_device}"
-        qemu-nbd -d "${source_write_device}"
-        qemu-nbd -d "${output_device}"
-        sleep 2
+    #
+    # 11. Finalizing
+    #
+    log::step "[ 11 ] Finalizing"
+    qemu-nbd -d "${source_read_device}"
+    qemu-nbd -d "${source_write_device}"
+    qemu-nbd -d "${output_device}"
+    sleep 2
 
-        log::success "--------------------------------"
-        log::success "Everything done, the new disk image is ready to use: ${output_file}"
-    fi
+    log::success "--------------------------------"
+    log::success "Everything done, the new disk image is ready to use: ${output_file}"
 
     echo
     log::info "You can calculate reference value of the disk with:"
