@@ -5,7 +5,10 @@ This guide walks you through encrypting a bootable OS disk with full disk encryp
 ## Prerequisites
 
 - cryptpilot-fde-host installed on your system
-- A bootable qcow2 disk image, or an unmounted real disk
+- A bootable qcow2 disk image
+
+> **Note**: The `--device` option for in-place disk encryption was removed since v0.7.0.
+> Use `--in`/`--out` for file-based conversion only.
 
 ## Prepare Configuration
 
@@ -289,62 +292,7 @@ Example output:
 }
 ```
 
-## Example 5: Encrypt a Real System Disk
-
-For production systems, you need to encrypt a real disk.
-
-> [!IMPORTANT]
-> **DO NOT encrypt the active disk you are booting from!**
-> 
-> You must:
-> 1. Unbind the disk from the instance
-> 2. Bind it to another instance as a data disk
-> 3. Encrypt it
-> 4. Re-bind it to the original instance
-
-### Steps
-
-1. **Prepare configuration** (same as above):
-
-```sh
-mkdir -p ./config_dir
-cat << EOF > ./config_dir/fde.toml
-[rootfs]
-delta_location = "disk"
-
-[rootfs.encrypt.exec]
-command = "echo"
-args = ["-n", "AAAaaawewe222"]
-
-[delta]
-integrity = true
-
-[delta.encrypt.exec]
-command = "echo"
-args = ["-n", "AAAaaawewe222"]
-EOF
-```
-
-2. **Validate configuration**:
-
-```sh
-cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
-```
-
-3. **Encrypt the disk image**:
-
-```sh
-cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
-    -c ./config_dir/ \
-    --rootfs-passphrase AAAaaawewe222
-```
-
-> **Note**: The `--device` option for in-place disk encryption was removed since v0.7.0.
-> Use `--in`/`--out` for file-based conversion instead.
-
-4. **Attach the encrypted disk image** to the original instance and boot from it.
-
-## Example 6: Using KBS Provider (Production)
+## Example 4: Using KBS Provider (Production)
 
 For production environments, use Key Broker Service with remote attestation.
 
@@ -387,7 +335,7 @@ When booting, the system will:
 4. If verified, KBS returns the decryption key
 5. System decrypts and boots
 
-## Example 7: Using KMS Provider (Cloud-Managed)
+## Example 5: Using KMS Provider (Cloud-Managed)
 
 For Alibaba Cloud users, use KMS for centralized key management.
 
@@ -484,11 +432,10 @@ Common issues:
 
 If `cryptpilot-convert` fails:
 
-1. **Check disk format**: Only qcow2 images are supported for disk images
+1. **Check disk format**: qcow2 and VHD images are supported
 2. **Check disk size**: Ensure enough space for encryption overhead
-3. **For real disks**: Ensure the disk is unmounted and not in use
-4. **Device already exists error**: If you see errors like `/dev/cryptpilot: already exists in filesystem`, it may be leftover from a previous failed convert. Try `dmsetup remove_all` to clean up
-5. **Check logs**: The last convert's detailed log is saved at `/tmp/.cryptpilot-convert.log`
+3. **Device already exists error**: If you see errors like `/dev/cryptpilot: already exists in filesystem`, it may be leftover from a previous failed convert. Try `dmsetup remove_all` to clean up
+4. **Check logs**: The last convert's detailed log is saved at `/tmp/.cryptpilot-convert.log`
 
 ### Boot Failed
 
