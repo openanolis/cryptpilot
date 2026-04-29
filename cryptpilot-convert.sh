@@ -708,12 +708,16 @@ disk::install_deb_on_rootfs() {
 #   $2 - Root filesystem device or image file to mount (e.g., /dev/sda2 or ./root.img)
 #   $3 - EFI partition device path (optional; e.g., /dev/sda1) — only used if efi_part_exist=true
 #   $4 - Boot file/device path (e.g., /dev/sda2 or ./boot.img) — used when boot_part_exist=false
+#   $5 - (Optional) Boot partition override — if set, use this instead of boot_part/boot_file_path
+#   $6 - (Optional) EFI partition override — if set, use this instead of efi_part
 #
 setup_chroot_mounts() {
     local rootfs="$1"
     local rootfs_file_or_part="$2"
     local efi_part="$3"
     local boot_file_path="$4"
+    local boot_override_part="${5:-}"
+    local efi_override_part="${6:-}"
 
     log::info "Preparing chroot environment at $rootfs"
 
@@ -742,12 +746,14 @@ setup_chroot_mounts() {
         esac
     done
 
-    # Mount /boot — either from dedicated partition, from a file/image, or skip in UKI mode if no boot partition
+    # Mount /boot — use override if provided, otherwise follow existing logic
     local boot_target="$rootfs/boot"
     mkdir -p "$boot_target"
     proc::hook_exit "mountpoint -q '$boot_target' && disk::umount_wait_busy '$boot_target'"
 
-    if [ "$boot_part_exist" = "false" ]; then
+    if [ -n "$boot_override_part" ]; then
+        mount "$boot_override_part" "$boot_target"
+    elif [ "$boot_part_exist" = "false" ]; then
         if [ -n "$boot_file_path" ]; then
             # /boot is part of root or stored as a file (e.g., in embedded systems)
             mount "$boot_file_path" "$boot_target"
@@ -758,7 +764,12 @@ setup_chroot_mounts() {
     fi
 
     # Conditionally mount EFI system partition under /boot/efi
-    if [ "$efi_part_exist" = "true" ] && [ -n "$efi_part" ]; then
+    if [ -n "$efi_override_part" ]; then
+        local efi_target="$rootfs/boot/efi"
+        mkdir -p "$efi_target"
+        proc::hook_exit "mountpoint -q '$efi_target' && disk::umount_wait_busy '$efi_target'"
+        mount "$efi_override_part" "$efi_target"
+    elif [ "$efi_part_exist" = "true" ] && [ -n "$efi_part" ]; then
         local efi_target="$rootfs/boot/efi"
         mkdir -p "$efi_target"
         proc::hook_exit "mountpoint -q '$efi_target' && disk::umount_wait_busy '$efi_target'"
@@ -1128,76 +1139,23 @@ EOF
     local rootfs_mount_point="${workdir}/rootfs"
     local source_write_rootfs_part="${source_write_device}p${source_rootfs_part_num}"
 
-        # Clear the read-only flag set by tune2fs during shrink, so we can mount rw for dracut
-        log::info "Clearing read-only flag on source-write rootfs"
-        tune2fs -O ^read-only "${source_write_rootfs_part}" >/dev/null 2>&1 || true
+    # Clear the read-only flag set by tune2fs during shrink, so we can mount rw for dracut
+    log::info "Clearing read-only flag on source-write rootfs"
+    tune2fs -O ^read-only "${source_write_rootfs_part}" >/dev/null 2>&1 || true
 
-        mkdir -p "${rootfs_mount_point}"
+    # Determine boot partition for output device (empty in UKI mode — /boot lives in rootfs)
+    local boot_override_part=""
+    if [ "$uki" = false ] && [ -n "${boot_part_num:-}" ]; then
+        boot_override_part="${output_device}p${boot_part_num}"
+    fi
 
-        # Mount rootfs from source-write
-        mount "${source_write_rootfs_part}" "${rootfs_mount_point}"
-        proc::hook_exit "mountpoint -q ${rootfs_mount_point} && disk::umount_wait_busy ${rootfs_mount_point}"
+    setup_chroot_mounts "${rootfs_mount_point}" "${source_write_rootfs_part}" "${output_device}p${efi_part_num}" "${boot_file_path}" "${boot_override_part}" "${output_device}p${efi_part_num}"
 
-        # Mount required pseudo-filesystems
-        for dir in dev dev/pts proc run sys tmp; do
-            local target="${rootfs_mount_point}/$dir"
-            mkdir -p "$target"
-            proc::hook_exit "mountpoint -q '$target' && disk::umount_wait_busy '$target'"
-            case "$dir" in
-            dev) mount -t devtmpfs devtmpfs "$target" ;;
-            dev/pts) mount -t devpts devpts "$target" ;;
-            proc) mount -t proc proc "$target" ;;
-            run) mount -t tmpfs tmpfs "$target" ;;
-            sys) mount -t sysfs sysfs "$target" ;;
-            tmp) mount -t tmpfs tmpfs "$target" ;;
-            esac
-        done
+    # Run dracut
+    log::info "Executing dracut in chroot"
+    update_initrd_inner "${rootfs_mount_point}" "${uki}" "${uki_append_cmdline}"
 
-        # Mount /boot (from output boot partition or from source-write rootfs)
-        local boot_target="${rootfs_mount_point}/boot"
-        mkdir -p "$boot_target"
-        if [ "$uki" = false ] && [ -n "${boot_part_num:-}" ]; then
-            # Boot partition exists on output - mount it so dracut can find kernel files
-            mount "${output_device}p${boot_part_num}" "$boot_target"
-            proc::hook_exit "mountpoint -q '$boot_target' && disk::umount_wait_busy '$boot_target'"
-        fi
-
-        # Mount EFI from output
-        if [ "$efi_part_exist" = "true" ]; then
-            local efi_target="${rootfs_mount_point}/boot/efi"
-            mkdir -p "$efi_target"
-            mount "${output_device}p${efi_part_num}" "$efi_target"
-            proc::hook_exit "mountpoint -q '$efi_target' && disk::umount_wait_busy '$efi_target'"
-        fi
-
-        # Bind-mount network config
-        for file in resolv.conf hosts; do
-            local src="/etc/$file"
-            local dst="${rootfs_mount_point}/etc/$file"
-            local backup="${dst}.cryptpilot"
-            mv "$dst" "$backup" 2>/dev/null || true
-            touch "$dst"
-            proc::hook_exit "mountpoint -q '$dst' && disk::umount_wait_busy '$dst'"
-            mount -o bind,ro "$(realpath "$src")" "$dst"
-        done
-
-        # Run dracut
-        log::info "Executing dracut in chroot"
-        update_initrd_inner "${rootfs_mount_point}" "${uki}" "${uki_append_cmdline}"
-
-        # Cleanup mounts (reverse order)
-        for dir in etc/hosts etc/resolv.conf boot/efi boot sys run proc dev/pts dev; do
-            disk::umount_wait_busy "${rootfs_mount_point}/$dir" 2>/dev/null || true
-        done
-        for file in resolv.conf hosts; do
-            local dst="${rootfs_mount_point}/etc/$file"
-            local backup="${dst}.cryptpilot"
-            if [ -f "$backup" ]; then
-                rm -f "$dst"
-                mv "$backup" "$dst"
-            fi
-        done
-        disk::umount_wait_busy "${rootfs_mount_point}"
+    cleanup_chroot_mounts "${rootfs_mount_point}"
 }
 
 step::shrink_rootfs() {
