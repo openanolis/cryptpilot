@@ -64,6 +64,7 @@ Depends: dracut,
          systemd,
          kmod,
          util-linux,
+         cloud-guest-utils,
          ${shlibs:Depends},
          ${misc:Depends}
 Recommends: e2fsprogs
