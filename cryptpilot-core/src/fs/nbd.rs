@@ -71,6 +71,8 @@ impl NbdDevice {
         let nbd_dev_num = Self::get_avaliable().await?;
         let nbd_dev_path = nbd_dev_num.to_path();
 
+        tracing::info!("Connecting disk image {disk_img:?} to NBD device {nbd_dev_path:?}");
+
         // The problem is that the nbd device may be use by the kernel (e.g. as mount point or as a device mapper) due to the annoying udev rules. Here we try to add a udev rule to ingore this device.
         let udev_rule = UdevRule::install_ignore_nbd_rule().await?;
 
@@ -88,6 +90,10 @@ impl NbdDevice {
 
         tracing::debug!("Waiting 1 second for the nbd device to be ready");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Ensure partition device nodes are created before proceeding
+        let _ = Command::new("partprobe").arg(&nbd_dev_path).run().await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         let device = Self {
             nbd_dev_num,
