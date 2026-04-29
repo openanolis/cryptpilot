@@ -49,11 +49,14 @@ RUN sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com
 RUN sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf ; if ! grep -q '^max_parallel_downloads=' /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi ;
 
 # Copy RPM from builder
-COPY --from=builder /root/rpmbuild/RPMS/x86_64/cryptpilot-fde-*.rpm /tmp/
+COPY --from=builder /root/rpmbuild/RPMS/x86_64/cryptpilot-fde-host-*.rpm /tmp/
+
+# place guest RPM to root directory
+COPY --from=builder /root/rpmbuild/RPMS/x86_64/cryptpilot-fde-guest-*.rpm /root/
 
 # Install FDE package and its dependencies
 # yum install will automatically resolve and install all dependencies from spec
-RUN yum install -y /tmp/cryptpilot-fde-*.rpm && \
+RUN yum install -y /tmp/cryptpilot-fde-host-*.rpm && \
     yum clean all && \
     rm -rf /var/cache/yum /tmp/*.rpm
 

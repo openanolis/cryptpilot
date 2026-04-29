@@ -45,11 +45,29 @@ graph LR
 从[最新发布版本](https://github.com/openanolis/cryptpilot/releases)安装：
 
 ```sh
-# 安装 cryptpilot-fde 包
-rpm --install cryptpilot-fde-*.rpm
+# host 包：提供 cryptpilot-convert、cryptpilot-enhance 和
+# cryptpilot-fde-host 等构建加密磁盘镜像的工具
+rpm --install cryptpilot-fde-host-*.rpm
+
+# guest 包：包含在目标虚拟机启动时运行的组件
+# 该包会在 cryptpilot-convert 转换过程中自动安装到客户机 rootfs 中
+rpm --install cryptpilot-fde-guest-*.rpm
 ```
 
 或从源码构建（参见[开发指南](../development.md)）。
+
+## 软件包
+
+FDE 功能作为两个独立的软件包交付：
+
+| 软件包 | 用途 | 主要二进制文件 | 运行环境 |
+|--------|------|----------------|----------|
+| `cryptpilot-fde-host` | 磁盘镜像转换和配置 | `cryptpilot-convert`、`cryptpilot-enhance`、`cryptpilot-fde-host` | 构建环境 / 宿主机 |
+| `cryptpilot-fde-guest` | 客户机启动时解密和初始化 | `cryptpilot-fde-guest`、dracut 模块、udev 规则 | 目标虚拟机内部（initrd） |
+
+**host** 包会拉入重量级的构建时依赖（qemu-img、libguestfs），仅在使用 `cryptpilot-convert` 创建加密镜像时需要。
+
+**guest** 包只包含启动时所需的组件，在转换过程中自动安装到客户机 rootfs 中。它不应携带 host 端的重量级依赖。
 
 ## 快速开始
 
@@ -78,37 +96,37 @@ cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
 
 ## 命令
 
-### `cryptpilot-fde show-reference-value`
+### `cryptpilot-fde-host show-reference-value`
 
 显示用于证明的加密参考值：
 
 ```sh
-cryptpilot-fde show-reference-value --disk /path/to/disk.qcow2
+cryptpilot-fde-host show-reference-value --disk /path/to/disk.qcow2
 ```
 
-### `cryptpilot-fde config check`
+### `cryptpilot-fde-host config check`
 
 验证 FDE 配置：
 
 ```sh
-cryptpilot-fde config check --keep-checking
+cryptpilot-fde-host config check --keep-checking
 ```
 
-### `cryptpilot-fde config dump`
+### `cryptpilot-fde-host config dump`
 
 导出配置为 TOML 格式用于 cloud-init：
 
 ```sh
-cryptpilot-fde config dump --disk /dev/sda
+cryptpilot-fde-host config dump --disk /dev/sda
 ```
 
-### `cryptpilot-fde boot-service`
+### `cryptpilot-fde-guest boot-service`
 
 由 systemd 在启动期间使用的内部命令（请勿手动调用）：
 
 ```sh
-cryptpilot-fde boot-service --stage before-sysroot
-cryptpilot-fde boot-service --stage after-sysroot
+cryptpilot-fde-guest boot-service --stage before-sysroot
+cryptpilot-fde-guest boot-service --stage after-sysroot
 ```
 
 ## 辅助脚本

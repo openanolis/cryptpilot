@@ -672,8 +672,8 @@ Options:
     --help          Show this help message
 
 Examples:
-    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --bootloader uki --rootfs-enc --delta-location ram
-    $(basename "$0") --rpm ./cryptpilot-fde-*.rpm --bootloader grub --rootfs-noenc --delta-location disk --input /path/to/image.qcow2
+    $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location ram
+    $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader grub --rootfs-noenc --delta-location disk --input /path/to/image.qcow2
 EOF
 }
 

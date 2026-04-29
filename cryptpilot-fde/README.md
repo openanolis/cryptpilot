@@ -45,11 +45,30 @@ graph LR
 Install from the [latest release](https://github.com/openanolis/cryptpilot/releases):
 
 ```sh
-# Install cryptpilot-fde package
-rpm --install cryptpilot-fde-*.rpm
+# Host package: provides cryptpilot-convert, cryptpilot-enhance, and
+# cryptpilot-fde-host for building encrypted disk images
+rpm --install cryptpilot-fde-host-*.rpm
+
+# Guest package: contains components that run inside the target VM at boot
+# time (initrd decryption, dm-verity, LVM, overlayfs). This package is
+# automatically installed into the guest rootfs by cryptpilot-convert.
+rpm --install cryptpilot-fde-guest-*.rpm
 ```
 
 Or build from source (see [Development Guide](../development.md)).
+
+## Packages
+
+The FDE functionality is delivered as two separate packages:
+
+| Package | Purpose | Key Binaries | Where It Runs |
+|---------|---------|--------------|---------------|
+| `cryptpilot-fde-host` | Disk image conversion and configuration | `cryptpilot-convert`, `cryptpilot-enhance`, `cryptpilot-fde-host` | Build environment / host machine |
+| `cryptpilot-fde-guest` | Guest boot-time decryption and setup | `cryptpilot-fde-guest`, dracut module, udev rules | Inside the target VM (initrd) |
+
+The **host** package pulls in heavy build-time dependencies (qemu-img, libguestfs) and is only used when creating encrypted images via `cryptpilot-convert`.
+
+The **guest** package contains only the components needed at boot time and is installed into the guest rootfs during the conversion process. It should not carry the heavy host-side dependencies.
 
 ## Quick Start
 
@@ -78,37 +97,37 @@ See [Configuration Guide](docs/configuration.md) for detailed options.
 
 ## Commands
 
-### `cryptpilot-fde show-reference-value`
+### `cryptpilot-fde-host show-reference-value`
 
 Display cryptographic reference values for attestation:
 
 ```sh
-cryptpilot-fde show-reference-value --disk /path/to/disk.qcow2
+cryptpilot-fde-host show-reference-value --disk /path/to/disk.qcow2
 ```
 
-### `cryptpilot-fde config check`
+### `cryptpilot-fde-host config check`
 
 Validate FDE configuration:
 
 ```sh
-cryptpilot-fde config check --keep-checking
+cryptpilot-fde-host config check --keep-checking
 ```
 
-### `cryptpilot-fde config dump`
+### `cryptpilot-fde-host config dump`
 
 Export configuration as TOML for cloud-init:
 
 ```sh
-cryptpilot-fde config dump --disk /dev/sda
+cryptpilot-fde-host config dump --disk /dev/sda
 ```
 
-### `cryptpilot-fde boot-service`
+### `cryptpilot-fde-guest boot-service`
 
 Internal commands used by systemd during boot (do not call manually):
 
 ```sh
-cryptpilot-fde boot-service --stage before-sysroot
-cryptpilot-fde boot-service --stage after-sysroot
+cryptpilot-fde-guest boot-service --stage before-sysroot
+cryptpilot-fde-guest boot-service --stage after-sysroot
 ```
 
 ## Helper Scripts

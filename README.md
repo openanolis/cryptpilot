@@ -14,14 +14,14 @@ cryptpilot is split into specialized packages:
 
 **Full Disk Encryption** - Encrypts entire system disks with boot integrity protection.
 
-- Encrypts rootfs and data partitions
-- dm-verity integrity protection
-- Remote attestation and measurement for secure key retrieval
-- Initrd integration for early boot decryption
+The FDE module is split into two packages:
+
+- **`cryptpilot-fde-host`** — Host-side tools for disk image conversion and configuration. Used only during the `cryptpilot-convert` / `cryptpilot-enhance` workflow. Includes heavy dependencies (qemu-img, libguestfs) that should not be shipped in guest images.
+- **`cryptpilot-fde-guest`** — Guest-side boot components. Runs inside the target VM during boot (initrd) to set up dm-crypt, dm-verity, LVM, and overlayfs. This is the package installed on the final guest disk image.
 
 **Quick Start:**
 ```sh
-# Encrypt a disk image
+# Encrypt a disk image (requires cryptpilot-fde-host)
 cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
     -c ./config_dir/ --rootfs-passphrase MyPassword
 ```
@@ -68,7 +68,12 @@ Download from [latest release](https://github.com/openanolis/cryptpilot/releases
 
 ```sh
 # For full disk encryption
-rpm --install cryptpilot-fde-*.rpm
+# The host package provides tools (cryptpilot-convert, cryptpilot-enhance) for building encrypted images
+rpm --install cryptpilot-fde-host-*.rpm
+
+# The guest package contains components running inside the target VM at boot time
+# It is installed into the guest rootfs by cryptpilot-convert automatically
+rpm --install cryptpilot-fde-guest-*.rpm
 
 # For runtime volume encryption
 rpm --install cryptpilot-crypt-*.rpm

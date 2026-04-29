@@ -14,14 +14,14 @@ cryptpilot 分为多个专用软件包：
 
 **全盘加密** - 加密整个系统磁盘并提供启动完整性保护。
 
-- 加密 rootfs 和数据分区
-- dm-verity 完整性保护
-- 通过远程证明安全获取密钥
-- 集成到 initrd 实现早期启动解密
+FDE 模块拆分为两个软件包：
+
+- **`cryptpilot-fde-host`** — 主机端工具，用于磁盘镜像转换和配置。仅在 `cryptpilot-convert` / `cryptpilot-enhance` 工作流中使用。包含重量级依赖（qemu-img、libguestfs），不应部署到客户机镜像中。
+- **`cryptpilot-fde-guest`** — 客户机启动时组件。在目标虚拟机内部运行（initrd 阶段），用于设置 dm-crypt、dm-verity、LVM 和 overlayfs。这是安装到最终客户机磁盘镜像中的包。
 
 **快速开始：**
 ```sh
-# 加密磁盘镜像
+# 加密磁盘镜像（需要 cryptpilot-fde-host）
 cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
     -c ./config_dir/ --rootfs-passphrase MyPassword
 ```
@@ -68,7 +68,12 @@ mount /dev/mapper/data0 /mnt/data0
 
 ```sh
 # 用于全盘加密
-rpm --install cryptpilot-fde-*.rpm
+# host 包提供 cryptpilot-convert、cryptpilot-enhance 等构建加密镜像的工具
+rpm --install cryptpilot-fde-host-*.rpm
+
+# guest 包包含目标虚拟机启动时运行的组件
+# 它会在 cryptpilot-convert 转换过程中自动安装到客户机 rootfs 中
+rpm --install cryptpilot-fde-guest-*.rpm
 
 # 用于运行时卷加密
 rpm --install cryptpilot-crypt-*.rpm

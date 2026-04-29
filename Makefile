@@ -118,9 +118,10 @@ rpm-build-in-docker-aarch64:
 
 .PHONE: rpm-install
 rpm-install: rpm-build
-	yum remove cryptpilot cryptpilot-fde cryptpilot-crypt cryptpilot-verity -y || true
+	yum remove cryptpilot cryptpilot-fde cryptpilot-fde-host cryptpilot-fde-guest cryptpilot-crypt cryptpilot-verity -y || true
 	ls -t /root/rpmbuild/RPMS/$(ARCH)/cryptpilot-[0-9]*.rpm | head -n 1 | xargs rpm --install
-	ls -t /root/rpmbuild/RPMS/$(ARCH)/cryptpilot-fde-*.rpm | head -n 1 | xargs rpm --install
+	ls -t /root/rpmbuild/RPMS/$(ARCH)/cryptpilot-fde-host-*.rpm | head -n 1 | xargs rpm --install
+	ls -t /root/rpmbuild/RPMS/$(ARCH)/cryptpilot-fde-guest-*.rpm | head -n 1 | xargs rpm --install
 	ls -t /root/rpmbuild/RPMS/$(ARCH)/cryptpilot-crypt-*.rpm | head -n 1 | xargs rpm --install
 	ls -t /root/rpmbuild/RPMS/$(ARCH)/cryptpilot-verity-*.rpm | head -n 1 | xargs rpm --install
 
