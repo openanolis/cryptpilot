@@ -191,8 +191,6 @@ popd
 pushd src/
 install -d -p %{buildroot}%{_prefix}/bin
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-host/bin/cryptpilot-fde-host %{buildroot}%{_prefix}/bin/cryptpilot-fde-host
-# Backwards compatibility symlink: cryptpilot-fde -> cryptpilot-fde-host
-ln -sf cryptpilot-fde-host %{buildroot}%{_prefix}/bin/cryptpilot-fde
 # Install FDE enhancement scripts (host only)
 install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
 install -p -m 755 cryptpilot-enhance.sh %{buildroot}%{_prefix}/bin/cryptpilot-enhance
@@ -251,7 +249,6 @@ rm -rf %{buildroot}
 
 %files -n cryptpilot-fde-host
 %license src/LICENSE
-%{_prefix}/bin/cryptpilot-fde
 %{_prefix}/bin/cryptpilot-fde-host
 %{_prefix}/bin/cryptpilot-convert
 %{_prefix}/bin/cryptpilot-enhance
