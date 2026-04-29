@@ -55,7 +55,7 @@ In CryptPilot, data is encrypted in units of volumes. The confidential system di
 
 The core components of the system disk encryption solution include:
 - **cryptpilot-convert**: Prepares encrypted disk layout during the image conversion phase
-- **cryptpilot-fde-host**: Performs decryption and mounting operations during system boot
+- **cryptpilot-fde-guest**: Performs decryption and mounting operations during system boot
 
 The entire process is divided into the image preparation phase and the system startup phase. The image preparation phase completes disk layout conversion in an offline environment, while the system startup phase completes device activation and filesystem mounting on each boot.
 
