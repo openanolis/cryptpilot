@@ -115,10 +115,12 @@ Requires: dracut
 Requires: lvm2
 Requires: util-linux
 Requires: veritysetup
+# Partition expansion for cloud environments
+Requires: cloud-utils-growpart
 # Filesystem tools needed during boot (tune2fs, resize2fs)
 Recommends: e2fsprogs
 
-# No qemu-img, libguestfs-tools-c, cloud-utils-growpart in guest image
+# No qemu-img, libguestfs-tools-c in guest image
 
 Provides: cryptpilot-fde = %{version}-%{release}
 Obsoletes: cryptpilot-fde < %{version}-%{release}
