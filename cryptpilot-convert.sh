@@ -1238,6 +1238,13 @@ step::prepare_output_and_snapshots() {
     if [ "$uki" = true ]; then
         local uki_efi_size="512M"
         log::info "UKI mode: resizing EFI partition to ${uki_efi_size}"
+
+        # Save partition UUIDs before parted modifies them.
+        # parted rm/mkpart generates new UUIDs, losing the originals.
+        local saved_efi_uuid saved_rootfs_uuid
+        saved_efi_uuid=$(blkid -s PART_UUID -o value "${output_device}p${efi_part_num}" 2>/dev/null || true)
+        saved_rootfs_uuid=$(blkid -s PART_UUID -o value "${output_device}p${rootfs_orig_part_num}" 2>/dev/null || true)
+
         # Must delete rootfs partition first to avoid overlap, then resize EFI,
         # then recreate rootfs. All partition table modifications must complete
         # BEFORE formatting the EFI partition, because partprobe re-reading the
@@ -1254,36 +1261,16 @@ step::prepare_output_and_snapshots() {
         log::info "Recreating rootfs partition from sector ${rootfs_new_start} to end"
         parted "${output_device}" --script -- mkpart primary ext4 "${rootfs_new_start}s" '100%'
 
-        # Now that all partition table modifications are done, format the EFI
-        # partition and copy EFI content from the source immediately.
-        # This must happen before any further parted operations that would
-        # trigger partprobe (which invalidates the kernel page cache).
-        local efi_part_size
-        efi_part_size=$(parted "${output_device}" --script -- unit B print | awk '/^ *'"${efi_part_num}"' / {gsub(/B$/,"",$4); print $4; exit}')
-        log::info "Formatting EFI partition with FAT32 (${efi_part_size} bytes)"
+        # Restore original partition UUIDs
+        if [ -n "$saved_efi_uuid" ]; then
+            log::info "Restoring EFI partition UUID: $saved_efi_uuid"
+            sgdisk -u "${efi_part_num}:${saved_efi_uuid}" "${output_device}" >/dev/null 2>&1 || true
+        fi
+        if [ -n "$saved_rootfs_uuid" ]; then
+            log::info "Restoring rootfs partition UUID: $saved_rootfs_uuid"
+            sgdisk -u "${rootfs_orig_part_num}:${saved_rootfs_uuid}" "${output_device}" >/dev/null 2>&1 || true
+        fi
 
-        # Run partprobe to make the new partition visible
-        partprobe "${output_device}"
-        udevadm settle --timeout=10
-
-        # Format the EFI partition
-        mkfs.vfat -F 32 "${output_device}p${efi_part_num}" >/dev/null
-
-        # Immediately mount source EFI and output EFI, then copy content
-        local src_efi_mount="${workdir}/src_efi_prepare"
-        local dst_efi_mount="${workdir}/dst_efi_prepare"
-        mkdir -p "$src_efi_mount" "$dst_efi_mount"
-        mount -o ro "${source_read_device}p${efi_part_num}" "$src_efi_mount"
-        mount "${output_device}p${efi_part_num}" "$dst_efi_mount"
-        cp -a "$src_efi_mount/." "$dst_efi_mount/"
-        disk::umount_wait_busy "$dst_efi_mount"
-        disk::umount_wait_busy "$src_efi_mount"
-        rmdir "$src_efi_mount" "$dst_efi_mount" 2>/dev/null || true
-
-        # Explicit sync to flush NBD page cache to the qcow2 file.
-        sync
-
-        log::info "EFI partition formatted and content copied"
     fi
 
     # If source had no separate boot partition, we need to create one on output
@@ -1292,6 +1279,11 @@ step::prepare_output_and_snapshots() {
         # Delete the rootfs partition first to free up space for the new boot partition.
         # The data is safe on source-read — we only modify the output partition table.
         log::info "Deleting rootfs partition on output to make room for boot partition"
+
+        # Save rootfs partition UUID before parted deletes it.
+        local saved_rootfs_uuid
+        saved_rootfs_uuid=$(blkid -s PART_UUID -o value "${output_device}p${rootfs_orig_part_num}" 2>/dev/null || true)
+
         parted "${output_device}" --script -- rm "${rootfs_orig_part_num}"
         partprobe "${output_device}"
         udevadm settle --timeout=10
@@ -1333,6 +1325,12 @@ step::prepare_output_and_snapshots() {
         # Set boot flag
         parted "${output_device}" --script -- set "${boot_part_num}" boot on
 
+        # Restore original rootfs partition UUID
+        if [ -n "$saved_rootfs_uuid" ]; then
+            log::info "Restoring rootfs partition UUID: $saved_rootfs_uuid"
+            sgdisk -u "${rootfs_orig_part_num}:${saved_rootfs_uuid}" "${output_device}" >/dev/null 2>&1 || true
+        fi
+
         # Format the newly created boot partition with ext4
         log::info "Formatting output boot partition"
         mkfs.ext4 -F "${output_device}p${boot_part_num}" >/dev/null 2>&1
@@ -1341,12 +1339,8 @@ step::prepare_output_and_snapshots() {
         # Track output boot partition number separately from the original source detection.
         # boot_part_exist reflects whether the SOURCE had a boot partition.
     else
-        # In UKI mode, EFI was already formatted and populated above;
-        # skip partprobe to avoid invalidating its page cache.
-        if [ "$uki" = false ]; then
-            partprobe "${output_device}"
-            udevadm settle --timeout=10
-        fi
+        partprobe "${output_device}"
+        udevadm settle --timeout=10
     fi
 
     log::info "source-read device: ${source_read_device}"
@@ -1357,14 +1351,9 @@ step::prepare_output_and_snapshots() {
 
 step::copy_partitions() {
 
-    # Copy EFI partition
-    # In UKI mode, the EFI partition was already formatted and populated in
-    # step::prepare_output_and_snapshots.
-    if [ "$uki" = false ]; then
-        # dd EFI partition (preserve UUID, labels, all metadata)
-        log::info "Copying EFI partition"
-        dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
-    fi
+    # dd EFI partition (preserve UUID, labels, all metadata)
+    log::info "Copying EFI partition"
+    dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
 
     # Populate the output boot partition.
     # Two cases:
@@ -1796,12 +1785,8 @@ main() {
     vgchange -an cryptpilot 2>/dev/null || true
     sleep 1
 
-    # Flush pending writes
-    sync
-
-    # Save EFI content to a temp file before NBD disconnect.
-    # NBD disconnect can lose FAT32 filesystem data written through mount+copy.
-    # We restore it afterwards using guestfish which writes directly to qcow2.
+    # Back up EFI content before NBD disconnect — dracut may have written
+    # BOOTX64.EFI (UKI mode) which must be preserved.
     local efi_backup="${workdir}/efi_backup.tar"
     local efi_backup_mount="${workdir}/efi_backup_mnt"
     mkdir -p "$efi_backup_mount"
@@ -1811,11 +1796,12 @@ main() {
         rmdir "$efi_backup_mount" 2>/dev/null || true
     fi
 
-    qemu-nbd -d "${output_device}"
-    sleep 3
+    qemu-nbd -d "${output_device}" 2>/dev/null || true
+    qemu-nbd -d "${source_read_device}" 2>/dev/null || true
+    qemu-nbd -d "${source_write_device}" 2>/dev/null || true
 
-    # Restore EFI partition using guestfish, which writes directly to the qcow2
-    # file and handles sync properly on close, avoiding the NBD data loss issue.
+    # Restore EFI partition using guestfish, which writes directly to qcow2
+    # and avoids the NBD writeback-cache data-loss issue on disconnect.
     if [ -f "$efi_backup" ]; then
         local extract_dir="${workdir}/efi_extract"
         mkdir -p "$extract_dir"
@@ -1836,9 +1822,6 @@ GUESTFISH_EOF
 
         rm -rf "$extract_dir"
     fi
-
-    qemu-nbd -d "${source_read_device}" 2>/dev/null || true
-    qemu-nbd -d "${source_write_device}" 2>/dev/null || true
 
     log::success "--------------------------------"
     log::success "Everything done, the new disk image is ready to use: ${output_file}"
