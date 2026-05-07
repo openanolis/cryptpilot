@@ -39,13 +39,56 @@ test: clean-test
 	@cargo run -- dump $(TEST_DATA_DIR) --print-metadata
 	@echo ""
 	
-	@echo "Step 5: Running verify command..."
+	@echo "Step 4b: Testing format with labels..."
+	@cargo run -- format $(TEST_DATA_DIR) --hash-output $(TEST_HASH_FILE) --force --label env=test --label version=1.0
+	@echo "✓ Format with labels completed"
+	@echo ""
+
+	@echo "Step 4c: Testing dump --print-labels..."
+	@cargo run -- dump $(TEST_DATA_DIR) --print-labels
+	@echo ""
+
+	@echo "Step 4d: Testing dump --print-label for specific key..."
+	@ENV_VAL=$$(cargo run -- dump $(TEST_DATA_DIR) --print-label env 2>/dev/null); \
+	if [ "$$ENV_VAL" = "test" ]; then \
+		echo "✓ Label 'env' value correct: $$ENV_VAL"; \
+	else \
+		echo "✗ Label 'env' value mismatch! Expected 'test', got '$$ENV_VAL'"; \
+		exit 1; \
+	fi
+	@echo ""
+
+	@echo "Step 4e: Testing dump --print-label for nonexistent key..."
+	@if cargo run -- dump $(TEST_DATA_DIR) --print-label nonexistent 2>/dev/null; then \
+		echo "✗ Should have failed for nonexistent label key"; \
+		exit 1; \
+	else \
+		echo "✓ Nonexistent label key correctly rejected"; \
+	fi
+	@echo ""
+
+	@echo "Step 4f: Verifying labels do not affect root hash..."
+	@cargo run -- format $(TEST_DATA_DIR) --hash-output $(TEST_HASH_FILE) --force
+	@HASH_NO_LABEL=$$(cat $(TEST_HASH_FILE)); \
+	cargo run -- format $(TEST_DATA_DIR) --hash-output $(TEST_DIR)/hash_with_labels.txt --force --label env=test --label version=1.0 2>/dev/null; \
+	HASH_WITH_LABEL=$$(cat $(TEST_DIR)/hash_with_labels.txt); \
+	if [ "$$HASH_NO_LABEL" = "$$HASH_WITH_LABEL" ]; then \
+		echo "✓ Root hash is identical with and without labels"; \
+	else \
+		echo "✗ Root hash differs! Labels should not affect hash."; \
+		echo "  Without labels: $$HASH_NO_LABEL"; \
+		echo "  With labels: $$HASH_WITH_LABEL"; \
+		exit 1; \
+	fi
+	@echo ""
+
+	@echo "Step 9: Running verify command..."
 	@HASH=$$(cat $(TEST_HASH_FILE)); \
 	cargo run -- verify $(TEST_DATA_DIR) $$HASH
 	@echo "✓ Verification passed!"
 	@echo ""
 	
-	@echo "Step 6: Testing verification failure (modified file)..."
+	@echo "Step 10: Testing verification failure (modified file)..."
 	@echo "modified content" > $(TEST_DATA_DIR)/file1.txt
 	@HASH=$$(cat $(TEST_HASH_FILE)); \
 	if cargo run -- verify $(TEST_DATA_DIR) $$HASH 2>&1; then \
@@ -56,12 +99,12 @@ test: clean-test
 	fi
 	@echo ""
 	
-	@echo "Step 7: Restoring original file for mount test..."
+	@echo "Step 11: Restoring original file for mount test..."
 	@echo "test file 1 content" > $(TEST_DATA_DIR)/file1.txt
 	@echo "✓ File restored"
 	@echo ""
 
-	@echo "Step 8: Creating bind mount for tampering test later..."
+	@echo "Step 12: Creating bind mount for tampering test later..."
 	@echo "  → Creating bind mount to access underlying data during verity mount..."
 	@mkdir -p $(TEST_BIND_DIR)
 	@mount --bind $(TEST_DATA_DIR) $(TEST_BIND_DIR) 2>/dev/null || { echo "✗ Failed to create bind mount (may need sudo)"; exit 1; }
@@ -71,7 +114,7 @@ test: clean-test
 
 
 	
-	@echo "Step 9: Testing open command (in-place mount with built-in FUSE)..."
+	@echo "Step 13: Testing open command (in-place mount with built-in FUSE)..."
 	@HASH=$$(cat $(TEST_HASH_FILE)); \
 	echo "  → Mounting verity-fuse in-place on $(TEST_DATA_DIR)..."; \
 	cargo run -- open $(TEST_DATA_DIR) $(TEST_DATA_DIR) $$HASH 2>&1 & \
@@ -110,7 +153,7 @@ test: clean-test
 	fi
 	@echo ""
 	
-	@echo "Step 10: Unmounting for tampering detection test..."
+	@echo "Step 14: Unmounting for tampering detection test..."
 	@if mountpoint -q $(TEST_DATA_DIR) 2>/dev/null; then \
 		echo "  → Unmounting in-place mount for tamper test..."; \
 		fusermount -u $(TEST_DATA_DIR) 2>/dev/null || umount $(TEST_DATA_DIR) 2>/dev/null || true; \
@@ -118,7 +161,7 @@ test: clean-test
 	fi
 	@echo ""
 	
-	@echo "Step 11: Testing tampering detection (cache disabled, using bind mount)..."
+	@echo "Step 15: Testing tampering detection (cache disabled, using bind mount)..."
 	@echo "  → Tampering with underlying data via bind mount..."
 	@echo "TAMPERED DATA" > $(TEST_BIND_DIR)/file1.txt
 	@echo "  → Opening with --block-cache-capacity 0 to disable cache for tamper detection..."
@@ -166,7 +209,7 @@ test: clean-test
 	@rmdir $(TEST_BIND_DIR) 2>/dev/null || true
 	@echo ""
 	
-	@echo "Step 12: Unmounting after tampering test..."
+	@echo "Step 16: Unmounting after tampering test..."
 	@if mountpoint -q $(TEST_DATA_DIR) 2>/dev/null; then \
 		echo "  → Unmounting..."; \
 		fusermount -u $(TEST_DATA_DIR) 2>/dev/null || cargo run -- close $(TEST_DATA_DIR) 2>/dev/null || true; \

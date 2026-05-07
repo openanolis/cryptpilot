@@ -104,16 +104,20 @@ pub struct DumpOptions {
     pub metadata: Option<std::path::PathBuf>,
 
     /// Print full metadata
-    #[arg(long, required_unless_present_any = ["print_root_hash", "print_label"])]
+    #[arg(long, required_unless_present_any = ["print_root_hash", "print_label", "print_labels"])]
     pub print_metadata: bool,
 
     /// Print only the root hash instead of full metadata
-    #[arg(long, required_unless_present_any = ["print_metadata", "print_label"])]
+    #[arg(long, required_unless_present_any = ["print_metadata", "print_label", "print_labels"])]
     pub print_root_hash: bool,
 
     /// Print the value of a specific label key
     #[arg(long)]
     pub print_label: Option<String>,
+
+    /// Print all labels
+    #[arg(long, required_unless_present_any = ["print_metadata", "print_root_hash", "print_label"])]
+    pub print_labels: bool,
 }
 
 #[derive(Parser, Debug)]

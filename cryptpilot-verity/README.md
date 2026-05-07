@@ -34,6 +34,7 @@ The CLI interface and subcommand design are intentionally similar to the `verity
   - POSIX metadata such as permissions bits, ownership (`uid`, `gid`), and timestamps.
   - Mount options, kernel-side permission checks, or higher-level application logic.
   - Integrity of files or directories that were never included in the formatted metadata; in practice such paths are ignored and do not appear in the exposed filesystem view. Likewise, if a file that was included in the metadata is later removed from the underlying filesystem, this is treated as absence rather than active tampering and does not by itself trigger an integrity failure.
+  - Labels (key-value metadata attached during format). Labels are stored in the metadata file but are not integrity-protected by the root hash.
   
 ## Security Notes
 
@@ -73,7 +74,7 @@ All commands are subcommands of the `cryptpilot-verity` binary. Run `cryptpilot-
 ### `format`
 
 ```bash
-cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] [--force] --hash-output <HASH_OUTPUT>
+cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] [--force] [--label key=value]... --hash-output <HASH_OUTPUT>
 ```
 
 - **Purpose**: Generate fs-verity metadata and the root hash for a given data directory.
@@ -82,6 +83,7 @@ cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] [--force] --has
   - `--metadata, -m` **[optional]**: Path to the output metadata file (FlatBuffers-encoded). If not specified, defaults to `<DATA_DIR>/cryptpilot-verity.metadata.fb`.
   - `--hash-output`: Path to write the root hash (use `-` for stdout).
   - `--force` **[optional]**: Overwrite an existing metadata file at the target path. Intended for re-formatting or third-party auditing of an already formatted directory.
+  - `--label key=value` **[optional, repeatable]**: Attach a label to the metadata. Labels are key-value pairs (Docker-style) stored in the metadata file. Can be specified multiple times. Labels are NOT included in the root hash calculation.
 
 ### `verify`
 
@@ -101,6 +103,8 @@ cryptpilot-verity verify <DATA_DIR> <HASH> [--metadata <METADATA_PATH>] [--metad
 ```bash
 cryptpilot-verity dump <DATA_DIR> --print-metadata
 cryptpilot-verity dump --metadata <METADATA_PATH> --print-root-hash
+cryptpilot-verity dump <DATA_DIR> --print-label <KEY>
+cryptpilot-verity dump <DATA_DIR> --print-labels
 ```
 
 - **Purpose**: Inspect metadata and/or print only the root hash.
@@ -109,6 +113,8 @@ cryptpilot-verity dump --metadata <METADATA_PATH> --print-root-hash
   - `--metadata` **[optional]**: Path to the metadata file to read directly. Either `--metadata` or `<DATA_DIR>` must be specified (not both required).
   - `--print-metadata`: Print the full decoded metadata (must specify either this or `--print-root-hash`).
   - `--print-root-hash`: Print only the root hash (must specify either this or `--print-metadata`).
+  - `--print-label <KEY>`: Print the value of a specific label key. Exits with an error if the key is not found.
+  - `--print-labels`: Print all labels (one `key=value` per line). Prints `(no labels)` if no labels were set during format.
 
 ### `open`
 

@@ -33,6 +33,7 @@ CLI 接口和子命令设计有意与 `veritysetup` 工具类似，以便熟悉 
   - POSIX 元数据，如权限位、所有权（`uid`、`gid`）和时间戳。
   - 挂载选项、内核端权限检查或更高级别的应用程序逻辑。
   - 从未包含在格式化元数据中的文件或目录的完整性；实际上，此类路径会被忽略，并且不会出现在公开的文件系统视图中。同样，如果元数据中包含的文件后来从底层文件系统中删除，这将被视为不存在而不是主动篡改，本身不会触发完整性失败。
+  - 标签（格式时附加的键值元数据）。标签存储在元数据文件中但不受 root hash 完整性保护。
   
 ## 安全注意事项
 
@@ -72,7 +73,7 @@ CLI 接口和子命令设计有意与 `veritysetup` 工具类似，以便熟悉 
 ### `format`
 
 ```bash
-cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] [--force] --hash-output <HASH_OUTPUT>
+cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] [--force] [--label key=value]... --hash-output <HASH_OUTPUT>
 ```
 
 - **目的**：为给定的数据目录生成 fs-verity 元数据和根哈希。
@@ -81,6 +82,7 @@ cryptpilot-verity format <DATA_DIR> [--metadata <METADATA_PATH>] [--force] --has
   - `--metadata, -m` **[可选]**：输出元数据文件（FlatBuffers 编码）的路径。如果未指定，默认为 `<DATA_DIR>/cryptpilot-verity.metadata.fb`。
   - `--hash-output`：写入根哈希的路径（使用 `-` 表示标准输出）。
   - `--force` **[可选]**：覆盖目标路径上的现有元数据文件。用于重新格式化或对已格式化目录进行第三方审计。
+  - `--label key=value` **[可选，可重复]**：为元数据附加标签。标签是键值对（Docker 风格），存储在元数据文件中但不参与 root hash 计算。
 
 ### `verify`
 
@@ -100,6 +102,8 @@ cryptpilot-verity verify <DATA_DIR> <HASH> [--metadata <METADATA_PATH>] [--metad
 ```bash
 cryptpilot-verity dump <DATA_DIR> --print-metadata
 cryptpilot-verity dump --metadata <METADATA_PATH> --print-root-hash
+cryptpilot-verity dump <DATA_DIR> --print-label <KEY>
+cryptpilot-verity dump <DATA_DIR> --print-labels
 ```
 
 - **目的**：检查元数据和/或仅打印根哈希。
@@ -108,6 +112,8 @@ cryptpilot-verity dump --metadata <METADATA_PATH> --print-root-hash
   - `--metadata` **[可选]**：直接读取的元数据文件路径。必须指定 `--metadata` 或 `<DATA_DIR>` 之一（不需要同时指定两者）。
   - `--print-metadata`：打印完整的解码元数据（必须指定此项或 `--print-root-hash`）。
   - `--print-root-hash`：仅打印根哈希（必须指定此项或 `--print-metadata`）。
+  - `--print-label <KEY>`：输出指定标签键的值。如果键不存在则报错退出。
+  - `--print-labels`：输出所有标签（每行一个 `key=value`）。如果未设置标签则输出 `(no labels)`。
 
 ### `open`
 
