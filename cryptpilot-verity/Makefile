@@ -110,26 +110,53 @@ test: clean-test
 	fi
 	@echo ""
 	
-	@echo "Step 10: Testing tampering detection (using bind mount)..."
+	@echo "Step 10: Unmounting for tampering detection test..."
+	@if mountpoint -q $(TEST_DATA_DIR) 2>/dev/null; then \
+		echo "  → Unmounting in-place mount for tamper test..."; \
+		fusermount -u $(TEST_DATA_DIR) 2>/dev/null || umount $(TEST_DATA_DIR) 2>/dev/null || true; \
+		sleep 1; \
+	fi
+	@echo ""
+	
+	@echo "Step 11: Testing tampering detection (cache disabled, using bind mount)..."
 	@echo "  → Tampering with underlying data via bind mount..."
 	@echo "TAMPERED DATA" > $(TEST_BIND_DIR)/file1.txt
-	@echo "  → Attempting to read tampered file from verity mount (should fail)..."
-	@if cat $(TEST_DATA_DIR)/file1.txt 2>/dev/null; then \
-		echo "✗ ERROR: Tampered data was NOT detected!"; \
-		echo "  This is a critical security failure."; \
+	@echo "  → Opening with --block-cache-capacity 0 to disable cache for tamper detection..."
+	@HASH=$$(cat $(TEST_HASH_FILE)); \
+	cargo run -- open $(TEST_DATA_DIR) $(TEST_DATA_DIR) $$HASH --block-cache-capacity 0 2>&1 & \
+	MOUNT_PID=$$!; \
+	sleep 3; \
+	if mountpoint -q $(TEST_DATA_DIR) 2>/dev/null; then \
+		echo "  → Attempting to read tampered file (should fail)..."; \
+		if cat $(TEST_DATA_DIR)/file1.txt 2>/dev/null; then \
+			echo "✗ ERROR: Tampered data was NOT detected!"; \
+			echo "  This is a critical security failure."; \
+			kill $$MOUNT_PID 2>/dev/null || true; \
+			umount $(TEST_BIND_DIR) 2>/dev/null || true; \
+			exit 1; \
+		else \
+			ERRCODE=$$?; \
+			if [ $$ERRCODE -ne 0 ]; then \
+				echo "✓ Tampering detected! Read failed with error code $$ERRCODE (expected)"; \
+				echo "  Verification is working correctly."; \
+			fi; \
+		fi; \
+	else \
+		echo "✗ Remount for tampering test failed!"; \
 		umount $(TEST_BIND_DIR) 2>/dev/null || true; \
 		exit 1; \
-	else \
-		ERRCODE=$$?; \
-		if [ $$ERRCODE -ne 0 ]; then \
-			echo "✓ Tampering detected! Read failed with error code $$ERRCODE (expected)"; \
-			echo "  Verification is working correctly."; \
-		fi; \
 	fi
+	@echo ""
 	@echo "  → Restoring original data via bind mount..."
 	@echo "test file 1 content" > $(TEST_BIND_DIR)/file1.txt
-	@echo "  → Verifying restored file can be read..."
-	@if cat $(TEST_DATA_DIR)/file1.txt >/dev/null 2>&1; then \
+	@echo "  → Remounting with cache enabled to verify restored file..."
+	@fusermount -u $(TEST_DATA_DIR) 2>/dev/null || true
+	@sleep 1
+	@HASH=$$(cat $(TEST_HASH_FILE)); \
+	cargo run -- open $(TEST_DATA_DIR) $(TEST_DATA_DIR) $$HASH 2>&1 & \
+	MOUNT_PID=$$!; \
+	sleep 3; \
+	if cat $(TEST_DATA_DIR)/file1.txt >/dev/null 2>&1; then \
 		echo "✓ Restored file reads successfully"; \
 	else \
 		echo "⚠ Restored file still fails (may need remount)"; \
@@ -139,19 +166,60 @@ test: clean-test
 	@rmdir $(TEST_BIND_DIR) 2>/dev/null || true
 	@echo ""
 	
-	@echo "Step 11: Testing close command (unmount)..."
+	@echo "Step 12: Unmounting after tampering test..."
 	@if mountpoint -q $(TEST_DATA_DIR) 2>/dev/null; then \
-		echo "  → Mount point is active, attempting unmount..."; \
-		cargo run -- close $(TEST_DATA_DIR) 2>&1 || true; \
+		echo "  → Unmounting..."; \
+		fusermount -u $(TEST_DATA_DIR) 2>/dev/null || cargo run -- close $(TEST_DATA_DIR) 2>/dev/null || true; \
 		sleep 1; \
 		if mountpoint -q $(TEST_DATA_DIR) 2>/dev/null; then \
-			echo "⚠ Unmount may have failed, forcing with fusermount..."; \
-			fusermount -u $(TEST_DATA_DIR) 2>/dev/null || umount $(TEST_DATA_DIR) 2>/dev/null || true; \
+			echo "⚠ Still mounted, force umounting..."; \
+			umount $(TEST_DATA_DIR) 2>/dev/null || true; \
 		else \
 			echo "✓ Successfully unmounted $(TEST_DATA_DIR)"; \
 		fi; \
 	else \
 		echo "⚠ Mount point was not active, skipping unmount"; \
+	fi
+	@echo ""
+	
+	@echo "Step 13: Testing open with custom block cache capacity..."
+	@echo "  → Creating test data and formatting..."
+	@mkdir -p $(TEST_DATA_DIR)/cache-test
+	@echo "cache test content" > $(TEST_DATA_DIR)/cache-test/cache_file.txt
+	@cargo run -- format $(TEST_DATA_DIR) --hash-output $(TEST_HASH_FILE) --force
+	@echo "✓ Re-formatted with new test data"
+	@echo ""
+	@echo "  → Opening with --block-cache-capacity 1024 (4MB cache)..."
+	@HASH=$$(cat $(TEST_HASH_FILE)); \
+	cargo run -- open $(TEST_DATA_DIR) $(TEST_DATA_DIR) $$HASH --block-cache-capacity 1024 2>&1 & \
+	MOUNT_PID=$$!; \
+	sleep 3; \
+	if mountpoint -q $(TEST_DATA_DIR) 2>/dev/null; then \
+		echo "✓ Mounted with custom block cache capacity"; \
+		echo "  → Reading file from capacity-limited mount:"; \
+		FILE_CONTENT=$$(cat $(TEST_DATA_DIR)/cache-test/cache_file.txt); \
+		if [ "$$FILE_CONTENT" = "cache test content" ]; then \
+			echo "✓ File read correctly: $$FILE_CONTENT"; \
+		else \
+			echo "✗ File content mismatch!"; \
+			echo "  Expected: cache test content"; \
+			echo "  Got: $$FILE_CONTENT"; \
+			kill $$MOUNT_PID 2>/dev/null || true; \
+			exit 1; \
+		fi; \
+	else \
+		echo "✗ Mount with custom block cache capacity failed!"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "  → Unmounting block-cache-capacity test mount..."
+	@fusermount -u $(TEST_DATA_DIR) 2>/dev/null || cargo run -- close $(TEST_DATA_DIR) 2>/dev/null || true
+	@sleep 1
+	@if mountpoint -q $(TEST_DATA_DIR) 2>/dev/null; then \
+		echo "⚠ Still mounted, force umounting..."; \
+		umount $(TEST_DATA_DIR) 2>/dev/null || true; \
+	else \
+		echo "✓ Unmounted successfully"; \
 	fi
 	@echo ""
 	

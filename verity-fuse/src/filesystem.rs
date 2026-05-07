@@ -23,13 +23,21 @@ pub struct VerityFS<V: FileVerifier> {
 
 impl<V: FileVerifier> VerityFS<V> {
     pub fn new(source: &Path, verifier: V) -> anyhow::Result<Self> {
+        Self::new_with_block_cache(source, verifier, BlockCache::default_capacity())
+    }
+
+    pub fn new_with_block_cache(
+        source: &Path,
+        verifier: V,
+        block_cache_capacity: usize,
+    ) -> anyhow::Result<Self> {
         let dir: Dir = Dir::open_ambient_dir(source, cap_std::ambient_authority())?;
         let verifier = Arc::new(verifier);
 
         Ok(Self {
             source: dir,
             verifier,
-            block_cache: BlockCache::new(),
+            block_cache: BlockCache::with_capacity(block_cache_capacity),
             handle_cache: FileHandleCache::new(),
         })
     }

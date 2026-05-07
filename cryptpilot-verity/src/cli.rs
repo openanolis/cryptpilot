@@ -116,6 +116,12 @@ pub struct OpenOptions {
     /// If not specified, defaults to <data_dir>/cryptpilot-verity.metadata.fb
     #[arg(short, long)]
     pub metadata: Option<std::path::PathBuf>,
+
+    /// Maximum number of verified data blocks to cache in memory.
+    /// Each block is 4KB, so the default of 4096 caches up to 16MB.
+    /// Larger values reduce disk I/O at the cost of more memory usage.
+    #[arg(long, default_value_t = 4096)]
+    pub block_cache_capacity: usize,
 }
 
 #[derive(Parser, Debug)]

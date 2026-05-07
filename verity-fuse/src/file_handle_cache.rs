@@ -141,6 +141,10 @@ impl BlockCache {
         Self::with_capacity(DEFAULT_BLOCK_CACHE_SIZE)
     }
 
+    pub fn default_capacity() -> usize {
+        DEFAULT_BLOCK_CACHE_SIZE
+    }
+
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             cache: Mutex::new(LruCache::new(
