@@ -35,15 +35,18 @@ impl MakeFs for NormalMakeFs {
         fs_type: MakeFsType,
     ) -> Result<()> {
         // Use mkfs commands directly instead of systemd-makefs
-        let (mkfs_cmd, force_arg) = match fs_type {
-            MakeFsType::Swap => ("mkswap", "-f"), // mkswap uses -f for force
-            MakeFsType::Ext4 => ("mkfs.ext4", "-F"), // mkfs.ext4 uses -F for force
-            MakeFsType::Xfs => ("mkfs.xfs", "-f"), // mkfs.xfs uses -f for force
-            MakeFsType::Vfat => ("mkfs.vfat", "-I"), // mkfs.vfat uses -I to force formatting
+        let (mkfs_cmd, args): (_, &[&str]) = match fs_type {
+            MakeFsType::Swap => ("mkswap", &["-f"]), // mkswap uses -f for force
+            MakeFsType::Ext4 => (
+                "mkfs.ext4",
+                &["-F", "-E", "lazy_itable_init=0,lazy_journal_init=0"],
+            ), // mkfs.ext4 uses -F for force
+            MakeFsType::Xfs => ("mkfs.xfs", &["-f"]), // mkfs.xfs uses -f for force
+            MakeFsType::Vfat => ("mkfs.vfat", &["-I"]), // mkfs.vfat uses -I to force formatting
         };
 
         Command::new(mkfs_cmd)
-            .arg(force_arg)
+            .args(args)
             .arg(device_path.as_ref())
             .run()
             .await?;
@@ -64,7 +67,11 @@ impl MakeFs for IntegrityNoWipeMakeFs {
             (file.get_block_device_size()?, file.get_size_of_block()?)
         };
 
-        tracing::info!("Setup dummy device with {device_size} bytes size for recording");
+        tracing::info!(
+            device_size,
+            block_size,
+            "Setup dummy device for blktrace recording operations"
+        );
 
         // Create a dummy device same size as the real one
         let dummy_device = DummyDevice::setup_on_tmpfs_with_block_size(device_size, block_size)
@@ -140,12 +147,16 @@ impl MakeFs for IntegrityNoWipeMakeFs {
             let mut real_device_file = File::options()
                 .write(true)
                 .read(true)
-                // .custom_flags(libc::O_DIRECT)
+                // .custom_flags(libc::O_DIRECT) // we disable here since O_DIRECT is not work on loop
                 .open(&device_path)
                 .await?;
             let mut buf = vec![0; page_size as usize];
             for i in rw_positions {
                 let offset = i * page_size;
+                tracing::trace!(
+                    "migrating page {i} at offset {offset} with {} bytes",
+                    buf.len()
+                );
                 dummy_device_file
                     .seek(std::io::SeekFrom::Start(offset))
                     .await?;

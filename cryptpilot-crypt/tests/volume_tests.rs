@@ -3,7 +3,10 @@
 
 #![allow(unused_macros)]
 
-use std::{future::Future, path::PathBuf};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+};
 
 use cryptpilot_crypt::{
     async_defer,
@@ -278,6 +281,13 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
             )
             .await?;
 
+            // Open and test fs stress
+            open_and_mount(&volume_config, |_, mount_dir: PathBuf| async move {
+                run_fs_stress(&mount_dir, PARALLEL_FS_STRESS).await?;
+                Ok(())
+            })
+            .await?;
+
             if use_external_suite {
                 // Open again and test with pjdfstest
                 open_and_mount(&volume_config, |_, mount_dir: PathBuf| async move {
@@ -320,6 +330,84 @@ pub async fn run_test_on_volume(config_str: &str, use_external_suite: bool) -> R
             })
             .await?;
         }
+    }
+
+    Ok(())
+}
+
+const PARALLEL_FS_STRESS: FsStressConfig = FsStressConfig {
+    workers: 16,
+    data_files_per_worker: 128,
+    tree_dirs_per_worker: 256,
+};
+
+struct FsStressConfig {
+    workers: usize,
+    data_files_per_worker: usize,
+    tree_dirs_per_worker: usize,
+}
+
+async fn run_fs_stress(root: &Path, config: FsStressConfig) -> anyhow::Result<()> {
+    let data = vec![0u8; 1024 * 1024];
+    let mut tasks = Vec::with_capacity(config.workers);
+    for worker in 0..config.workers {
+        let worker_dir = root.join(format!("w{worker}"));
+        let data = data.clone();
+        let data_files_per_worker = config.data_files_per_worker;
+        tasks.push(tokio::spawn(async move {
+            tokio::fs::create_dir_all(&worker_dir).await?;
+            for file in 0..data_files_per_worker {
+                tokio::fs::write(worker_dir.join(format!("f{file}")), &data).await?;
+            }
+            std::io::Result::Ok(())
+        }));
+    }
+
+    let mut stress_error = None;
+    for task in tasks {
+        match task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                stress_error.get_or_insert_with(|| anyhow::Error::new(err));
+            }
+            Err(err) => {
+                stress_error.get_or_insert_with(|| anyhow::Error::new(err));
+            }
+        }
+    }
+    if let Some(err) = stress_error {
+        return Err(err);
+    }
+
+    let mut tasks = Vec::with_capacity(config.workers);
+    for worker in 0..config.workers {
+        let worker_tree = root.join("trees").join(format!("w{worker}"));
+        let tree_dirs_per_worker = config.tree_dirs_per_worker;
+        tasks.push(tokio::spawn(async move {
+            tokio::fs::create_dir_all(&worker_tree).await?;
+            for dir in 0..tree_dirs_per_worker {
+                let dir_path = worker_tree.join(format!("d{dir}"));
+                tokio::fs::create_dir_all(&dir_path).await?;
+                tokio::fs::write(dir_path.join("file"), format!("w{worker}-{dir}")).await?;
+            }
+            std::io::Result::Ok(())
+        }));
+    }
+
+    let mut stress_error = None;
+    for task in tasks {
+        match task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                stress_error.get_or_insert_with(|| anyhow::Error::new(err));
+            }
+            Err(err) => {
+                stress_error.get_or_insert_with(|| anyhow::Error::new(err));
+            }
+        }
+    }
+    if let Some(err) = stress_error {
+        return Err(err);
     }
 
     Ok(())

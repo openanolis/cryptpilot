@@ -96,7 +96,7 @@ impl Drop for DummyDevice {
 const LOOP_SET_BLOCK_SIZE: u64 = 0x4C09;
 
 fn loop_device_set_block_size(ld: &LoopDevice, block_size: u64) -> Result<()> {
-    let _ = unsafe {
+    let _: i32 = unsafe {
         nix::errno::Errno::result(libc::ioctl(ld.as_raw_fd(), LOOP_SET_BLOCK_SIZE, block_size))
     }
     .context("Failed to LOOP_SET_BLOCK_SIZE")?;
