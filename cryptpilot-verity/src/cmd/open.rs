@@ -119,11 +119,8 @@ impl OpenCommand {
         let verifier = VerityVerifier::new(file_infos)?;
 
         // Create VerityFS instance with real verifier
-        let fs = VerityFS::new_with_block_cache(
-            source,
-            verifier,
-            self.options.block_cache_capacity,
-        )?;
+        let fs =
+            VerityFS::new_with_block_cache(source, verifier, self.options.block_cache_capacity)?;
 
         // Prepare mount options
         let options = vec![

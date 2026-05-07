@@ -122,7 +122,7 @@ impl<V: FileVerifier> VerityFS<V> {
 
         // Compute which blocks overlap with the requested range
         let start_block = (requested_offset / block_size) as usize;
-        let end_block = ((requested_end + block_size - 1) / block_size) as usize; // ceil(requested_end / block_size)
+        let end_block = requested_end.div_ceil(block_size) as usize;
         let num_blocks = end_block - start_block;
 
         let cached_file = self.open_file_cached(file)?;
