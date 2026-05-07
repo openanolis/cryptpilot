@@ -34,13 +34,21 @@ impl Command for DumpCommand {
             println!("{}", root_hash);
         } else if self.options.print_metadata {
             // Parse metadata
-            let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
+            let metadata_info = crate::metadata::deserialize_metadata(&metadata_bytes)?;
+            let file_infos = &metadata_info.file_infos;
 
             // Print metadata in human-readable format
             println!("Metadata contents:");
             println!("Total files: {}", file_infos.len());
+            if !metadata_info.labels.is_empty() {
+                println!();
+                println!("Labels:");
+                for (key, value) in &metadata_info.labels {
+                    println!("  {}={}", key, value);
+                }
+            }
             println!();
-            for info in &file_infos {
+            for info in file_infos {
                 println!("File: {}", info.path);
                 println!("  Descriptor Hash: {}", info.descriptor_hash);
                 println!("  FsVerity Descriptor:");

@@ -8,7 +8,8 @@ mod metadata_generated;
 mod metadata_hash_generated;
 
 pub use metadata_generated::cryptpilot::verity::{
-    FileInfo, FileInfoArgs, FsVerityDescriptor, FsVerityDescriptorArgs, Metadata, MetadataArgs,
+    FileInfo, FileInfoArgs, FsVerityDescriptor, FsVerityDescriptorArgs, KeyValue, KeyValueArgs,
+    Metadata, MetadataArgs,
 };
 pub use metadata_hash_generated::cryptpilot::verity::hash::{
     FileHashEntry, FileHashEntryArgs, MetadataHash, MetadataHashArgs,
@@ -18,9 +19,16 @@ use anyhow::{bail, Result};
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 use sha2::digest::typenum::Unsigned;
 use sha2::{digest::OutputSizeUser, Digest, Sha256};
+use std::collections::BTreeMap;
 use verity_core::digest::{FsVeritySha256, InnerHash};
 use verity_core::tree::MerkleTree;
 use verity_fuse::file_verifier::file_verity_info::FileVerityInfo;
+
+/// Deserialized metadata containing file info and labels
+pub struct MetadataInfo {
+    pub file_infos: Vec<FileVerityInfo>,
+    pub labels: BTreeMap<String, String>,
+}
 
 /// Calculate fs-verity hash for file data
 pub fn calculate_fsverity_hash(
@@ -38,7 +46,10 @@ pub fn calculate_fsverity_hash(
 }
 
 /// Serialize file information to FlatBuffers format
-pub fn serialize_metadata(file_infos: &[FileVerityInfo]) -> Result<Vec<u8>> {
+pub fn serialize_metadata(
+    file_infos: &[FileVerityInfo],
+    labels: &BTreeMap<String, String>,
+) -> Result<Vec<u8>> {
     let mut builder = FlatBufferBuilder::new();
 
     // Sort by path for stable output (using references to avoid copying)
@@ -84,12 +95,31 @@ pub fn serialize_metadata(file_infos: &[FileVerityInfo]) -> Result<Vec<u8>> {
 
     let files_vector = builder.create_vector(&file_info_offsets);
 
+    // Build labels vector
+    let labels_vector = {
+        let mut label_offsets = Vec::with_capacity(labels.len());
+        for (key, value) in labels {
+            let key_offset = builder.create_string(key);
+            let value_offset = builder.create_string(value);
+            let label = KeyValue::create(
+                &mut builder,
+                &KeyValueArgs {
+                    key: Some(key_offset),
+                    value: Some(value_offset),
+                },
+            );
+            label_offsets.push(label);
+        }
+        Some(builder.create_vector(&label_offsets))
+    };
+
     // Create root Metadata table with version
     let metadata = Metadata::create(
         &mut builder,
         &MetadataArgs {
             version: 1, // Current metadata format version
             files: Some(files_vector),
+            labels: labels_vector,
         },
     );
 
@@ -99,7 +129,7 @@ pub fn serialize_metadata(file_infos: &[FileVerityInfo]) -> Result<Vec<u8>> {
 }
 
 /// Deserialize file information from FlatBuffers format
-pub fn deserialize_metadata(data: &[u8]) -> Result<Vec<FileVerityInfo>> {
+pub fn deserialize_metadata(data: &[u8]) -> Result<MetadataInfo> {
     let metadata = flatbuffers::root::<Metadata>(data)
         .map_err(|e| anyhow::anyhow!("Failed to parse FlatBuffers metadata: {}", e))?;
 
@@ -187,7 +217,26 @@ pub fn deserialize_metadata(data: &[u8]) -> Result<Vec<FileVerityInfo>> {
         }
     }
 
-    Ok(result)
+    // Parse labels
+    let mut labels = BTreeMap::new();
+    if let Some(labels_vec) = metadata.labels() {
+        for kv in labels_vec {
+            let key = kv
+                .key()
+                .ok_or_else(|| anyhow::anyhow!("Missing key in KeyValue"))?
+                .to_string();
+            let value = kv
+                .value()
+                .ok_or_else(|| anyhow::anyhow!("Missing value in KeyValue"))?
+                .to_string();
+            labels.insert(key, value);
+        }
+    }
+
+    Ok(MetadataInfo {
+        file_infos: result,
+        labels,
+    })
 }
 
 /// Calculate hash from full metadata binary
@@ -275,15 +324,40 @@ mod tests {
         info.verify_self().unwrap();
 
         let file_infos = vec![info];
+        let mut labels = BTreeMap::new();
+        labels.insert("env".to_string(), "prod".to_string());
 
-        let serialized = serialize_metadata(&file_infos).unwrap();
+        let serialized = serialize_metadata(&file_infos, &labels).unwrap();
         let deserialized = deserialize_metadata(&serialized).unwrap();
 
-        assert_eq!(file_infos.len(), deserialized.len());
-        assert_eq!(file_infos[0].path, deserialized[0].path);
+        assert_eq!(file_infos.len(), deserialized.file_infos.len());
+        assert_eq!(file_infos[0].path, deserialized.file_infos[0].path);
         assert_eq!(
             file_infos[0].descriptor_hash,
-            deserialized[0].descriptor_hash
+            deserialized.file_infos[0].descriptor_hash
         );
+        assert_eq!(deserialized.labels.get("env"), Some(&"prod".to_string()));
+    }
+
+    #[test]
+    fn test_serialize_deserialize_empty_labels() {
+        let test_data = b"test file content";
+        let (descriptor, merkle_tree) = calculate_fsverity_hash(test_data);
+        let descriptor_hash = hex::encode(descriptor.to_descriptor_hash());
+        let info = FileVerityInfo {
+            path: "test.txt".to_string(),
+            descriptor,
+            merkle_tree,
+            descriptor_hash,
+        };
+
+        let file_infos = vec![info];
+        let labels = BTreeMap::new();
+
+        let serialized = serialize_metadata(&file_infos, &labels).unwrap();
+        let deserialized = deserialize_metadata(&serialized).unwrap();
+
+        assert_eq!(file_infos.len(), deserialized.file_infos.len());
+        assert!(deserialized.labels.is_empty());
     }
 }

@@ -78,7 +78,8 @@ impl Command for OpenCommand {
         tracing::info!("Metadata hash verification passed");
 
         // Parse metadata
-        let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
+        let metadata_info = crate::metadata::deserialize_metadata(&metadata_bytes)?;
+        let file_infos = metadata_info.file_infos;
         tracing::info!("Metadata contains {} files", file_infos.len());
 
         // Verify metadata integrity for each file

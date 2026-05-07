@@ -82,7 +82,7 @@ impl Command for FormatCommand {
         }
 
         // Serialize to FlatBuffers format
-        let fb_data = crate::metadata::serialize_metadata(&file_infos)?;
+        let fb_data = crate::metadata::serialize_metadata(&file_infos, &std::collections::BTreeMap::new())?;
         tracing::debug!(
             "Generated FlatBuffers metadata with {} entries, metadata size: {} bytes",
             file_infos.len(),

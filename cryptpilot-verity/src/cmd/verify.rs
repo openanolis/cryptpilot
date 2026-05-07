@@ -45,7 +45,8 @@ impl Command for VerifyCommand {
         tracing::info!("Root hash verification passed");
 
         // Parse metadata after hash verification
-        let file_infos = crate::metadata::deserialize_metadata(&metadata_bytes)?;
+        let metadata_info = crate::metadata::deserialize_metadata(&metadata_bytes)?;
+        let file_infos = metadata_info.file_infos;
 
         // Verify self-consistency of metadata entries (always required)
         for info in &file_infos {
