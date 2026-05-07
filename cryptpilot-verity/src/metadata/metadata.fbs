@@ -12,6 +12,12 @@ table FsVerityDescriptor {
   salt: [ubyte];           // salt prepended to each hashed block
 }
 
+// Key-value pair for metadata labels
+table KeyValue {
+  key: string;
+  value: string;
+}
+
 // Single file information with fs-verity data
 table FileInfo {
   path: string;                           // relative path of the file
@@ -20,10 +26,11 @@ table FileInfo {
   descriptor_hash: string;                // hex-encoded descriptor hash (final measurement)
 }
 
-// Root metadata structure containing all file information
+// Root metadata structures containing all file information
 table Metadata {
   version: uint = 1;        // metadata format version for backward compatibility
   files: [FileInfo];
+  labels: [KeyValue];
 }
 
 root_type Metadata;
