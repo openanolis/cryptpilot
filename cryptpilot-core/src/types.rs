@@ -44,7 +44,7 @@ pub enum IntegrityType {
     /// Enable integrity verification with journaling (default).
     ///
     /// Provides stronger data consistency guarantees and allows recovery
-    /// via the journal after a crash. Suitable for persistent storage. 
+    /// via the journal after a crash. Suitable for persistent storage.
     /// But it will write data twice, one for journal and one for actual
     /// data area.
     Journal,
