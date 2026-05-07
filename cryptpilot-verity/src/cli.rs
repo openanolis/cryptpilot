@@ -1,5 +1,15 @@
 use clap::{Parser, Subcommand};
 
+fn parse_label(s: &str) -> Result<(String, String), String> {
+    let Some((key, value)) = s.split_once('=') else {
+        return Err(format!("invalid label format '{}', expected key=value", s));
+    };
+    if key.is_empty() {
+        return Err("label key cannot be empty".to_string());
+    }
+    Ok((key.to_string(), value.to_string()))
+}
+
 use crate::build::CLAP_LONG_VERSION;
 
 #[derive(Parser, Debug)]
@@ -52,6 +62,10 @@ pub struct FormatOptions {
     /// Intended for re-formatting or third-party auditing of an already formatted directory.
     #[arg(long)]
     pub force: bool,
+
+    /// Label in key=value format. Can be specified multiple times.
+    #[arg(long = "label", value_parser = parse_label)]
+    pub labels: Vec<(String, String)>,
 }
 
 #[derive(Parser, Debug)]
@@ -90,12 +104,16 @@ pub struct DumpOptions {
     pub metadata: Option<std::path::PathBuf>,
 
     /// Print full metadata
-    #[arg(long, required_unless_present = "print_root_hash")]
+    #[arg(long, required_unless_present_any = ["print_root_hash", "print_label"])]
     pub print_metadata: bool,
 
     /// Print only the root hash instead of full metadata
-    #[arg(long, required_unless_present = "print_metadata")]
+    #[arg(long, required_unless_present_any = ["print_metadata", "print_label"])]
     pub print_root_hash: bool,
+
+    /// Print the value of a specific label key
+    #[arg(long)]
+    pub print_label: Option<String>,
 }
 
 #[derive(Parser, Debug)]
