@@ -1,4 +1,4 @@
-use crate::file_handle_cache::{BlockCache, BlockKey, CachedFileHandle, FileHandleCache};
+use crate::file_handle_cache::{BlockCache, BlockKey, FileHandle, FileHandlePool};
 use crate::file_verifier::{FileVerifier, VerifiableFile};
 use cap_std::fs::{Dir, Metadata};
 use cap_std::fs::{MetadataExt as _, PermissionsExt};
@@ -18,7 +18,7 @@ pub struct VerityFS<V: FileVerifier> {
     source: Dir,
     verifier: Arc<V>,
     block_cache: BlockCache,
-    handle_cache: FileHandleCache,
+    handle_cache: FileHandlePool,
 }
 
 impl<V: FileVerifier> VerityFS<V> {
@@ -38,7 +38,7 @@ impl<V: FileVerifier> VerityFS<V> {
             source: dir,
             verifier,
             block_cache: BlockCache::with_capacity(block_cache_capacity),
-            handle_cache: FileHandleCache::new(),
+            handle_cache: FileHandlePool::new(),
         })
     }
 
@@ -80,7 +80,7 @@ impl<V: FileVerifier> VerityFS<V> {
         Ok(())
     }
 
-    fn open_file_cached(&self, file: &V::File) -> Result<Arc<CachedFileHandle>, i32> {
+    fn open_file_cached(&self, file: &V::File) -> Result<Arc<FileHandle>, i32> {
         self.handle_cache
             .get_or_open(file.ino(), || {
                 self.source
@@ -136,11 +136,11 @@ impl<V: FileVerifier> VerityFS<V> {
             let block_end = block_offset + block_size;
 
             // Determine overlap between [block_offset, block_end) and [requested_offset, requested_end)
-            let copy_start_in_file = requested_offset.max(block_offset);
-            let copy_end_in_file = requested_end.min(block_end);
+            let copy_start_in_block = requested_offset.max(block_offset);
+            let copy_end_in_block = requested_end.min(block_end);
 
             // No overlap? (shouldn't happen due to block range calc, but safe)
-            if copy_start_in_file >= copy_end_in_file {
+            if copy_start_in_block >= copy_end_in_block {
                 continue;
             }
 
@@ -148,6 +148,10 @@ impl<V: FileVerifier> VerityFS<V> {
             let block_data = if let Some(cached) = self.block_cache.get(&key) {
                 cached
             } else {
+                // Note: pread_file_data may return fewer bytes than block_size
+                // (e.g. when reading the last partial block of a small file).
+                // block_data may therefore be shorter than block_size — downstream
+                // slicing must account for this.
                 let raw_block = cached_file
                     .pread_file_data(block_offset, block_size as usize)
                     .map_err(|e| {
@@ -177,9 +181,17 @@ impl<V: FileVerifier> VerityFS<V> {
                 arc_block
             };
 
-            // Compute slice within the block to copy
-            let src_start = (copy_start_in_file - block_offset) as usize;
-            let src_end = (copy_end_in_file - block_offset) as usize;
+            // Compute slice within the block to copy.
+            // Both bounds are relative to the block start.
+            let src_start = (copy_start_in_block - block_offset) as usize;
+            // SAFETY: pread_file_data may return fewer bytes than block_size
+            // (partial block at EOF), so clamp to actual data length.
+            let src_end = ((copy_end_in_block - block_offset) as usize).min(block_data.len());
+
+            // If the requested range starts beyond available data, skip
+            if src_start >= src_end {
+                continue;
+            }
 
             // Append only the needed part to output
             output.extend_from_slice(&block_data[src_start..src_end]);

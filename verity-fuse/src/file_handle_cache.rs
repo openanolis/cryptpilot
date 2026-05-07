@@ -13,12 +13,12 @@ use std::sync::{Arc, Mutex};
 const DEFAULT_HANDLE_CACHE_SIZE: usize = 1024;
 const DEFAULT_BLOCK_CACHE_SIZE: usize = 4096; // Cache up to 4096 blocks (16MB at 4KB blocks)
 
-/// Cached file handle wrapper with pread support
-pub struct CachedFileHandle {
+/// File handle wrapper with pread support
+pub struct FileHandle {
     file: File,
 }
 
-impl CachedFileHandle {
+impl FileHandle {
     pub fn new(file: File) -> Self {
         Self { file }
     }
@@ -74,12 +74,12 @@ impl CachedFileHandle {
     }
 }
 
-/// LRU cache for file handles, keyed by ino
-pub struct FileHandleCache {
-    cache: Mutex<LruCache<u64, Arc<CachedFileHandle>>>,
+/// LRU-based pool of open file handles, keyed by ino
+pub struct FileHandlePool {
+    cache: Mutex<LruCache<u64, Arc<FileHandle>>>,
 }
 
-impl FileHandleCache {
+impl FileHandlePool {
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_HANDLE_CACHE_SIZE)
     }
@@ -93,7 +93,7 @@ impl FileHandleCache {
     }
 
     /// Get cached handle or open new file using provided opener function
-    pub fn get_or_open<F>(&self, ino: u64, opener: F) -> std::io::Result<Arc<CachedFileHandle>>
+    pub fn get_or_open<F>(&self, ino: u64, opener: F) -> std::io::Result<Arc<FileHandle>>
     where
         F: FnOnce() -> std::io::Result<File>,
     {
@@ -102,13 +102,13 @@ impl FileHandleCache {
             return Ok(Arc::clone(cached));
         }
         let file = opener()?;
-        let cached = Arc::new(CachedFileHandle::new(file));
+        let cached = Arc::new(FileHandle::new(file));
         cache.put(ino, Arc::clone(&cached));
         Ok(cached)
     }
 }
 
-impl Default for FileHandleCache {
+impl Default for FileHandlePool {
     fn default() -> Self {
         Self::new()
     }
