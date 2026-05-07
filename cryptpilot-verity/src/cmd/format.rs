@@ -81,8 +81,14 @@ impl Command for FormatCommand {
             file_infos.push(info);
         }
 
+        // Collect labels from CLI options into a BTreeMap
+        let mut labels = std::collections::BTreeMap::new();
+        for (key, value) in &self.options.labels {
+            labels.insert(key.clone(), value.clone());
+        }
+
         // Serialize to FlatBuffers format
-        let fb_data = crate::metadata::serialize_metadata(&file_infos, &std::collections::BTreeMap::new())?;
+        let fb_data = crate::metadata::serialize_metadata(&file_infos, &labels)?;
         tracing::debug!(
             "Generated FlatBuffers metadata with {} entries, metadata size: {} bytes",
             file_infos.len(),

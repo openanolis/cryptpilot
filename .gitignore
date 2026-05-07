@@ -21,3 +21,6 @@ cryptpilot-verity/benchmark/cachefs_mount/
 cryptpilot-verity/benchmark/cachefs_verity_mount/
 cryptpilot-verity/benchmark/verity_on_cachefs_mount/
 cryptpilot-verity/benchmark/verity_source_data/
+
+# Superpowers design docs
+docs/superpowers/

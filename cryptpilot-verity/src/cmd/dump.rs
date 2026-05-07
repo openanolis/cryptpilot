@@ -69,8 +69,18 @@ impl Command for DumpCommand {
                 );
                 println!();
             }
+        } else if let Some(ref key) = self.options.print_label {
+            let metadata_info = crate::metadata::deserialize_metadata(&metadata_bytes)?;
+            match metadata_info.labels.get(key) {
+                Some(value) => println!("{}", value),
+                None => {
+                    anyhow::bail!("label key '{}' not found", key);
+                }
+            }
         } else {
-            anyhow::bail!("Either --print-root-hash or --print-metadata must be specified");
+            anyhow::bail!(
+                "Either --print-root-hash, --print-metadata, or --print-label must be specified"
+            );
         };
 
         Ok(())
