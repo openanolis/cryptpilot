@@ -1,3 +1,14 @@
+//! Test-only passthrough FUSE mount.
+//!
+//! This binary wires up [`VerityFS`] with a no-op [`PassthroughVerifier`] that
+//! accepts every data block without any cryptographic verification. It exists
+//! solely to exercise the FUSE plumbing (read, readdir, lookup, etc.) during
+//! development and testing.
+//!
+//! **WARNING: This does NOT verify file integrity. All reads pass through
+//! unverified. DO NOT use this in production or with untrusted data.**
+//!
+//! For production-grade verified mounts, use `cryptpilot-verity open` instead.
 use anyhow::{bail, Context, Result};
 use cap_std::fs::Dir;
 use clap::Parser;
@@ -5,9 +16,18 @@ use fuser::MountOption;
 use relative_path::{RelativePath, RelativePathBuf};
 use std::collections::HashMap;
 use std::path::Path;
+use std::path::PathBuf;
 use tracing::info;
 use verity_fuse::file_verifier::{FileVerifier, VerifiableFile};
-use verity_fuse::{cli::Cli, filesystem::VerityFS};
+use verity_fuse::filesystem::VerityFS;
+
+#[derive(Parser)]
+pub struct Cli {
+    #[arg(short, long)]
+    pub source: PathBuf,
+    #[arg(short, long)]
+    pub mount_point: PathBuf,
+}
 
 const ROOT_INO: u64 = 1;
 const ROOT_PATH: &str = "";
@@ -39,7 +59,7 @@ impl VerifiableFile for PassthroughFile {
     }
 
     fn verify_data_block(&self, _block_index: usize, _data: &[u8]) -> Result<()> {
-        // Passthrough mode - always succeeds (unsafe!)
+        // Test stub: unconditionally accepts any data. No integrity check is performed.
         Ok(())
     }
 }
