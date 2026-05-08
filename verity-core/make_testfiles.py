@@ -51,14 +51,16 @@ for i in [-1, 0, 1]:
         with testfile('hashblock_{}_{}'.format(i, j)) as f:
             f.write(b'A' * (block_size * (hashes_per_block + i) + j))
 
-with testfile('longfile') as f:
-    size = hashes_per_block * hashes_per_block * block_size * 3 + 99
-    data = b''
-    while len(data) < size:
-        print("size = {} / {}".format(len(data), size))
-        data += ''.join('{:08x}'.format(len(data) + i) for i in range(0, 1024 * 1024 * 5, 8)).encode('ascii')
-    data = data[:size]
-    f.write(data)
+# longfile is ~192MB and not used in tests (only referenced in a comment).
+# Generate it manually if needed for local testing.
+# with testfile('longfile') as f:
+#     size = hashes_per_block * hashes_per_block * block_size * 3 + 99
+#     data = b''
+#     while len(data) < size:
+#         print("size = {} / {}".format(len(data), size))
+#         data += ''.join('{:08x}'.format(len(data) + i) for i in range(0, 1024 * 1024 * 5, 8)).encode('ascii')
+#     data = data[:size]
+#     f.write(data)
 
 
 # show results using: fsverity measure testfiles/*

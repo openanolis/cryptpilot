@@ -145,9 +145,13 @@ deb-install: deb-build
 	dpkg -i ../cryptpilot-verity_*.deb ../cryptpilot-fde_*.deb ../cryptpilot-crypt_*.deb ../cryptpilot_*.deb
 	apt-get install -f -y
 
-.PHONE: run-test
-run-test: install-test-depend
+.PHONY: run-test
+run-test: install-test-depend verity-testfiles
 	cargo test -- --nocapture
+
+.PHONY: verity-testfiles
+verity-testfiles:
+	@cd verity-core && python3 make_testfiles.py
 
 .PHONE: install-test-depend
 install-test-depend:
