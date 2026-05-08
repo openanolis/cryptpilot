@@ -85,8 +85,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        distro: ["ubuntu:24.04"]
         arch: [x86_64, aarch64]
-        distro: ["ubuntu:24.04", "debian:trixie"]
         include:
           - arch: x86_64
             runner: ubuntu-latest
