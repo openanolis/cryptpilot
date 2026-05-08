@@ -92,11 +92,13 @@ calc_average() {
 
 calc_stddev() {
     local arr=("$@")
-    local avg=$(calc_average "${arr[@]}")
+    local avg
+    avg=$(calc_average "${arr[@]}")
     local count=${#arr[@]}
     local sum_sq=0
     for val in "${arr[@]}"; do
-        local diff=$(echo "$val - $avg" | bc -l)
+        local diff
+        diff=$(echo "$val - $avg" | bc -l)
         sum_sq=$(echo "$sum_sq + ($diff * $diff)" | bc -l)
     done
     echo "scale=3; sqrt($sum_sq / $count)" | bc -l
@@ -216,7 +218,8 @@ setup_gocryptfs_encrypted() {
     echo "$password" | gocryptfs -init -q "$encrypted_dir" 2>"$LOG_DIR/gocryptfs_init.log"
     
     # Mount temporarily to copy files
-    local temp_mount=$(mktemp -d)
+    local temp_mount
+    temp_mount=$(mktemp -d)
     echo "$password" | gocryptfs -q "$encrypted_dir" "$temp_mount" 2>"$LOG_DIR/gocryptfs_mount.log"
     
     # Copy files
@@ -241,7 +244,8 @@ setup_verity_fuse() {
     
     "$CRYPTPILOT_VERITY" format "$data_dir" --hash-output "$RESULT_DIR/${label}_root_hash.txt" --force \
         >> "$LOG_DIR/${label}_verity_format.log" 2>&1
-    local root_hash=$(cat "$RESULT_DIR/${label}_root_hash.txt")
+    local root_hash
+    root_hash=$(cat "$RESULT_DIR/${label}_root_hash.txt")
     
     log_info "Root Hash: $root_hash"
     mount_verity_fuse "$data_dir" "$mount_point" "$root_hash" "$label"
@@ -352,16 +356,21 @@ test_sequential_read_dd_single() {
     
     drop_caches
     
-    local output=$(dd if="$file" of=/dev/null bs=1M 2>&1)
-    local speed=$(echo "$output" | grep -oP '[\d.]+\s*(MB|GB)/s' | head -1 | grep -oP '[\d.]+')
-    local unit=$(echo "$output" | grep -oP '[\d.]+\s*(MB|GB)/s' | head -1 | grep -oP '(MB|GB)')
+    local output
+    output=$(dd if="$file" of=/dev/null bs=1M 2>&1)
+    local speed_unit
+    speed_unit=$(echo "$output" | grep -oP '[\d.]+\s*(MB|GB)/s' | head -1)
+    local speed
+    speed=$(echo "$speed_unit" | grep -oP '[\d.]+')
+    local unit
+    unit=$(echo "$speed_unit" | grep -oP '(MB|GB)')
     
     if [ "$unit" = "GB" ]; then
         speed=$(echo "$speed * 1024" | bc -l)
     fi
     
     record_raw_result "$label" "sequential_read_dd" "$run" "$speed" "MB/s"
-    log_info "  Run $run: sequential_read_dd = ${speed} MB/s"
+    log_info "  Run $run: sequential_read_dd=${speed} MB/s"
 }
 
 test_sequential_read_fio_single() {
@@ -371,7 +380,8 @@ test_sequential_read_fio_single() {
     
     drop_caches
     
-    local output=$(fio --name=seq_read \
+    local output
+    output=$(fio --name=seq_read \
         --filename="$target_dir/large_files/file_1.bin" \
         --rw=read \
         --bs=4k \
@@ -382,11 +392,13 @@ test_sequential_read_fio_single() {
         --group_reporting \
         --output-format=json 2>/dev/null)
     
-    local bw_kb=$(echo "$output" | jq -r '.jobs[0].read.bw')
-    local bw_mb=$(echo "scale=3; $bw_kb / 1024" | bc -l)
+    local bw_kb;
+    bw_kb=$(echo "$output" | jq -r '.jobs[0].read.bw')
+    local bw_mb;
+    bw_mb=$(echo "scale=3; $bw_kb / 1024" | bc -l)
     
     record_raw_result "$label" "sequential_read_fio" "$run" "$bw_mb" "MB/s"
-    log_info "  Run $run: sequential_read_fio = ${bw_mb} MB/s"
+    log_info "  Run $run: sequential_read_fio=${bw_mb} MB/s"
 }
 
 test_random_read_fio_single() {
@@ -396,7 +408,8 @@ test_random_read_fio_single() {
     
     drop_caches
     
-    local output=$(fio --name=rand_read \
+    local output
+    output=$(fio --name=rand_read \
         --filename="$target_dir/large_files/file_1.bin" \
         --rw=randread \
         --bs=4k \
@@ -407,13 +420,16 @@ test_random_read_fio_single() {
         --group_reporting \
         --output-format=json 2>/dev/null)
     
-    local iops=$(echo "$output" | jq -r '.jobs[0].read.iops')
-    local lat_ns=$(echo "$output" | jq -r '.jobs[0].read.lat_ns.mean')
-    local lat_ms=$(echo "scale=3; $lat_ns / 1000000" | bc -l)
+    local iops;
+    iops=$(echo "$output" | jq -r '.jobs[0].read.iops')
+    local lat_ns;
+    lat_ns=$(echo "$output" | jq -r '.jobs[0].read.lat_ns.mean')
+    local lat_ms;
+    lat_ms=$(echo "scale=3; $lat_ns / 1000000" | bc -l)
     
     record_raw_result "$label" "random_read_iops" "$run" "$iops" "IOPS"
     record_raw_result "$label" "random_read_latency" "$run" "$lat_ms" "ms"
-    log_info "  Run $run: random_read_iops = ${iops}, latency = ${lat_ms} ms"
+    log_info "  Run $run: random_read_iops=${iops}, latency=${lat_ms} ms"
 }
 
 test_small_files_read_single() {
@@ -423,18 +439,22 @@ test_small_files_read_single() {
     
     drop_caches
     
-    local start=$(date +%s.%N)
+    local start;
+    start=$(date +%s.%N)
     for i in $(seq 1 $SMALL_FILE_COUNT); do
         cat "$target_dir/small_files/file_$i.bin" > /dev/null
     done
-    local end=$(date +%s.%N)
+    local end;
+    end=$(date +%s.%N)
     
-    local duration=$(echo "$end - $start" | bc -l)
-    local ops_per_sec=$(echo "scale=3; $SMALL_FILE_COUNT / $duration" | bc -l)
+    local duration;
+    duration=$(echo "$end - $start" | bc -l)
+    local ops_per_sec;
+    ops_per_sec=$(echo "scale=3; $SMALL_FILE_COUNT / $duration" | bc -l)
     
     record_raw_result "$label" "small_files_read" "$run" "$duration" "seconds"
     record_raw_result "$label" "small_files_ops" "$run" "$ops_per_sec" "ops/s"
-    log_info "  Run $run: small_files_read = ${duration} sec (${ops_per_sec} ops/s)"
+    log_info "  Run $run: small_files_read=${duration} sec (${ops_per_sec} ops/s)"
 }
 
 test_readdir_single() {
@@ -444,14 +464,17 @@ test_readdir_single() {
     
     drop_caches
     
-    local start=$(date +%s.%N)
+    local start;
+    start=$(date +%s.%N)
     ls -laR "$target_dir" > /dev/null 2>&1
-    local end=$(date +%s.%N)
+    local end;
+    end=$(date +%s.%N)
     
-    local duration=$(echo "($end - $start) * 1000" | bc -l)
+    local duration
+    duration=$(echo "($end - $start) * 1000" | bc -l)
     
     record_raw_result "$label" "readdir" "$run" "$duration" "ms"
-    log_info "  Run $run: readdir = ${duration} ms"
+    log_info "  Run $run: readdir=${duration} ms"
 }
 
 # Run all single-iteration tests on a target directory
@@ -508,12 +531,15 @@ calculate_statistics() {
     echo "label,test,value,stddev,unit" > "$RESULT_DIR/results.csv"
     
     # Get unique label,test combinations
-    local combinations=$(tail -n +2 "$RESULT_DIR/raw_results.csv" | cut -d',' -f1,2 | sort -u)
+    local combinations;
+    combinations=$(tail -n +2 "$RESULT_DIR/raw_results.csv" | cut -d',' -f1,2 | sort -u)
     
     while IFS=',' read -r label test; do
         # Get all values for this label,test
-        local values=$(grep "^$label,$test," "$RESULT_DIR/raw_results.csv" | cut -d',' -f4)
-        local unit=$(grep "^$label,$test," "$RESULT_DIR/raw_results.csv" | head -1 | cut -d',' -f5)
+        local values;
+        values=$(grep "^$label,$test," "$RESULT_DIR/raw_results.csv" | cut -d',' -f4)
+        local unit;
+        unit=$(grep "^$label,$test," "$RESULT_DIR/raw_results.csv" | head -1 | cut -d',' -f5)
         
         # Convert to array
         local arr=()
@@ -522,8 +548,10 @@ calculate_statistics() {
         done <<< "$values"
         
         # Calculate statistics
-        local avg=$(calc_average "${arr[@]}")
-        local stddev=$(calc_stddev "${arr[@]}")
+        local avg;
+        avg=$(calc_average "${arr[@]}")
+        local stddev;
+        stddev=$(calc_stddev "${arr[@]}")
         
         echo "$label,$test,$avg,$stddev,$unit" >> "$RESULT_DIR/results.csv"
         log_info "  $label,$test: avg=$avg, stddev=$stddev"
@@ -556,7 +584,8 @@ run_all_tests() {
     log_info "Formatting source data with verity..."
     "$CRYPTPILOT_VERITY" format "$verity_source_dir" --hash-output "$RESULT_DIR/cachefs_verity_root_hash.txt" --force \
         >> "$LOG_DIR/cachefs_verity_format.log" 2>&1
-    local verity_hash=$(cat "$RESULT_DIR/cachefs_verity_root_hash.txt")
+    local verity_hash;
+    verity_hash=$(cat "$RESULT_DIR/cachefs_verity_root_hash.txt")
     log_info "verity root hash: $verity_hash"
     
     setup_gocryptfs_encrypted "$verity_source_dir" "$VERITY_ENCRYPTED_DATA_DIR" "$GOCRYPTFS_PASSWORD"
@@ -683,7 +712,8 @@ generate_report() {
             printf "| %-28s |" "$test ($unit)"
             local baseline_val=""
             for label in "${labels[@]}"; do
-                local val=$(grep "^$label,$test," "$RESULT_DIR/results.csv" 2>/dev/null | cut -d',' -f3)
+                local val;
+                val=$(grep "^$label,$test," "$RESULT_DIR/results.csv" 2>/dev/null | cut -d',' -f3)
                 if [ -n "$val" ]; then
                     if [ "$label" = "baseline" ]; then
                         baseline_val="$val"
@@ -692,8 +722,10 @@ generate_report() {
                         # Calculate change percentage vs baseline
                         if [ -n "$baseline_val" ] && [ "$baseline_val" != "0" ]; then
                             # Ensure numbers have leading zero for bc
-                            local safe_val=$(echo "$val" | sed 's/^\./0./')
-                            local safe_baseline=$(echo "$baseline_val" | sed 's/^\./0./')
+                            local safe_val;
+                            safe_val=${val/#./0.}
+                            local safe_baseline
+                            safe_baseline=${baseline_val/#./0.}
                             
                             # Calculate change: (val - baseline) / baseline * 100
                             # For lower_is_better metrics, invert the sign
