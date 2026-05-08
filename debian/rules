@@ -93,4 +93,8 @@ override_dh_auto_test:
 	true
 
 override_dh_shlibdeps:
-	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
+	# Exclude libfuse from auto-generated shlibdeps to avoid
+	# libfuse3-3 (Ubuntu) vs libfuse3-4 (Debian) incompatibility.
+	# The fuse3 dependency in debian/control covers both distros.
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info -- \
+		-Xlibfuse3
