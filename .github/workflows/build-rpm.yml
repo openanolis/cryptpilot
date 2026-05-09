@@ -281,6 +281,12 @@ jobs:
             make run-convert-test-case BOOTLOADER=${{ matrix.bootloader }} ROOTFS_ENC=${{ matrix.rootfs_enc }} DELTA_LOCATION=${{ matrix.delta_location }} INPUT_IMAGE=/workspace/test-images/test-image.qcow2 CRYPTPILOT_FDE_RPM=${{ steps.install-rpm.outputs.cryptpilot_fde_rpm_container }}
           "
 
+      - name: Print convert diagnostic log
+        if: always()
+        run: |
+          echo "=== /tmp/.cryptpilot-convert.log (from test-container) ==="
+          docker exec test-container cat /tmp/.cryptpilot-convert.log 2>/dev/null || echo "(log file not available)"
+
       - name: Cleanup
         if: always()
         run: |
