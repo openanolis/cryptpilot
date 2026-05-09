@@ -1,3 +1,71 @@
+cryptpilot (0.8.0) unstable; urgency=medium
+
+  * fix(verity): drop libfuse3 dynamic link dependency
+  * fix(ci): restore generated FlatBuffers files and drop debian:trixie from DEB test matrix
+  * fix(debian): use correct dpkg-shlibdeps -x option to exclude libfuse3
+  * fix(test): generate verity-core test fixtures via Makefile dependency and remove generated FlatBuffers files from git
+  * fix(debian): exclude libfuse from shlibdeps for cross-distro compatibility
+  * fix: resolve all shellcheck SC2155 and SC2001 warnings in benchmark script
+  * fix: commit generated FlatBuffers files and add shellcheck config
+  * fix: resolve clippy manual_div_ceil and fmt issues
+  * feat(cryptpilot-verity): add --print-labels and update docs and tests
+  * feat(cryptpilot-verity): wire up labels in format command and add print-label handler
+  * feat(cryptpilot-verity): add label serialization and wire up format/dump commands
+  * feat(cryptpilot-verity): add --label and --print-label CLI arguments
+  * feat(cryptpilot-verity): add KeyValue table and labels field to FlatBuffers schema
+  * docs(verity-fuse): add warning comments to test-only passthrough binary
+  * refactor(verity-fuse): rename file handle types and improve block read safety
+  * verity: add --block-cache-capacity option for open command
+  * feat(verity-fuse): add LRU cache for verified data blocks
+  * perf(verity-fuse): add LRU cache for file handles to reduce open/close syscalls
+  * perf(verity-fuse): replace lseek+read with pread for position-independent reads
+  * feat(cryptpilot-verity): add performance benchmark script
+  * chore: make cargo clippy happy
+  * docs(cryptpilot-verity): add subtitle and Chinese README
+  * feat(cryptpilot-verity): add force format option and update docs
+  * docs(cryptpilot-verity): improve README structure and security clarity
+  * fix(cryptpilot-verity): ensure stable root hash by sorting metadata entries
+  * feat(cryptpilot-verity): change --data-dir to positional data_dir in CLI
+  * feat(cryptpilot-verity): add --metadata-only mode for lightweight verification
+  * build(cryptpilot-verity): update spec file for cryptpilot-verity
+  * test(cryptpilot-verity): use in-place mount with bind mount for tampering test
+  * fix(deps): use patched mountinfo2 from git to support optional fields parsing
+  * docs(cryptpilot-verity): add comprehensive README for cryptpilot-verity
+  * feat(cryptpilot-verity): integrate fs-verity verification and refactor verity-fuse filesystem
+  * docs(cryptpilot-verity): add README for dual schema design
+  * fix(cryptpilot-verity): remove incorrect relative path handling for metadata option
+  * feat(cryptpilot-verity): add open/close commands with built-in FUSE mounting
+  * refactor(cryptpilot-verity): optimize metadata hash calculation and improve API design
+  * refactor(cryptpilot-verity): Use mmap for file verification while keeping metadata reads secure
+  * refactor(cryptpilot-verity): Replace SHA256 with fs-verity merkle tree hash algorithm
+  * chore(rust): update toolchain to 1.85.0 to support edition 2024
+  * feat(fuse): add verity-fuse FUSE filesystem with capability-safe access
+  * fix: remove trailing whitespace in types.rs
+  * feat(core,crypt): add fs stress tests and improve mkfs reliability
+  * ci: fix CI binary checks after host/guest RPM split
+  * debian: update .gitignore for host/guest package split
+  * debian: add cloud-guest-utils as guest package dependency
+  * spec: add cloud-utils-growpart as guest package dependency
+  * debian: remove cryptpilot-fde backwards compatibility symlink links file
+  * spec: remove cryptpilot-fde backwards compatibility symlink
+  * ci: update buildspec outputs for host/guest RPM split
+  * fix(docs): correct "install into initrd" phrasing to guest rootfs
+  * fix(docs): correct boot-time binary attribution to cryptpilot-fde-guest
+  * docs: update all cryptpilot-fde binary references to host/guest names
+  * docs: update documentation for host/guest package split and update CI
+  * fix(ci): pass guest RPM to convert test instead of host RPM
+  * fix(ci): update build-rpm.yml for host/guest RPM split
+  * fix(spec): restore missing install -d for udev rules directory
+  * ci: remove cryptpilot meta-package from DEB artifact upload
+  * fix: split fde RPM packaging, remove policy.rego, and fix convert version detection
+  * refactor: restore original file locations for metadata and initrd_state
+  * fix(ci): resolve CI failures after host/guest RPM split
+  * build: add cryptpilot-fde symlink for backwards compatibility
+  * build: split cryptpilot-fde into host and guest RPM packages
+  * docs(crypt): add encryption algorithms and kernel config requirements
+
+ -- Kun Lai <laikun@linux.alibaba.com>  Sat, 09 May 2026 11:36:41 +0800
+
 cryptpilot (0.7.0) unstable; urgency=medium
 
   * fix(disk-persistent): handle dirty COW device in dm-snapshot setup
