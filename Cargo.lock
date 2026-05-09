@@ -1065,6 +1065,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "async-walkdir",
+ "base64 0.22.1",
  "clap",
  "flatbuffers",
  "flatc",

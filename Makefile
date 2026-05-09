@@ -352,3 +352,58 @@ docker-build-verity:
 .PHONY: docker-build-all
 docker-build-all: docker-build
 
+# Cross-language quality assurance targets
+
+.PHONY: check-fbs
+check-fbs:
+	@test -L verity-go/metadata/metadata.fbs || { echo "ERROR: metadata.fbs should be a symlink to Rust source"; exit 1; }
+	@test -L verity-go/metadata/metadata_hash.fbs || { echo "ERROR: metadata_hash.fbs should be a symlink to Rust source"; exit 1; }
+	@echo "FlatBuffers schemas are shared via symlink."
+
+.PHONY: go-test
+go-test:
+	cd verity-go && /usr/local/go/bin/go test -race -v ./... -skip TestInterop
+
+.PHONY: cross-test
+cross-test:
+	bash tests/cross_lang_test.sh
+
+.PHONY: check-all
+check-all: clippy go-test check-fbs
+	cargo fmt --check
+
+# Interop tests: Rust CLI produces → Go lib consumes, and vice versa
+
+.PHONY: interop-rust-produces
+interop-rust-produces:
+	@echo "=== Rust produces, Go consumes ==="
+	@rm -rf /tmp/cryptpilot-interop && mkdir -p /tmp/cryptpilot-interop/data
+	@printf 'hello' > /tmp/cryptpilot-interop/data/a.txt
+	@printf 'world' > /tmp/cryptpilot-interop/data/b.txt
+	@touch /tmp/cryptpilot-interop/data/empty.txt
+	@cargo run -p cryptpilot-verity --quiet -- format \
+		/tmp/cryptpilot-interop/data \
+		--hash-output - \
+		--label env=prod \
+		--force > /tmp/cryptpilot-interop/root_hash.txt
+	@cd verity-go && INTEROP_DIR=/tmp/cryptpilot-interop \
+		/usr/local/go/bin/go test -count=1 -v ./metadata/ -run TestInterop_RustProducesGoVerifies
+
+.PHONY: interop-go-produces
+interop-go-produces:
+	@echo "=== Go produces, Rust verifies ==="
+	@rm -rf /tmp/cryptpilot-interop2 && mkdir -p /tmp/cryptpilot-interop2/data
+	@cd verity-go && INTEROP_DIR=/tmp/cryptpilot-interop2 \
+		/usr/local/go/bin/go test -count=1 -v ./metadata/ -run TestInterop_GoProducesRustVerifies
+	@echo "Running Rust verify..."
+	@HASH=$$(cargo run -p cryptpilot-verity --quiet -- dump \
+		/tmp/cryptpilot-interop2/data --print-root-hash 2>&1 | tail -1) && \
+	cargo run -p cryptpilot-verity --quiet -- verify \
+		/tmp/cryptpilot-interop2/data "$$HASH"
+	@rm -rf /tmp/cryptpilot-interop /tmp/cryptpilot-interop2
+	@echo "Interop dirs cleaned up"
+
+.PHONY: interop-test
+interop-test: interop-rust-produces interop-go-produces
+	@echo "=== All interop tests passed ==="
+

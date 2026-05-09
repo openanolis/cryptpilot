@@ -72,3 +72,29 @@ jobs:
 
       - name: Run test script from repo
         run: make run-test
+
+  go-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: 'true'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Run Go tests
+        run: |
+          cd verity-go
+          go test -race -v ./...
+      - name: Check FlatBuffers schemas in sync
+        run: make check-fbs
+      - name: Run cross-language tests
+        run: |
+          cd verity-go
+          go test -v ./... -run TestCross
+      - name: Install Rust toolchain for interop tests
+        uses: dtolnay/rust-toolchain@1.85.0
+      - name: Run interop tests
+        run: |
+          yum-builddep -y --skip-unavailable ./cryptpilot.spec
+          make interop-test
