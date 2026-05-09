@@ -67,6 +67,12 @@ The CLI interface and subcommand design are intentionally similar to the `verity
    - Uses the metadata to create a `verity-fuse` filesystem.
    - Each read is verified against the Merkle tree before data is returned to the caller.
 
+## Dependencies
+
+- **`fusermount` (or `fusermount3`)**: Required for the `open` and `close` subcommands to mount/unmount the FUSE filesystem.
+- **No `libfuse3` needed**: The binary does **not** dynamically link against `libfuse3.so`. It uses a pure Rust FUSE implementation that communicates directly with the kernel via `/dev/fuse`. Only `fusermount` (the user-space mount helper) needs to be installed on the target system.
+- All other subcommands (`format`, `verify`, `dump`) have no external dependencies.
+
 ## Commands
 
 All commands are subcommands of the `cryptpilot-verity` binary. Run `cryptpilot-verity --help` or `cryptpilot-verity <subcommand> --help` for details.

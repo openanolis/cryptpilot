@@ -66,6 +66,12 @@ CLI 接口和子命令设计有意与 `veritysetup` 工具类似，以便熟悉 
    - 使用元数据创建 `verity-fuse` 文件系统。
    - 在将数据返回给调用者之前，每次读取都会根据 Merkle 树进行验证。
 
+## 依赖
+
+- **`fusermount`（或 `fusermount3`）**: `open` 和 `close` 子命令挂载/卸载 FUSE 文件系统时需要。
+- **无需 `libfuse3`**: 二进制文件**不**动态链接 `libfuse3.so`。它使用纯 Rust FUSE 实现，直接通过 `/dev/fuse` 与内核通信。目标系统上只需安装 `fusermount`（用户空间挂载辅助工具）。
+- 其余子命令（`format`、`verify`、`dump`）无任何外部依赖。
+
 ## 命令
 
 所有命令都是 `cryptpilot-verity` 二进制文件的子命令。运行 `cryptpilot-verity --help` 或 `cryptpilot-verity <subcommand> --help` 以获取详细信息。

@@ -1509,7 +1509,6 @@ dependencies = [
  "log",
  "memchr",
  "page_size",
- "pkg-config",
  "smallvec",
  "zerocopy 0.6.6",
 ]
