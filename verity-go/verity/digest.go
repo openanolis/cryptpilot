@@ -25,7 +25,7 @@ func newFixedSizeBlock(algo HashAlgorithm, salt []byte, blockSize int) fixedSize
 // newSaltedHash creates a hash.Hash initialized with the salt.
 func newSaltedHash(algo HashAlgorithm, salt []byte) hash.Hash {
 	h := algo.newHash()
-	blockSize := algo.blockSize()
+	blockSize := algo.BlockSize()
 	for i := 0; i < len(salt); i += blockSize {
 		end := i + blockSize
 		if end > len(salt) {
@@ -118,7 +118,7 @@ func (d *FsVerityDigest) Write(data []byte) (int, error) {
 
 // update processes data in block_size chunks, matching the Rust implementation.
 func (d *FsVerityDigest) update(data []byte) {
-	digestSize := d.config.algo.digestSize()
+	digestSize := d.config.algo.DigestSize()
 
 	for chunkStart := 0; chunkStart < len(data); chunkStart += d.config.blockSize {
 		chunkEnd := chunkStart + d.config.blockSize
@@ -165,7 +165,7 @@ func (d *FsVerityDigest) update(data []byte) {
 
 // Finalize flushes all levels and returns the descriptor and merkle tree.
 func (d *FsVerityDigest) Finalize() (FsVerityDescriptor, *MerkleTree) {
-	digestSize := d.config.algo.digestSize()
+	digestSize := d.config.algo.DigestSize()
 	compressionFactor := d.config.blockSize / digestSize
 
 	var totalSize int

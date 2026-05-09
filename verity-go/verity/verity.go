@@ -10,7 +10,7 @@ import (
 const (
 	MaxDigestSize    = 64
 	MaxSaltSize      = 32
-	MaxLevels        = 8  // FS_VERITY_MAX_LEVELS
+	MaxLevels        = 8 // FS_VERITY_MAX_LEVELS
 	DefaultBlockSize = 4096
 )
 
@@ -33,7 +33,7 @@ func (h HashAlgorithm) String() string {
 	}
 }
 
-func (h HashAlgorithm) digestSize() int {
+func (h HashAlgorithm) DigestSize() int {
 	switch h {
 	case HashSHA256:
 		return sha256.Size
@@ -44,7 +44,7 @@ func (h HashAlgorithm) digestSize() int {
 	}
 }
 
-func (h HashAlgorithm) blockSize() int {
+func (h HashAlgorithm) BlockSize() int {
 	switch h {
 	case HashSHA256:
 		return sha256.BlockSize
@@ -114,7 +114,7 @@ func (d *FsVerityDescriptor) DataSizeToBytes() []byte {
 // saltToDigest creates a hash.Hash initialized with the salt padded to block boundaries.
 func saltToDigest(algo HashAlgorithm, salt []byte) hash.Hash {
 	h := algo.newHash()
-	blockSize := algo.blockSize()
+	blockSize := algo.BlockSize()
 	for i := 0; i < len(salt); i += blockSize {
 		end := i + blockSize
 		if end > len(salt) {

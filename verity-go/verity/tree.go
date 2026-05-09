@@ -14,7 +14,7 @@ func NewMerkleTree(hashes [][]byte, algo HashAlgorithm) *MerkleTree {
 
 // Level1AsBytes returns the level-1 hashes as concatenated bytes.
 func (t *MerkleTree) Level1AsBytes() []byte {
-	digestSize := t.algo.digestSize()
+	digestSize := t.algo.DigestSize()
 	out := make([]byte, 0, len(t.level1)*digestSize)
 	for _, h := range t.level1 {
 		out = append(out, h...)
@@ -29,7 +29,7 @@ func (t *MerkleTree) Level1AsBytes() []byte {
 func (t *MerkleTree) RebuildRootHash(salt []byte, blockSize int) []byte {
 	if len(t.level1) == 0 {
 		// Empty file: root hash is all zeros
-		return make([]byte, t.algo.digestSize())
+		return make([]byte, t.algo.DigestSize())
 	}
 	if len(t.level1) == 1 {
 		return t.level1[0]
@@ -42,7 +42,7 @@ func (t *MerkleTree) RebuildRootHash(salt []byte, blockSize int) []byte {
 		d.Write(hash)
 	}
 	// Pad to block boundary
-	totalBytes := len(t.level1) * t.algo.digestSize()
+	totalBytes := len(t.level1) * t.algo.DigestSize()
 	padding := (blockSize - totalBytes%blockSize) % blockSize
 	if padding > 0 {
 		d.Write(make([]byte, padding))
