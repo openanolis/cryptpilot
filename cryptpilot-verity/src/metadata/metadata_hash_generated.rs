@@ -2,392 +2,298 @@
 // @generated
 extern crate alloc;
 
+
 #[allow(unused_imports, dead_code)]
 pub mod cryptpilot {
 
-    #[allow(unused_imports, dead_code)]
-    pub mod verity {
+#[allow(unused_imports, dead_code)]
+pub mod verity {
 
-        #[allow(unused_imports, dead_code)]
-        pub mod hash {
+#[allow(unused_imports, dead_code)]
+pub mod hash {
 
-            pub enum FileHashEntryOffset {}
-            #[derive(Copy, Clone, PartialEq)]
 
-            pub struct FileHashEntry<'a> {
-                pub _tab: ::flatbuffers::Table<'a>,
-            }
+pub enum FileHashEntryOffset {}
+#[derive(Copy, Clone, PartialEq)]
 
-            impl<'a> ::flatbuffers::Follow<'a> for FileHashEntry<'a> {
-                type Inner = FileHashEntry<'a>;
-                #[inline]
-                unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                    Self {
-                        _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                    }
-                }
-            }
+pub struct FileHashEntry<'a> {
+  pub _tab: ::flatbuffers::Table<'a>,
+}
 
-            impl<'a> FileHashEntry<'a> {
-                pub const VT_PATH: ::flatbuffers::VOffsetT = 4;
-                pub const VT_DESCRIPTOR_HASH: ::flatbuffers::VOffsetT = 6;
+impl<'a> ::flatbuffers::Follow<'a> for FileHashEntry<'a> {
+  type Inner = FileHashEntry<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
+  }
+}
 
-                #[inline]
-                pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                    FileHashEntry { _tab: table }
-                }
-                #[allow(unused_mut)]
-                pub fn create<
-                    'bldr: 'args,
-                    'args: 'mut_bldr,
-                    'mut_bldr,
-                    A: ::flatbuffers::Allocator + 'bldr,
-                >(
-                    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                    args: &'args FileHashEntryArgs<'args>,
-                ) -> ::flatbuffers::WIPOffset<FileHashEntry<'bldr>> {
-                    let mut builder = FileHashEntryBuilder::new(_fbb);
-                    if let Some(x) = args.descriptor_hash {
-                        builder.add_descriptor_hash(x);
-                    }
-                    if let Some(x) = args.path {
-                        builder.add_path(x);
-                    }
-                    builder.finish()
-                }
+impl<'a> FileHashEntry<'a> {
+  pub const VT_PATH: ::flatbuffers::VOffsetT = 4;
+  pub const VT_DESCRIPTOR_HASH: ::flatbuffers::VOffsetT = 6;
 
-                #[inline]
-                pub fn path(&self) -> Option<&'a str> {
-                    // Safety:
-                    // Created from valid Table for this object
-                    // which contains a valid value in this slot
-                    unsafe {
-                        self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
-                            FileHashEntry::VT_PATH,
-                            None,
-                        )
-                    }
-                }
-                #[inline]
-                pub fn descriptor_hash(&self) -> Option<&'a str> {
-                    // Safety:
-                    // Created from valid Table for this object
-                    // which contains a valid value in this slot
-                    unsafe {
-                        self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
-                            FileHashEntry::VT_DESCRIPTOR_HASH,
-                            None,
-                        )
-                    }
-                }
-            }
+  #[inline]
+  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+    FileHashEntry { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args FileHashEntryArgs<'args>
+  ) -> ::flatbuffers::WIPOffset<FileHashEntry<'bldr>> {
+    let mut builder = FileHashEntryBuilder::new(_fbb);
+    if let Some(x) = args.descriptor_hash { builder.add_descriptor_hash(x); }
+    if let Some(x) = args.path { builder.add_path(x); }
+    builder.finish()
+  }
 
-            impl ::flatbuffers::Verifiable for FileHashEntry<'_> {
-                #[inline]
-                fn run_verifier(
-                    v: &mut ::flatbuffers::Verifier,
-                    pos: usize,
-                ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                    v.visit_table(pos)?
-                        .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
-                            "path",
-                            Self::VT_PATH,
-                            false,
-                        )?
-                        .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
-                            "descriptor_hash",
-                            Self::VT_DESCRIPTOR_HASH,
-                            false,
-                        )?
-                        .finish();
-                    Ok(())
-                }
-            }
-            pub struct FileHashEntryArgs<'a> {
-                pub path: Option<::flatbuffers::WIPOffset<&'a str>>,
-                pub descriptor_hash: Option<::flatbuffers::WIPOffset<&'a str>>,
-            }
-            impl<'a> Default for FileHashEntryArgs<'a> {
-                #[inline]
-                fn default() -> Self {
-                    FileHashEntryArgs {
-                        path: None,
-                        descriptor_hash: None,
-                    }
-                }
-            }
 
-            pub struct FileHashEntryBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-                fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-                start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-            }
-            impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> FileHashEntryBuilder<'a, 'b, A> {
-                #[inline]
-                pub fn add_path(&mut self, path: ::flatbuffers::WIPOffset<&'b str>) {
-                    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
-                        FileHashEntry::VT_PATH,
-                        path,
-                    );
-                }
-                #[inline]
-                pub fn add_descriptor_hash(
-                    &mut self,
-                    descriptor_hash: ::flatbuffers::WIPOffset<&'b str>,
-                ) {
-                    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
-                        FileHashEntry::VT_DESCRIPTOR_HASH,
-                        descriptor_hash,
-                    );
-                }
-                #[inline]
-                pub fn new(
-                    _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-                ) -> FileHashEntryBuilder<'a, 'b, A> {
-                    let start = _fbb.start_table();
-                    FileHashEntryBuilder {
-                        fbb_: _fbb,
-                        start_: start,
-                    }
-                }
-                #[inline]
-                pub fn finish(self) -> ::flatbuffers::WIPOffset<FileHashEntry<'a>> {
-                    let o = self.fbb_.end_table(self.start_);
-                    ::flatbuffers::WIPOffset::new(o.value())
-                }
-            }
+  #[inline]
+  pub fn path(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(FileHashEntry::VT_PATH, None)}
+  }
+  #[inline]
+  pub fn descriptor_hash(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(FileHashEntry::VT_DESCRIPTOR_HASH, None)}
+  }
+}
 
-            impl ::core::fmt::Debug for FileHashEntry<'_> {
-                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                    let mut ds = f.debug_struct("FileHashEntry");
-                    ds.field("path", &self.path());
-                    ds.field("descriptor_hash", &self.descriptor_hash());
-                    ds.finish()
-                }
-            }
-            pub enum MetadataHashOffset {}
-            #[derive(Copy, Clone, PartialEq)]
+impl ::flatbuffers::Verifiable for FileHashEntry<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut ::flatbuffers::Verifier, pos: usize
+  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+    v.visit_table(pos)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("path", Self::VT_PATH, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("descriptor_hash", Self::VT_DESCRIPTOR_HASH, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct FileHashEntryArgs<'a> {
+    pub path: Option<::flatbuffers::WIPOffset<&'a str>>,
+    pub descriptor_hash: Option<::flatbuffers::WIPOffset<&'a str>>,
+}
+impl<'a> Default for FileHashEntryArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    FileHashEntryArgs {
+      path: None,
+      descriptor_hash: None,
+    }
+  }
+}
 
-            pub struct MetadataHash<'a> {
-                pub _tab: ::flatbuffers::Table<'a>,
-            }
+pub struct FileHashEntryBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> FileHashEntryBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_path(&mut self, path: ::flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(FileHashEntry::VT_PATH, path);
+  }
+  #[inline]
+  pub fn add_descriptor_hash(&mut self, descriptor_hash: ::flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(FileHashEntry::VT_DESCRIPTOR_HASH, descriptor_hash);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> FileHashEntryBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    FileHashEntryBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> ::flatbuffers::WIPOffset<FileHashEntry<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    ::flatbuffers::WIPOffset::new(o.value())
+  }
+}
 
-            impl<'a> ::flatbuffers::Follow<'a> for MetadataHash<'a> {
-                type Inner = MetadataHash<'a>;
-                #[inline]
-                unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                    Self {
-                        _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                    }
-                }
-            }
+impl ::core::fmt::Debug for FileHashEntry<'_> {
+  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+    let mut ds = f.debug_struct("FileHashEntry");
+      ds.field("path", &self.path());
+      ds.field("descriptor_hash", &self.descriptor_hash());
+      ds.finish()
+  }
+}
+pub enum MetadataHashOffset {}
+#[derive(Copy, Clone, PartialEq)]
 
-            impl<'a> MetadataHash<'a> {
-                pub const VT_FILES: ::flatbuffers::VOffsetT = 4;
+pub struct MetadataHash<'a> {
+  pub _tab: ::flatbuffers::Table<'a>,
+}
 
-                #[inline]
-                pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                    MetadataHash { _tab: table }
-                }
-                #[allow(unused_mut)]
-                pub fn create<
-                    'bldr: 'args,
-                    'args: 'mut_bldr,
-                    'mut_bldr,
-                    A: ::flatbuffers::Allocator + 'bldr,
-                >(
-                    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                    args: &'args MetadataHashArgs<'args>,
-                ) -> ::flatbuffers::WIPOffset<MetadataHash<'bldr>> {
-                    let mut builder = MetadataHashBuilder::new(_fbb);
-                    if let Some(x) = args.files {
-                        builder.add_files(x);
-                    }
-                    builder.finish()
-                }
+impl<'a> ::flatbuffers::Follow<'a> for MetadataHash<'a> {
+  type Inner = MetadataHash<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
+  }
+}
 
-                #[inline]
-                pub fn files(
-                    &self,
-                ) -> Option<
-                    ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<FileHashEntry<'a>>>,
-                > {
-                    // Safety:
-                    // Created from valid Table for this object
-                    // which contains a valid value in this slot
-                    unsafe {
-                        self._tab.get::<::flatbuffers::ForwardsUOffset<
-                            ::flatbuffers::Vector<
-                                'a,
-                                ::flatbuffers::ForwardsUOffset<FileHashEntry>,
-                            >,
-                        >>(MetadataHash::VT_FILES, None)
-                    }
-                }
-            }
+impl<'a> MetadataHash<'a> {
+  pub const VT_FILES: ::flatbuffers::VOffsetT = 4;
 
-            impl ::flatbuffers::Verifiable for MetadataHash<'_> {
-                #[inline]
-                fn run_verifier(
-                    v: &mut ::flatbuffers::Verifier,
-                    pos: usize,
-                ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                    v.visit_table(pos)?
-                        .visit_field::<::flatbuffers::ForwardsUOffset<
-                            ::flatbuffers::Vector<
-                                '_,
-                                ::flatbuffers::ForwardsUOffset<FileHashEntry>,
-                            >,
-                        >>("files", Self::VT_FILES, false)?
-                        .finish();
-                    Ok(())
-                }
-            }
-            pub struct MetadataHashArgs<'a> {
-                pub files: Option<
-                    ::flatbuffers::WIPOffset<
-                        ::flatbuffers::Vector<
-                            'a,
-                            ::flatbuffers::ForwardsUOffset<FileHashEntry<'a>>,
-                        >,
-                    >,
-                >,
-            }
-            impl<'a> Default for MetadataHashArgs<'a> {
-                #[inline]
-                fn default() -> Self {
-                    MetadataHashArgs { files: None }
-                }
-            }
+  #[inline]
+  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+    MetadataHash { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args MetadataHashArgs<'args>
+  ) -> ::flatbuffers::WIPOffset<MetadataHash<'bldr>> {
+    let mut builder = MetadataHashBuilder::new(_fbb);
+    if let Some(x) = args.files { builder.add_files(x); }
+    builder.finish()
+  }
 
-            pub struct MetadataHashBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-                fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-                start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-            }
-            impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> MetadataHashBuilder<'a, 'b, A> {
-                #[inline]
-                pub fn add_files(
-                    &mut self,
-                    files: ::flatbuffers::WIPOffset<
-                        ::flatbuffers::Vector<
-                            'b,
-                            ::flatbuffers::ForwardsUOffset<FileHashEntry<'b>>,
-                        >,
-                    >,
-                ) {
-                    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
-                        MetadataHash::VT_FILES,
-                        files,
-                    );
-                }
-                #[inline]
-                pub fn new(
-                    _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-                ) -> MetadataHashBuilder<'a, 'b, A> {
-                    let start = _fbb.start_table();
-                    MetadataHashBuilder {
-                        fbb_: _fbb,
-                        start_: start,
-                    }
-                }
-                #[inline]
-                pub fn finish(self) -> ::flatbuffers::WIPOffset<MetadataHash<'a>> {
-                    let o = self.fbb_.end_table(self.start_);
-                    ::flatbuffers::WIPOffset::new(o.value())
-                }
-            }
 
-            impl ::core::fmt::Debug for MetadataHash<'_> {
-                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                    let mut ds = f.debug_struct("MetadataHash");
-                    ds.field("files", &self.files());
-                    ds.finish()
-                }
-            }
-            #[inline]
-            /// Verifies that a buffer of bytes contains a `MetadataHash`
-            /// and returns it.
-            /// Note that verification is still experimental and may not
-            /// catch every error, or be maximally performant. For the
-            /// previous, unchecked, behavior use
-            /// `root_as_metadata_hash_unchecked`.
-            pub fn root_as_metadata_hash(
-                buf: &[u8],
-            ) -> Result<MetadataHash<'_>, ::flatbuffers::InvalidFlatbuffer> {
-                ::flatbuffers::root::<MetadataHash>(buf)
-            }
-            #[inline]
-            /// Verifies that a buffer of bytes contains a size prefixed
-            /// `MetadataHash` and returns it.
-            /// Note that verification is still experimental and may not
-            /// catch every error, or be maximally performant. For the
-            /// previous, unchecked, behavior use
-            /// `size_prefixed_root_as_metadata_hash_unchecked`.
-            pub fn size_prefixed_root_as_metadata_hash(
-                buf: &[u8],
-            ) -> Result<MetadataHash<'_>, ::flatbuffers::InvalidFlatbuffer> {
-                ::flatbuffers::size_prefixed_root::<MetadataHash>(buf)
-            }
-            #[inline]
-            /// Verifies, with the given options, that a buffer of bytes
-            /// contains a `MetadataHash` and returns it.
-            /// Note that verification is still experimental and may not
-            /// catch every error, or be maximally performant. For the
-            /// previous, unchecked, behavior use
-            /// `root_as_metadata_hash_unchecked`.
-            pub fn root_as_metadata_hash_with_opts<'b, 'o>(
-                opts: &'o ::flatbuffers::VerifierOptions,
-                buf: &'b [u8],
-            ) -> Result<MetadataHash<'b>, ::flatbuffers::InvalidFlatbuffer> {
-                ::flatbuffers::root_with_opts::<MetadataHash<'b>>(opts, buf)
-            }
-            #[inline]
-            /// Verifies, with the given verifier options, that a buffer of
-            /// bytes contains a size prefixed `MetadataHash` and returns
-            /// it. Note that verification is still experimental and may not
-            /// catch every error, or be maximally performant. For the
-            /// previous, unchecked, behavior use
-            /// `root_as_metadata_hash_unchecked`.
-            pub fn size_prefixed_root_as_metadata_hash_with_opts<'b, 'o>(
-                opts: &'o ::flatbuffers::VerifierOptions,
-                buf: &'b [u8],
-            ) -> Result<MetadataHash<'b>, ::flatbuffers::InvalidFlatbuffer> {
-                ::flatbuffers::size_prefixed_root_with_opts::<MetadataHash<'b>>(opts, buf)
-            }
-            #[inline]
-            /// Assumes, without verification, that a buffer of bytes contains a MetadataHash and returns it.
-            /// # Safety
-            /// Callers must trust the given bytes do indeed contain a valid `MetadataHash`.
-            pub unsafe fn root_as_metadata_hash_unchecked(buf: &[u8]) -> MetadataHash<'_> {
-                unsafe { ::flatbuffers::root_unchecked::<MetadataHash>(buf) }
-            }
-            #[inline]
-            /// Assumes, without verification, that a buffer of bytes contains a size prefixed MetadataHash and returns it.
-            /// # Safety
-            /// Callers must trust the given bytes do indeed contain a valid size prefixed `MetadataHash`.
-            pub unsafe fn size_prefixed_root_as_metadata_hash_unchecked(
-                buf: &[u8],
-            ) -> MetadataHash<'_> {
-                unsafe { ::flatbuffers::size_prefixed_root_unchecked::<MetadataHash>(buf) }
-            }
-            #[inline]
-            pub fn finish_metadata_hash_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(
-                fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-                root: ::flatbuffers::WIPOffset<MetadataHash<'a>>,
-            ) {
-                fbb.finish(root, None);
-            }
+  #[inline]
+  pub fn files(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<FileHashEntry<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<FileHashEntry>>>>(MetadataHash::VT_FILES, None)}
+  }
+}
 
-            #[inline]
-            pub fn finish_size_prefixed_metadata_hash_buffer<
-                'a,
-                'b,
-                A: ::flatbuffers::Allocator + 'a,
-            >(
-                fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-                root: ::flatbuffers::WIPOffset<MetadataHash<'a>>,
-            ) {
-                fbb.finish_size_prefixed(root, None);
-            }
-        } // pub mod hash
-    } // pub mod verity
-} // pub mod cryptpilot
+impl ::flatbuffers::Verifiable for MetadataHash<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut ::flatbuffers::Verifier, pos: usize
+  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+    v.visit_table(pos)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<FileHashEntry>>>>("files", Self::VT_FILES, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct MetadataHashArgs<'a> {
+    pub files: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<FileHashEntry<'a>>>>>,
+}
+impl<'a> Default for MetadataHashArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    MetadataHashArgs {
+      files: None,
+    }
+  }
+}
+
+pub struct MetadataHashBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> MetadataHashBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_files(&mut self, files: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<FileHashEntry<'b >>>>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(MetadataHash::VT_FILES, files);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> MetadataHashBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    MetadataHashBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> ::flatbuffers::WIPOffset<MetadataHash<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    ::flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl ::core::fmt::Debug for MetadataHash<'_> {
+  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+    let mut ds = f.debug_struct("MetadataHash");
+      ds.field("files", &self.files());
+      ds.finish()
+  }
+}
+#[inline]
+/// Verifies that a buffer of bytes contains a `MetadataHash`
+/// and returns it.
+/// Note that verification is still experimental and may not
+/// catch every error, or be maximally performant. For the
+/// previous, unchecked, behavior use
+/// `root_as_metadata_hash_unchecked`.
+pub fn root_as_metadata_hash(buf: &[u8]) -> Result<MetadataHash<'_>, ::flatbuffers::InvalidFlatbuffer> {
+  ::flatbuffers::root::<MetadataHash>(buf)
+}
+#[inline]
+/// Verifies that a buffer of bytes contains a size prefixed
+/// `MetadataHash` and returns it.
+/// Note that verification is still experimental and may not
+/// catch every error, or be maximally performant. For the
+/// previous, unchecked, behavior use
+/// `size_prefixed_root_as_metadata_hash_unchecked`.
+pub fn size_prefixed_root_as_metadata_hash(buf: &[u8]) -> Result<MetadataHash<'_>, ::flatbuffers::InvalidFlatbuffer> {
+  ::flatbuffers::size_prefixed_root::<MetadataHash>(buf)
+}
+#[inline]
+/// Verifies, with the given options, that a buffer of bytes
+/// contains a `MetadataHash` and returns it.
+/// Note that verification is still experimental and may not
+/// catch every error, or be maximally performant. For the
+/// previous, unchecked, behavior use
+/// `root_as_metadata_hash_unchecked`.
+pub fn root_as_metadata_hash_with_opts<'b, 'o>(
+  opts: &'o ::flatbuffers::VerifierOptions,
+  buf: &'b [u8],
+) -> Result<MetadataHash<'b>, ::flatbuffers::InvalidFlatbuffer> {
+  ::flatbuffers::root_with_opts::<MetadataHash<'b>>(opts, buf)
+}
+#[inline]
+/// Verifies, with the given verifier options, that a buffer of
+/// bytes contains a size prefixed `MetadataHash` and returns
+/// it. Note that verification is still experimental and may not
+/// catch every error, or be maximally performant. For the
+/// previous, unchecked, behavior use
+/// `root_as_metadata_hash_unchecked`.
+pub fn size_prefixed_root_as_metadata_hash_with_opts<'b, 'o>(
+  opts: &'o ::flatbuffers::VerifierOptions,
+  buf: &'b [u8],
+) -> Result<MetadataHash<'b>, ::flatbuffers::InvalidFlatbuffer> {
+  ::flatbuffers::size_prefixed_root_with_opts::<MetadataHash<'b>>(opts, buf)
+}
+#[inline]
+/// Assumes, without verification, that a buffer of bytes contains a MetadataHash and returns it.
+/// # Safety
+/// Callers must trust the given bytes do indeed contain a valid `MetadataHash`.
+pub unsafe fn root_as_metadata_hash_unchecked(buf: &[u8]) -> MetadataHash<'_> {
+  unsafe { ::flatbuffers::root_unchecked::<MetadataHash>(buf) }
+}
+#[inline]
+/// Assumes, without verification, that a buffer of bytes contains a size prefixed MetadataHash and returns it.
+/// # Safety
+/// Callers must trust the given bytes do indeed contain a valid size prefixed `MetadataHash`.
+pub unsafe fn size_prefixed_root_as_metadata_hash_unchecked(buf: &[u8]) -> MetadataHash<'_> {
+  unsafe { ::flatbuffers::size_prefixed_root_unchecked::<MetadataHash>(buf) }
+}
+#[inline]
+pub fn finish_metadata_hash_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(
+    fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    root: ::flatbuffers::WIPOffset<MetadataHash<'a>>) {
+  fbb.finish(root, None);
+}
+
+#[inline]
+pub fn finish_size_prefixed_metadata_hash_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>, root: ::flatbuffers::WIPOffset<MetadataHash<'a>>) {
+  fbb.finish_size_prefixed(root, None);
+}
+}  // pub mod hash
+}  // pub mod verity
+}  // pub mod cryptpilot
+
