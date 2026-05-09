@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+## Rust-Go Sync
+
+When modifying the Rust `cryptpilot-verity`, `verity-core`, or `verity-fuse` code, always evaluate whether the corresponding Go library (`verity-go/`) needs the same change. If the change affects core algorithms (hash computation, merkle tree, descriptor format) or metadata structures (FlatBuffers schema, serialization), apply the equivalent change to the Go code in the same commit.
+
+## Excluded Paths
+
+Never commit files under `docs/superpowers/` or `.claude/` to git. These are Claude session artifacts and should be kept local only. Add them to `.gitignore` if not already present.
+
 ## Git Commit Requirements
 
 When creating or amending commits:

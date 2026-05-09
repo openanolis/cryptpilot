@@ -1,0 +1,36 @@
+// FlatBuffers schema for cryptpilot-verity metadata
+
+namespace cryptpilot.verity;
+
+// FsVerity descriptor information
+table FsVerityDescriptor {
+  version: ubyte;          // must be 1
+  hash_algorithm: ubyte;   // Merkle tree hash algorithm (1=SHA256, 2=SHA512)
+  log_blocksize: ubyte;    // log2 of size of data and tree blocks
+  data_size: ulong;        // size of file the Merkle tree is built over
+  root_hash: [ubyte];      // Merkle tree root hash (binary)
+  salt: [ubyte];           // salt prepended to each hashed block
+}
+
+// Key-value pair for metadata labels
+table KeyValue {
+  key: string;
+  value: string;
+}
+
+// Single file information with fs-verity data
+table FileInfo {
+  path: string;                           // relative path of the file
+  descriptor: FsVerityDescriptor;         // fs-verity descriptor
+  merkle_tree_level1: [ubyte];            // Level 1 merkle tree hashes (concatenated binary)
+  descriptor_hash: string;                // hex-encoded descriptor hash (final measurement)
+}
+
+// Root metadata structures containing all file information
+table Metadata {
+  version: uint = 1;        // metadata format version for backward compatibility
+  files: [FileInfo];
+  labels: [KeyValue];
+}
+
+root_type Metadata;

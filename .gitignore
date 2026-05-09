@@ -24,3 +24,6 @@ cryptpilot-verity/benchmark/verity_source_data/
 
 # Superpowers design docs
 docs/superpowers/
+
+# Claude session artifacts
+.claude/
