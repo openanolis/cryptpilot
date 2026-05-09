@@ -24,21 +24,31 @@ func (t *MerkleTree) Level1AsBytes() []byte {
 
 // RebuildRootHash reconstructs the root hash from level-1 hashes.
 // Used when loading a tree from serialized metadata.
+// When there are more level-1 hashes than fit in one block, this builds
+// intermediate tree levels using the full FsVerityDigest pipeline.
 func (t *MerkleTree) RebuildRootHash(salt []byte, blockSize int) []byte {
+	if len(t.level1) == 0 {
+		// Empty file: root hash is all zeros
+		return make([]byte, t.algo.digestSize())
+	}
 	if len(t.level1) == 1 {
 		return t.level1[0]
 	}
 
-	h := saltToDigest(t.algo, salt)
+	// Use a full FsVerityDigest to process the level-1 hashes,
+	// matching the Rust implementation's rebuild_root_hash.
+	d := NewFsVerityWithSaltAndBlockSize(t.algo, salt, blockSize)
 	for _, hash := range t.level1 {
-		h.Write(hash)
+		d.Write(hash)
 	}
 	// Pad to block boundary
-	padding := (blockSize - (len(t.level1)*t.algo.digestSize())%blockSize) % blockSize
+	totalBytes := len(t.level1) * t.algo.digestSize()
+	padding := (blockSize - totalBytes%blockSize) % blockSize
 	if padding > 0 {
-		h.Write(make([]byte, padding))
+		d.Write(make([]byte, padding))
 	}
-	return h.Sum(nil)
+	desc, _ := d.Finalize()
+	return desc.RootHash
 }
 
 // VerifyDataBlock verifies a single data block against the merkle tree.

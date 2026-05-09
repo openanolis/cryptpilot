@@ -149,6 +149,8 @@ func (d *FsVerityDigest) update(data []byte) {
 			if levelIdx == 0 {
 				d.merkleTree.level1 = append(d.merkleTree.level1, hash)
 			}
+			// Append the overflow to the freshly reset level (matches Rust behavior)
+			level.append(overflow)
 			overflow = hash
 			keepSpace = true
 		}
