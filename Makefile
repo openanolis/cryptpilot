@@ -364,13 +364,17 @@ check-fbs:
 go-test:
 	cd verity-go && /usr/local/go/bin/go test -race -v ./... -skip TestInterop
 
-.PHONY: cross-test
-cross-test:
-	bash tests/cross_lang_test.sh
-
 .PHONY: check-all
 check-all: clippy go-test check-fbs
 	cargo fmt --check
+
+.PHONY: gen-interop-fixture
+gen-interop-fixture:
+	@echo "=== Generating interop fixture ==="
+	cd verity-core && python3 make_testfiles.py
+	cargo run -p cryptpilot-verity -- format verity-core/testfiles --hash-output - --label env=prod --force
+	cp verity-core/testfiles/cryptpilot-verity.metadata.fb verity-go/metadata/testdata/rust.metadata.fb
+	@echo "Fixture updated: verity-go/metadata/testdata/rust.metadata.fb"
 
 # Interop tests: Rust CLI produces → Go lib consumes, and vice versa
 
