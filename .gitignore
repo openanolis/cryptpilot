@@ -27,3 +27,6 @@ docs/superpowers/
 
 # Claude session artifacts
 .claude/
+
+# Generated test files
+testfiles/

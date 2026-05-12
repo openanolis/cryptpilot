@@ -82,14 +82,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
       - name: Verify interop fixture is up to date
         run: |
           python3 verity-core/make_testfiles.py
           cargo run -p cryptpilot-verity -- format verity-core/testfiles --hash-output - --label env=prod --force
           diff verity-core/testfiles/cryptpilot-verity.metadata.fb verity-go/metadata/testdata/rust.metadata.fb \
             || { echo "ERROR: interop fixture is stale. Run verity-go/metadata/gen_fixture.sh to regenerate."; exit 1; }
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
       - name: Run Go tests
         run: |
           cd verity-go
