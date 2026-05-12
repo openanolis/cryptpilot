@@ -41,6 +41,9 @@ func TestInterop_RustProducesGoVerifies(t *testing.T) {
 	dataDir := filepath.Join(dir, "data")
 
 	metadataPath := filepath.Join(dataDir, "cryptpilot-verity.metadata.fb")
+	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+		t.Skip("interop data not found — run `make interop-rust-produces` first")
+	}
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
 		t.Fatalf("read metadata: %v", err)

@@ -92,9 +92,31 @@ jobs:
         run: |
           cd verity-go
           go test -v ./... -run TestCross
-      - name: Install Rust toolchain for interop tests
+
+  interop-test:
+    runs-on: ubuntu-latest
+    container:
+      image: alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: 'true'
+      - name: Install dependencies
+        run: |
+          sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
+          sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+          yum update -y
+          yum install -y git yum-utils device-mapper kmod systemd systemd-udev lvm2 util-linux veritysetup fuse3 fuse3-libs
+          yum-builddep -y --skip-unavailable ./cryptpilot.spec
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.85.0
+      - name: Install Go
+        run: |
+          curl -fsSL https://go.dev/dl/go1.24.0.linux-amd64.tar.gz | tar -C /usr/local -xz
+          export PATH=/usr/local/go/bin:$PATH
+          go version
       - name: Run interop tests
         run: |
-          yum-builddep -y --skip-unavailable ./cryptpilot.spec
+          export PATH=/usr/local/go/bin:$PATH
           make interop-test

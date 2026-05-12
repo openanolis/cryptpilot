@@ -400,10 +400,10 @@ interop-go-produces:
 		/tmp/cryptpilot-interop2/data --print-root-hash 2>&1 | tail -1) && \
 	cargo run -p cryptpilot-verity --quiet -- verify \
 		/tmp/cryptpilot-interop2/data "$$HASH"
-	@rm -rf /tmp/cryptpilot-interop /tmp/cryptpilot-interop2
-	@echo "Interop dirs cleaned up"
 
 .PHONY: interop-test
 interop-test: interop-rust-produces interop-go-produces
+	@rm -rf /tmp/cryptpilot-interop /tmp/cryptpilot-interop2
+	@echo "Interop dirs cleaned up"
 	@echo "=== All interop tests passed ==="
 
