@@ -29,7 +29,7 @@ Rust `cryptpilot-verity` CLI 可自动完成完整流程 — 遍历目录、
 计算每个文件的 fs-verity、构建 Merkle 树、输出 FlatBuffers 元数据文件：
 
 ```bash
-cargo run -p cryptpilot-verity -- format /path/to/dir --label env=prod -m metadata.fb
+cargo run -p cryptpilot-verity -- format /path/to/dir --label env=prod -m metadata.fb --hash-output -
 ```
 
 #### 方式 B：Go 代码实现
