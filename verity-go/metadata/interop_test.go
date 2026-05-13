@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"testing"
 
-	"cryptpilot-verity-go/verity"
+	"github.com/openanolis/cryptpilot/verity-go/verity"
 )
 
 // expectedDescriptorHashes maps test file name to expected SHA-256 descriptor hash.

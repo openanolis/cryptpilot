@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"cryptpilot-verity-go/verity"
+	"github.com/openanolis/cryptpilot/verity-go/verity"
 )
 
 func makeTestFileVerityInfo(path string, data []byte) FileVerityInfo {

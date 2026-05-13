@@ -1,4 +1,4 @@
-module cryptpilot-verity-go
+module github.com/openanolis/cryptpilot/verity-go
 
 go 1.24
 

@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"cryptpilot-verity-go/metadata/generated"
+	"github.com/openanolis/cryptpilot/verity-go/metadata/generated"
 
 	flatbuffers "github.com/google/flatbuffers/go"
 )

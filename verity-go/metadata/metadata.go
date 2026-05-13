@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sort"
 
-	"cryptpilot-verity-go/metadata/generated"
-	"cryptpilot-verity-go/verity"
+	"github.com/openanolis/cryptpilot/verity-go/metadata/generated"
+	"github.com/openanolis/cryptpilot/verity-go/verity"
 
 	flatbuffers "github.com/google/flatbuffers/go"
 )

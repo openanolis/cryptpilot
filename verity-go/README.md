@@ -30,7 +30,7 @@ compute fs-verity for each file, build the Merkle tree, and write the FlatBuffer
 metadata file:
 
 ```bash
-cargo run -p cryptpilot-verity -- format /path/to/dir --label env=prod --hash-output metadata.fb
+cargo run -p cryptpilot-verity -- format /path/to/dir --label env=prod -m metadata.fb
 ```
 
 #### Option B: Go implementation
@@ -42,7 +42,6 @@ package main
 
 import (
 	"encoding/hex"
-	"fmt"
 	"os"
 
 	"github.com/openanolis/cryptpilot/verity-go/metadata"
@@ -76,7 +75,6 @@ are available:
 package main
 
 import (
-	"encoding/hex"
 	"fmt"
 	"os"
 
