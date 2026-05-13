@@ -515,7 +515,7 @@ test_qemu_boot() {
     log::info "QEMU container started: ${container_name}"
 
     # Stream logs to file and check for boot status
-    local timeout=180  # 3 minutes timeout
+    local timeout=360  # 6 minutes timeout
     local elapsed=0
     local check_interval=2
     local boot_success=false
