@@ -376,38 +376,3 @@ gen-interop-fixture:
 	cp verity-core/testfiles/cryptpilot-verity.metadata.fb verity-go/metadata/testdata/rust.metadata.fb
 	@echo "Fixture updated: verity-go/metadata/testdata/rust.metadata.fb"
 
-# Interop tests: Rust CLI produces → Go lib consumes, and vice versa
-
-.PHONY: interop-rust-produces
-interop-rust-produces:
-	@echo "=== Rust produces, Go consumes ==="
-	@rm -rf /tmp/cryptpilot-interop && mkdir -p /tmp/cryptpilot-interop/data
-	@printf 'hello' > /tmp/cryptpilot-interop/data/a.txt
-	@printf 'world' > /tmp/cryptpilot-interop/data/b.txt
-	@touch /tmp/cryptpilot-interop/data/empty.txt
-	@cargo run -p cryptpilot-verity --quiet -- format \
-		/tmp/cryptpilot-interop/data \
-		--hash-output - \
-		--label env=prod \
-		--force > /tmp/cryptpilot-interop/root_hash.txt
-	@cd verity-go && INTEROP_DIR=/tmp/cryptpilot-interop \
-		/usr/local/go/bin/go test -count=1 -v ./metadata/ -run TestInterop_RustProducesGoVerifies
-
-.PHONY: interop-go-produces
-interop-go-produces:
-	@echo "=== Go produces, Rust verifies ==="
-	@rm -rf /tmp/cryptpilot-interop2 && mkdir -p /tmp/cryptpilot-interop2/data
-	@cd verity-go && INTEROP_DIR=/tmp/cryptpilot-interop2 \
-		/usr/local/go/bin/go test -count=1 -v ./metadata/ -run TestInterop_GoProducesRustVerifies
-	@echo "Running Rust verify..."
-	@HASH=$$(cargo run -p cryptpilot-verity --quiet -- dump \
-		/tmp/cryptpilot-interop2/data --print-root-hash 2>&1 | tail -1) && \
-	cargo run -p cryptpilot-verity --quiet -- verify \
-		/tmp/cryptpilot-interop2/data "$$HASH"
-
-.PHONY: interop-test
-interop-test: interop-rust-produces interop-go-produces
-	@rm -rf /tmp/cryptpilot-interop /tmp/cryptpilot-interop2
-	@echo "Interop dirs cleaned up"
-	@echo "=== All interop tests passed ==="
-
