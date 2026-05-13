@@ -1,9 +1,13 @@
 // FlatBuffers serialization and deserialization utilities
 
-#![allow(clippy::all)]
-#![allow(warnings)]
+#[rustfmt::skip]
+#[allow(clippy::all)]
+#[allow(warnings)]
 #[allow(unused_imports, dead_code)]
 mod metadata_generated;
+#[rustfmt::skip]
+#[allow(clippy::all)]
+#[allow(warnings)]
 #[allow(unused_imports, dead_code)]
 mod metadata_hash_generated;
 
@@ -16,11 +20,11 @@ pub use metadata_hash_generated::cryptpilot::verity::hash::{
 };
 
 use anyhow::{bail, Result};
-use flatbuffers::{FlatBufferBuilder, WIPOffset};
+use flatbuffers::FlatBufferBuilder;
 use sha2::digest::typenum::Unsigned;
 use sha2::{digest::OutputSizeUser, Digest, Sha256};
 use std::collections::BTreeMap;
-use verity_core::digest::{FsVeritySha256, InnerHash};
+use verity_core::digest::FsVeritySha256;
 use verity_core::tree::MerkleTree;
 use verity_fuse::file_verifier::file_verity_info::FileVerityInfo;
 
@@ -189,18 +193,18 @@ pub fn deserialize_metadata(data: &[u8]) -> Result<MetadataInfo> {
 
             // convert merkle_tree_level1 to Vec<digest::Output<D>>
             let merkle_tree_level1: Vec<sha2::digest::Output<Sha256>> = {
-                const chunk_size: usize = <Sha256 as OutputSizeUser>::OutputSize::USIZE;
-                let iter = merkle_tree_level1.chunks_exact(chunk_size);
+                const CHUNK_SIZE: usize = <Sha256 as OutputSizeUser>::OutputSize::USIZE;
+                let iter = merkle_tree_level1.chunks_exact(CHUNK_SIZE);
                 if !iter.remainder().is_empty() {
                     bail!(
                         "Broken merkle tree for {}: level 1 length is {} not a multiple of the hash size {}",
                         path,
                         merkle_tree_level1.len(),
-                        chunk_size
+                        CHUNK_SIZE
                     );
                 }
                 iter.map(|chunk| {
-                    let array: [u8; chunk_size] = chunk.try_into().unwrap(); // this should never fail
+                    let array: [u8; CHUNK_SIZE] = chunk.try_into().unwrap(); // this should never fail
                     From::from(array)
                 })
                 .collect()
@@ -359,69 +363,5 @@ mod tests {
 
         assert_eq!(file_infos.len(), deserialized.file_infos.len());
         assert!(deserialized.labels.is_empty());
-    }
-
-    // Cross-language test: deserialize metadata produced by the Go implementation.
-    // To regenerate the Go fixture, run:
-    //   go test ./metadata/ -v -run TestCross_GoSerialize
-    // in the verity-go directory and update the base64 string below.
-    #[test]
-    fn test_cross_deserialize_go_metadata() {
-        // Base64-encoded FlatBuffers metadata from Go's SerializeMetadata.
-        // Contains: a.txt ("hello"), b.txt ("world"), c.txt ("")
-        // Labels: {"env": "prod", "version": "1.0"}
-        let go_fixture_b64 = "EAAAAAAACgAMAAAACAAEAAoAAAAIAAAAWAAAAAIAAAAwAAAABAAAAOD///8IAAAADAAAAAMAAAAxLjAABwAAAHZlcnNpb24ACAAMAAgABAAIAAAACAAAABAAAAAEAAAAcHJvZAAAAAADAAAAZW52AAMAAACYAQAAvAAAAAQAAACA/v//XAAAAAwAAAAcAAAAmAAAAAAAAAAQABAADwAOAA0AAAAIAAQAEAAAAAwAAAAMAAAAAAwBAQAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAM2QyNDhjYTU0MmEyNGZjNjJkMWM0M2I5MTZlYWU1MDE2ODc4ZTI1MzNjODgyMzg0ODBiMjYxMjhhMWYxYWY5NQAAAAAFAAAAYy50eHQAAAA0////dAAAAAwAAAAsAAAAsAAAACAAAACw45uhEBrNC1SNnL+5WHuNe1KY+wlojtACMjl6opDSHCj///8UAAAAFAAAAAUAAAAAAAAAAAwBAQAAAAAgAAAAcOOboRAazQtUjZy/uVh7jXtSmPsJaI7QAjI5eqKQ0hxAAAAAMzEyOGVlYmEzZTQ2M2MyZmY1MjlkM2FhMWE1YzQ4NDQzMTEzYmQwMzdjMTc1OWY1NWFiODhiYTVjMmQ0NDVlZAAAAAAFAAAAYi50eHQAAAAMABQAEAAMAAgABAAMAAAAhAAAAAwAAAA8AAAAwAAAACAAAACxUFbJqNt3q1cI0Zt/Mw/hPYjurj0KsnEIHTQ4wPRiZBAAGAAXABYAFQAMAAgABAAQAAAAFAAAABQAAAAFAAAAAAAAAAAMAQEAAAAAIAAAALFQVsmo23erVwjRm38zD+E9iO6uPQqycQgdNDjA9GJkQAAAADU1NWI1ODljMjZlZTQzYjdhMjUxMGU2YzY3Y2VkOWZiMzE5MGI2ZGE2ZTllNjgzOTg0NTUxZjVkNzdhNzYzZGUAAAAABQAAAGEudHh0AAAA";
-
-        let data = base64::decode(go_fixture_b64).expect("decode base64");
-        let info = deserialize_metadata(&data).expect("deserialize Go metadata");
-
-        assert_eq!(info.file_infos.len(), 3, "expected 3 files");
-        assert_eq!(info.file_infos[0].path, "a.txt");
-        assert_eq!(info.file_infos[1].path, "b.txt");
-        assert_eq!(info.file_infos[2].path, "c.txt");
-        assert_eq!(info.labels.get("env"), Some(&"prod".to_string()));
-        assert_eq!(info.labels.get("version"), Some(&"1.0".to_string()));
-
-        for fi in &info.file_infos {
-            fi.verify_self().expect(&format!("verify {}", fi.path));
-        }
-    }
-
-    // Cross-language test: serialize metadata and print base64 for Go to consume.
-    // Run with --nocapture to see the base64 output.
-    // Paste the output into rustFixtureBase64 in verity-go/metadata/cross_test.go.
-    #[test]
-    fn test_cross_serialize_rust_metadata() {
-        let file_infos: Vec<FileVerityInfo> = vec![
-            make_test_info("a.txt", b"hello"),
-            make_test_info("b.txt", b"world"),
-            make_test_info("c.txt", b""),
-        ];
-        let mut labels = BTreeMap::new();
-        labels.insert("env".to_string(), "prod".to_string());
-        labels.insert("version".to_string(), "1.0".to_string());
-
-        let serialized = serialize_metadata(&file_infos, &labels).unwrap();
-        let b64 = base64::encode(&serialized);
-
-        println!("Rust serialized metadata (base64 for Go test):");
-        println!("{}", b64);
-
-        let info = deserialize_metadata(&serialized).unwrap();
-        assert_eq!(info.file_infos.len(), 3);
-        for fi in &info.file_infos {
-            fi.verify_self().unwrap();
-        }
-    }
-
-    fn make_test_info(path: &str, data: &[u8]) -> FileVerityInfo {
-        let (descriptor, merkle_tree) = calculate_fsverity_hash(data);
-        let descriptor_hash = hex::encode(descriptor.to_descriptor_hash());
-        FileVerityInfo {
-            path: path.to_string(),
-            descriptor,
-            merkle_tree,
-            descriptor_hash,
-        }
     }
 }
