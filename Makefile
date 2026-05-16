@@ -15,6 +15,9 @@ else
 	MUSL_PATH_ARCH := $(ARCH)
 endif
 
+# Auto-detect the latest built fde-guest RPM
+CRYPTPILOT_FDE_RPM := $(shell ls -t /root/rpmbuild/RPMS/$(ARCH)/cryptpilot-fde-guest-*.rpm 2>/dev/null | head -n 1)
+
 .PHONE: help
 help:
 	@echo "Read README.md first"
