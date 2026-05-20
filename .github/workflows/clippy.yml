@@ -47,7 +47,7 @@ jobs:
         uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Install build dependencies
-        run: yum-builddep -y --skip-unavailable ./cryptpilot.spec
+        run: yum-builddep -y --skip-unavailable --define 'with_rustup 1' ./cryptpilot.spec
 
       - name: Install Clippy
         run: rustup component add clippy

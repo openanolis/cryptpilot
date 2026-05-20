@@ -68,7 +68,7 @@ jobs:
           submodules: 'true'
 
       - name: Install build dependencies
-        run: yum-builddep -y --skip-unavailable ./cryptpilot.spec
+        run: yum-builddep -y --skip-unavailable --define 'with_rustup 1' ./cryptpilot.spec
 
       - name: Run test script from repo
         run: make run-test
