@@ -357,7 +357,6 @@ docker-build-all: docker-build
 .PHONY: check-fbs
 check-fbs:
 	@test -L verity-go/metadata/metadata.fbs || { echo "ERROR: metadata.fbs should be a symlink to Rust source"; exit 1; }
-	@test -L verity-go/metadata/metadata_hash.fbs || { echo "ERROR: metadata_hash.fbs should be a symlink to Rust source"; exit 1; }
 	@echo "FlatBuffers schemas are shared via symlink."
 
 .PHONY: go-test
@@ -372,7 +371,9 @@ check-all: clippy go-test check-fbs
 gen-interop-fixture:
 	@echo "=== Generating interop fixture ==="
 	cd verity-core && python3 make_testfiles.py
-	cargo run -p cryptpilot-verity -- format verity-core/testfiles --hash-output - --label env=prod --force
-	cp verity-core/testfiles/cryptpilot-verity.metadata.fb verity-go/metadata/testdata/rust.metadata.fb
-	@echo "Fixture updated: verity-go/metadata/testdata/rust.metadata.fb"
+	@HASH=$$(cargo run -q -p cryptpilot-verity -- format verity-core/testfiles --hash-output - --label env=prod --force); \
+	cp verity-core/testfiles/cryptpilot-verity.metadata.fb verity-go/metadata/testdata/rust.metadata.fb; \
+	echo "$$HASH" > verity-go/metadata/testdata/rust.metadata.fb.hash; \
+	echo "Fixture updated: verity-go/metadata/testdata/rust.metadata.fb"; \
+	echo "Root hash: $$HASH"
 

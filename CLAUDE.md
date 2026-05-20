@@ -4,6 +4,10 @@
 
 When modifying the Rust `cryptpilot-verity`, `verity-core`, or `verity-fuse` code, always evaluate whether the corresponding Go library (`verity-go/`) needs the same change. If the change affects core algorithms (hash computation, merkle tree, descriptor format) or metadata structures (FlatBuffers schema, serialization), apply the equivalent change to the Go code in the same commit.
 
+## Documentation Sync
+
+When creating or modifying features, commands, or interfaces, always evaluate whether the corresponding documentation (README.md, CLAUDE.md, or other .md files under the project) needs to be updated. If the change introduces new commands, modifies existing behavior, adds configuration options, or changes usage examples, update the relevant documentation in the same commit.
+
 ## Excluded Paths
 
 Never commit files under `docs/superpowers/` or `.claude/` to git. These are Claude session artifacts and should be kept local only. Add them to `.gitignore` if not already present.
@@ -40,6 +44,28 @@ Fix any errors or warnings reported before proceeding with the commit.
 - Run `make test` in `cryptpilot-verity/` to execute the full integration test suite
   (format, dump, verify, open/FUSE mount, tamper detection, close).
 - Run `cargo test -p verity-fuse -p verity-core` for unit tests (requires `cd verity-core && python3 make_testfiles.py` first).
+- Run Go tests: `cd verity-go && go test -race -v ./...`
+
+## Pre-Push / Pre-PR Checks
+
+Before pushing or creating a pull request, always run the relevant checks and ensure they pass.
+
+**Always run (regardless of what changed):**
+```bash
+cargo fmt --check
+cargo build        # or `make clippy` / `cargo clippy` if lints are relevant
+```
+
+**When modifying verity-related code** (`cryptpilot-verity`, `verity-core`, `verity-fuse`, or `verity-go`):
+```bash
+# Rust verity tests
+cargo test -p cryptpilot-verity -p verity-core -p verity-fuse
+
+# Go verity tests
+cd verity-go && go build ./... && go test -race -v ./...
+```
+
+For changes outside the verity subsystem, run the tests relevant to the affected packages only. If system dependencies are missing (e.g., `libcryptsetup`), the CI pipeline serves as the authoritative check, but `cargo fmt --check` must always pass locally.
 
 ## FUSE Dependency
 

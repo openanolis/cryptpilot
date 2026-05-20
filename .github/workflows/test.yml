@@ -87,9 +87,17 @@ jobs:
       - name: Verify interop fixture is up to date
         run: |
           (cd verity-core && python3 make_testfiles.py)
-          cargo run -p cryptpilot-verity -- format verity-core/testfiles --hash-output - --label env=prod --force
+          HASH=$(cargo run -q -p cryptpilot-verity -- format verity-core/testfiles --hash-output - --label env=prod --force)
           diff verity-core/testfiles/cryptpilot-verity.metadata.fb verity-go/metadata/testdata/rust.metadata.fb \
             || { echo "ERROR: interop fixture is stale. Run verity-go/metadata/gen_fixture.sh to regenerate."; exit 1; }
+          EXPECTED_HASH=$(cat verity-go/metadata/testdata/rust.metadata.fb.hash | tr -d '[:space:]')
+          if [ "$HASH" != "$EXPECTED_HASH" ]; then
+            echo "ERROR: root hash mismatch"
+            echo "  expected: $EXPECTED_HASH"
+            echo "  got:      $HASH"
+            exit 1
+          fi
+          echo "Interop fixture and root hash are up to date"
       - name: Run Go tests
         run: |
           cd verity-go

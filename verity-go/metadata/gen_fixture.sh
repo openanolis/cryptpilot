@@ -12,8 +12,11 @@ python3 make_testfiles.py
 
 echo "=== Running Rust format ==="
 cd "$REPO_ROOT"
-cargo run -p cryptpilot-verity -- format verity-core/testfiles --hash-output - --label env=prod --force
+HASH=$(cargo run -q -p cryptpilot-verity -- format verity-core/testfiles --hash-output - --label env=prod --force)
 
 echo "=== Copying fixture ==="
 cp verity-core/testfiles/cryptpilot-verity.metadata.fb verity-go/metadata/testdata/rust.metadata.fb
+echo "$HASH" > verity-go/metadata/testdata/rust.metadata.fb.hash
+
 echo "Fixture updated: verity-go/metadata/testdata/rust.metadata.fb"
+echo "Root hash: $HASH"

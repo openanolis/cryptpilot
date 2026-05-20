@@ -5,47 +5,55 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 
+	"github.com/gibson042/canonicaljson-go"
 	"github.com/openanolis/cryptpilot/verity-go/metadata/generated"
-
-	flatbuffers "github.com/google/flatbuffers/go"
 )
 
+// fileHashEntry is a single file entry for hash calculation.
+type fileHashEntry struct {
+	DescriptorHash string `json:"descriptor_hash"`
+	Path           string `json:"path"`
+}
+
+// metadataHash is the canonical JSON structure for metadata hash calculation.
+type metadataHash struct {
+	Files []fileHashEntry `json:"files"`
+}
+
 // CalculateMetadataHash extracts path+descriptor_hash from metadata, serializes
-// to the minimal MetadataHash format, and returns its SHA-256 digest (hex-encoded).
+// to canonical JSON (sorted by path, sorted keys via struct field order), and
+// returns its SHA-256 digest (hex-encoded).
 func CalculateMetadataHash(metadataBytes []byte) (string, error) {
 	md := generated.GetRootAsMetadata(metadataBytes, 0)
 
-	builder := flatbuffers.NewBuilder(0)
-
 	filesLen := md.FilesLength()
-	var filesVec flatbuffers.UOffsetT
+	entries := make([]fileHashEntry, filesLen)
 
-	if filesLen > 0 {
-		fileOffsets := make([]flatbuffers.UOffsetT, filesLen)
-		var fi generated.FileInfo
-		for i := 0; i < filesLen; i++ {
-			if !md.Files(&fi, i) {
-				return "", &ParseError{Message: fmt.Sprintf("missing FileInfo at index %d", i)}
-			}
-			pathOff := builder.CreateString(string(fi.Path()))
-			hashOff := builder.CreateString(string(fi.DescriptorHash()))
-			generated.FileHashEntryStart(builder)
-			generated.FileHashEntryAddPath(builder, pathOff)
-			generated.FileHashEntryAddDescriptorHash(builder, hashOff)
-			fileOffsets[i] = generated.FileHashEntryEnd(builder)
+	var fi generated.FileInfo
+	for i := 0; i < filesLen; i++ {
+		if !md.Files(&fi, i) {
+			return "", &ParseError{Message: fmt.Sprintf("missing FileInfo at index %d", i)}
 		}
-		filesVec = builder.CreateVectorOfTables(fileOffsets)
+		entries[i] = fileHashEntry{
+			DescriptorHash: string(fi.DescriptorHash()),
+			Path:           string(fi.Path()),
+		}
 	}
+	// Sort by path for deterministic output.
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Path < entries[j].Path
+	})
 
-	generated.MetadataHashStart(builder)
-	if filesLen > 0 {
-		generated.MetadataHashAddFiles(builder, filesVec)
+	doc := metadataHash{Files: entries}
+
+	jsonBytes, err := canonicaljson.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal canonical JSON: %w", err)
 	}
-	hashOff := generated.MetadataHashEnd(builder)
-	builder.Finish(hashOff)
 
 	h := sha256.New()
-	h.Write(builder.FinishedBytes())
+	h.Write(jsonBytes)
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

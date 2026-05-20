@@ -162,3 +162,39 @@ func findTestfilesDir(t *testing.T) string {
 	}
 	return ""
 }
+
+// TestInterop_CalculateMetadataHash_CrossLanguage loads the Rust-generated metadata
+// fixture and verifies that Go's CalculateMetadataHash produces the same root hash
+// as Rust's calculate_metadata_hash.
+func TestInterop_CalculateMetadataHash_CrossLanguage(t *testing.T) {
+	fbPath := filepath.Join(fixtureDir(), "rust.metadata.fb")
+	data, err := os.ReadFile(fbPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skip("fixture not found — run `make gen-interop-fixture` first")
+		}
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	// Read the expected root hash (committed alongside the fixture)
+	hashPath := filepath.Join(fixtureDir(), "rust.metadata.fb.hash")
+	expectedHashBytes, err := os.ReadFile(hashPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skip("root hash fixture not found — run `make gen-interop-fixture` first")
+		}
+		t.Fatalf("read root hash fixture: %v", err)
+	}
+	expectedHash := string(bytes.TrimSpace(expectedHashBytes))
+
+	// Calculate the hash using Go's implementation
+	goHash, err := CalculateMetadataHash(data)
+	if err != nil {
+		t.Fatalf("CalculateMetadataHash: %v", err)
+	}
+
+	if goHash != expectedHash {
+		t.Errorf("root hash mismatch\nexpected (Rust): %s\ngot (Go):      %s",
+			expectedHash, goHash)
+	}
+}

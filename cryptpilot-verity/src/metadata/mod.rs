@@ -5,21 +5,14 @@
 #[allow(warnings)]
 #[allow(unused_imports, dead_code)]
 mod metadata_generated;
-#[rustfmt::skip]
-#[allow(clippy::all)]
-#[allow(warnings)]
-#[allow(unused_imports, dead_code)]
-mod metadata_hash_generated;
 
 pub use metadata_generated::cryptpilot::verity::{
     FileInfo, FileInfoArgs, FsVerityDescriptor, FsVerityDescriptorArgs, KeyValue, KeyValueArgs,
     Metadata, MetadataArgs,
 };
-pub use metadata_hash_generated::cryptpilot::verity::hash::{
-    FileHashEntry, FileHashEntryArgs, MetadataHash, MetadataHashArgs,
-};
 
 use anyhow::{bail, Result};
+use canon_json::CanonJsonSerialize;
 use flatbuffers::FlatBufferBuilder;
 use sha2::digest::typenum::Unsigned;
 use sha2::{digest::OutputSizeUser, Digest, Sha256};
@@ -247,66 +240,56 @@ pub fn deserialize_metadata(data: &[u8]) -> Result<MetadataInfo> {
 /// This function:
 /// 1. Parses the full metadata
 /// 2. Extracts only essential fields (path, descriptor_hash)
-/// 3. Serializes them to MetadataHash format
+/// 3. Serializes them to canonical JSON (sorted by path, sorted keys via struct order)
 /// 4. Calculates SHA256 hash
 pub fn calculate_metadata_hash(metadata_bytes: &[u8]) -> Result<String> {
-    // Parse full metadata
     let metadata = flatbuffers::root::<Metadata>(metadata_bytes)
         .map_err(|e| anyhow::anyhow!("Failed to parse metadata: {}", e))?;
 
-    // Convert full Metadata FlatBuffer to MetadataHash for hash calculation
-    let hash_bytes = {
-        let mut builder = FlatBufferBuilder::new();
+    // Extract path + descriptor_hash pairs into a Vec, sorted by path
+    let mut entries: Vec<FileHashJsonEntry> = Vec::new();
+    if let Some(files) = metadata.files() {
+        for file_info in files {
+            let path = file_info
+                .path()
+                .ok_or_else(|| anyhow::anyhow!("Missing path in FileInfo"))?
+                .to_string();
+            let descriptor_hash = file_info
+                .descriptor_hash()
+                .ok_or_else(|| anyhow::anyhow!("Missing descriptor_hash in FileInfo"))?
+                .to_string();
+            entries.push(FileHashJsonEntry {
+                descriptor_hash,
+                path,
+            });
+        }
+    }
+    // FlatBuffers files are already sorted by path (see serialize_metadata),
+    // but sort again for determinism.
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
 
-        let files_vector = if let Some(files) = metadata.files() {
-            // Build FileHashEntry vector
-            let mut files_offsets = Vec::with_capacity(files.len());
-            for file_info in files {
-                let path = file_info
-                    .path()
-                    .ok_or_else(|| anyhow::anyhow!("Missing path in FileInfo"))?;
+    let doc = MetadataHashDoc { files: entries };
+    let json_bytes = doc
+        .to_canon_json_vec()
+        .map_err(|e| anyhow::anyhow!("marshal canonical JSON: {}", e))?;
 
-                let descriptor_hash = file_info
-                    .descriptor_hash()
-                    .ok_or_else(|| anyhow::anyhow!("Missing descriptor_hash in FileInfo"))?;
-
-                let path_offset = builder.create_string(path);
-                let hash_offset = builder.create_string(descriptor_hash);
-
-                let entry = FileHashEntry::create(
-                    &mut builder,
-                    &FileHashEntryArgs {
-                        path: Some(path_offset),
-                        descriptor_hash: Some(hash_offset),
-                    },
-                );
-                files_offsets.push(entry);
-            }
-
-            Some(builder.create_vector(&files_offsets))
-        } else {
-            None
-        };
-
-        // Create MetadataHash table
-        let metadata_hash = MetadataHash::create(
-            &mut builder,
-            &MetadataHashArgs {
-                files: files_vector,
-            },
-        );
-
-        builder.finish(metadata_hash, None);
-
-        // Serialize to MetadataHash format
-        builder.finished_data().to_vec()
-    };
-
-    // Calculate SHA256
     let mut hasher = sha2::Sha256::new();
-    hasher.update(&hash_bytes);
+    hasher.update(&json_bytes);
 
     Ok(hex::encode(hasher.finalize()))
+}
+
+/// Canonical JSON document for metadata hash calculation.
+#[derive(serde::Serialize)]
+struct MetadataHashDoc {
+    files: Vec<FileHashJsonEntry>,
+}
+
+/// Single file entry for hash calculation.
+#[derive(serde::Serialize)]
+struct FileHashJsonEntry {
+    descriptor_hash: String,
+    path: String,
 }
 
 #[cfg(test)]
@@ -363,5 +346,52 @@ mod tests {
 
         assert_eq!(file_infos.len(), deserialized.file_infos.len());
         assert!(deserialized.labels.is_empty());
+    }
+
+    #[test]
+    fn test_canonical_json_hash_determinism() {
+        let test_data = b"test file content";
+        let (descriptor, merkle_tree) = calculate_fsverity_hash(test_data);
+        let descriptor_hash = hex::encode(descriptor.to_descriptor_hash());
+        let info = FileVerityInfo {
+            path: "test.txt".to_string(),
+            descriptor,
+            merkle_tree,
+            descriptor_hash,
+        };
+
+        let file_infos = vec![info];
+        let labels = BTreeMap::new();
+
+        let serialized = serialize_metadata(&file_infos, &labels).unwrap();
+        let hash1 = calculate_metadata_hash(&serialized).unwrap();
+
+        // Same input → same hash
+        let hash2 = calculate_metadata_hash(&serialized).unwrap();
+        assert_eq!(hash1, hash2);
+
+        // Different path → different hash
+        let (descriptor2, merkle_tree2) = calculate_fsverity_hash(test_data);
+        let descriptor_hash2 = hex::encode(descriptor2.to_descriptor_hash());
+        let info2 = FileVerityInfo {
+            path: "other.txt".to_string(),
+            descriptor: descriptor2,
+            merkle_tree: merkle_tree2,
+            descriptor_hash: descriptor_hash2,
+        };
+        let serialized2 = serialize_metadata(&[info2], &labels).unwrap();
+        let hash3 = calculate_metadata_hash(&serialized2).unwrap();
+        assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn cross_check_metadata_hash() {
+        // FlatBuffers generated by Go: one FileInfo with path="test.txt", descriptor_hash="abcdef1234567890"
+        let fb_hex = "0c0000000800080000000400080000000400000001000000100000000c000c0008000000000004000c000000080000001c00000010000000616263646566313233343536373839300000000008000000746573742e74787400000000";
+        let fb_bytes = hex::decode(fb_hex).unwrap();
+        let hash = calculate_metadata_hash(&fb_bytes).unwrap();
+        // Expected: SHA-256 of canonical JSON: {"files":[{"descriptor_hash":"abcdef1234567890","path":"test.txt"}]}
+        let expected = "baa8151afa2b0a8eec0175239a0ddcf92cade8d7c364f1a26e5afa0d667335c1";
+        assert_eq!(hash, expected, "Rust canonical JSON hash should match Go's");
     }
 }
