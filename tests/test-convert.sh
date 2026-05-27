@@ -536,6 +536,13 @@ test_qemu_boot() {
 
         # Check for login prompt (success)
         if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+            # Verify cryptpilot-fde-guest actually ran in the guest
+            if grep -q "cryptpilot-fde-guest\[" "${boot_log}" 2>/dev/null; then
+                log::success "cryptpilot-fde-guest verified in boot log"
+            else
+                log::error "cryptpilot-fde-guest not found in boot log — RPM may not be installed in guest"
+                break
+            fi
             log::success "Login prompt detected - boot successful!"
             boot_success=true
             break
