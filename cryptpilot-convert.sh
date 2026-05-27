@@ -1365,21 +1365,31 @@ step::copy_partitions() {
             log::info "Copying boot partition from source"
             dd if="${source_read_device}p${boot_part_num}" of="${output_device}p${boot_part_num}" bs=4M status=progress
         else
-            # Boot partition was created in step 5, formatted with ext4 — copy kernel files from boot.img
-            log::info "Copying kernel files to boot partition"
+            # Boot partition was created in step 5, formatted with ext4.
+            # Get the boot.img filesystem UUID before copying, then set the
+            # output boot partition to the same UUID so that grub.cfg (which
+            # references the boot.img UUID) points to the correct partition.
+            local boot_img_uuid
+            boot_img_uuid=$(blkid -s UUID -o value "${boot_file_path}" 2>/dev/null || true)
+
+            log::info "Copying boot content from boot.img to output boot partition"
             local boot_img_mount="${workdir}/boot_img"
             local boot_part_mount="${workdir}/boot_part"
             mkdir -p "$boot_img_mount" "$boot_part_mount"
 
             mount -o ro "${boot_file_path}" "$boot_img_mount"
             mount "${output_device}p${boot_part_num}" "$boot_part_mount"
-            # Only copy vmlinuz kernel images — dracut will regenerate initramfs and other
-            # boot files. Skip old initramfs, grub modules, rescue images to save space.
-            find "${boot_img_mount}" -maxdepth 1 -type f -name 'vmlinuz-*' -print0 | while IFS= read -r -d '' src_file; do
-                cp -f "$src_file" "$boot_part_mount/"
-            done
+            cp -a "$boot_img_mount/." "$boot_part_mount/"
             disk::umount_wait_busy "$boot_part_mount"
             disk::umount_wait_busy "$boot_img_mount"
+
+            # Set the output boot partition UUID to match boot.img's UUID.
+            # tune2fs requires a freshly checked filesystem, so run e2fsck first.
+            if [ -n "$boot_img_uuid" ]; then
+                log::info "Setting boot partition UUID to $boot_img_uuid"
+                e2fsck -f -y "${output_device}p${boot_part_num}" >/dev/null 2>&1 || true
+                tune2fs -U "$boot_img_uuid" "${output_device}p${boot_part_num}"
+            fi
         fi
     fi
 }
