@@ -462,8 +462,8 @@ install_zram_module_if_needed() {
         kernel_version=$(chroot "${rootfs_mount_point}" bash -c "dpkg -l | grep -oP 'linux-image-\K[0-9.-]+-generic' | head -n1")
 
         if [ -z "$kernel_version" ]; then
-            log::error "Could not determine kernel version, zram module installation failed"
-            return 1
+            log::warn "Could not determine standard Ubuntu kernel version, skipping zram installation"
+            return 0
         fi
 
         log::info "Detected kernel version: $kernel_version"
@@ -476,7 +476,7 @@ install_zram_module_if_needed() {
             ${all_proxy:+all_proxy=$all_proxy} \
             ${no_proxy:+no_proxy=$no_proxy} \
             bash -c "apt-get update && apt-get install -y --no-install-recommends --no-install-suggests linux-modules-extra-$kernel_version"; then
-            log::error "Could not install zram modules, possibly due to disk space constraints or missing package"
+            log::warn "Could not install zram modules, possibly due to disk space constraints or missing package"
             return 1
         fi
     fi
@@ -603,10 +603,7 @@ disk::install_deb_on_rootfs() {
 
     # Install user-provided packages
     if [ ${#user_packages[@]} -gt 0 ]; then
-        chroot "${rootfs_mount_point}" bash -c "dpkg --configure -a || true"
-        chroot "${rootfs_mount_point}" bash -c "dpkg -i $(printf '%s ' "${user_packages[@]}"| sed 's/ $//')" || true
-
-        # Fix dependencies
+        # First ensure apt indexes are available
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
@@ -615,7 +612,20 @@ disk::install_deb_on_rootfs() {
             ${no_proxy:+no_proxy=$no_proxy} \
             apt-get update || true
 
-        # Fix dependencies
+        # Pre-install common deb dependencies (dracut, dracut-network are required by cryptpilot-fde-guest)
+        chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+            ${https_proxy:+https_proxy=$https_proxy} \
+            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+            ${all_proxy:+all_proxy=$all_proxy} \
+            ${no_proxy:+no_proxy=$no_proxy} \
+            apt-get install -y dracut dracut-network lvm2 cryptsetup-bin || true
+
+        # Now install the deb packages
+        chroot "${rootfs_mount_point}" bash -c "dpkg --configure -a || true"
+        chroot "${rootfs_mount_point}" bash -c "dpkg -i $(printf '%s ' "${user_packages[@]}"| sed 's/ $//')" || true
+
+        # Fix any remaining dependency issues
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
@@ -668,19 +678,24 @@ disk::install_deb_on_rootfs() {
         fi
     done
 
-    # Install missing essential packages
-    if [ ${#packages_to_install[@]} -gt 0 ]; then
+    # Install missing essential packages — skip apt-get if only cryptpilot-fde-guest
+    # needs installing (already attempted via dpkg -i above); apt-get would fail for RPM version strings.
+    local non_cryptpilot=()
+    for pkg in "${packages_to_install[@]}"; do
+        case "$pkg" in cryptpilot-fde-guest*) ;; *) non_cryptpilot+=("$pkg") ;; esac
+    done
+    if [ ${#non_cryptpilot[@]} -gt 0 ]; then
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
             ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
             ${all_proxy:+all_proxy=$all_proxy} \
             ${no_proxy:+no_proxy=$no_proxy} \
-            apt-get -y install "${packages_to_install[@]}"
+            apt-get -y install "${non_cryptpilot[@]}"
     fi
 
-    # Step 4: Install zram kernel module for Ubuntu
-    install_zram_module_if_needed "${rootfs_mount_point}"
+    # Step 4: Install zram kernel module for Ubuntu (best-effort only)
+    install_zram_module_if_needed "${rootfs_mount_point}" || log::warn "zram module installation skipped — may not be available for this kernel"
 
     # Step 5: Lock version for all essential packages (using base package name)
     chroot "${rootfs_mount_point}" apt-mark hold "${essential_package_names[@]}"
@@ -1021,6 +1036,68 @@ if [ "${uki:-false}" = false ]; then
             update-grub || true
         fi
     fi
+
+    # Ensure grubenv exists with saved_entry set.
+    # RHEL-based images ship with a grubenv, but Ubuntu cloud images may not have one.
+    # cryptpilot-fde-host show-reference-value requires saved_entry to be present.
+    echo "Ensuring grubenv with saved_entry exists..."
+    grubenv_path=""
+    if [ -f /boot/grub2/grubenv ]; then
+        grubenv_path=/boot/grub2/grubenv
+    elif [ -f /boot/grub/grubenv ]; then
+        grubenv_path=/boot/grub/grubenv
+    fi
+    if [ -z "$grubenv_path" ]; then
+        # Create a fresh grubenv file (1024-byte GRUB environment block)
+        echo "Creating grubenv file..."
+        mkdir -p /boot/grub
+        grubenv_path=/boot/grub/grubenv
+        # grub-editenv create generates a valid 1024-byte grubenv file
+        if command -v grub-editenv >/dev/null 2>&1; then
+            grub-editenv "$grubenv_path" create
+        elif command -v grub2-editenv >/dev/null 2>&1; then
+            grub2-editenv "$grubenv_path" create
+        else
+            # Fallback: manually create a 1024-byte block with GRUB env magic
+            # GRUB env header: "# GRUB Environment Version 1.0\n" (32 bytes) followed by padding
+            { printf '# GRUB Environment Version 1.0\n'; dd if=/dev/zero bs=1 count=992 2>/dev/null; } > "$grubenv_path"
+        fi
+    fi
+
+    # Determine the kernel entry to set as saved_entry.
+    # The value should match the menuentry title/id in grub.cfg.
+    # For Ubuntu, the menuentry contains the kernel version (e.g., "Ubuntu, with Linux 5.10.134-csv"),
+    # so we extract just the version number without the vmlinuz- prefix.
+    if [ -n "$(ls /boot/vmlinuz-* 2>/dev/null | grep -v rescue)" ]; then
+        kernel_file=$(ls /boot/vmlinuz-* 2>/dev/null | grep -v rescue | sort -V | tail -1)
+        kernel_entry=$(basename "$kernel_file" | sed 's/^vmlinuz-//')
+    else
+        kernel_file=$(ls /boot/vmlinuz* 2>/dev/null | sort -V | tail -1)
+        kernel_entry=$(basename "$kernel_file" | sed 's/^vmlinuz-//')
+    fi
+
+    if [ -n "$kernel_entry" ] && [ -f "$grubenv_path" ]; then
+        echo "Setting saved_entry to $kernel_entry"
+        if command -v grub-editenv >/dev/null 2>&1; then
+            grub-editenv "$grubenv_path" set saved_entry="$kernel_entry"
+        elif command -v grub2-editenv >/dev/null 2>&1; then
+            grub2-editenv "$grubenv_path" set saved_entry="$kernel_entry"
+        else
+            # Fallback: write directly into grubenv file (text before padding)
+            # Remove any existing saved_entry line and add new one
+            sed -i '/^saved_entry=/d' "$grubenv_path"
+            sed -i "1a saved_entry=$kernel_entry" "$grubenv_path"
+        fi
+    fi
+
+    # Also ensure GRUB_DEFAULT=saved in /etc/default/grub so GRUB actually uses saved_entry
+    if [ -f /etc/default/grub ]; then
+        sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
+    fi
+    for f in /etc/default/grub.d/*.cfg; do
+        [ -f "$f" ] && sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' "$f"
+    done
+
     echo "Cleaning up package manager cache..."
     if command -v yum >/dev/null 2>&1; then
         yum clean all
