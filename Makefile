@@ -145,8 +145,28 @@ deb-install: deb-build
 	dpkg -i ../cryptpilot-verity_*.deb ../cryptpilot-fde_*.deb ../cryptpilot-crypt_*.deb ../cryptpilot_*.deb
 	apt-get install -f -y
 
+.PHONY: cleanup-stale-devices
+cleanup-stale-devices:
+	@# Remove leftover dm-crypt devices from previous failed test runs
+	@# Must remove inner crypt devices first (they hold refs to _dif integrity layers)
+	@dmsetup ls --target crypt | grep '\.cryptpilot-' | awk '{print $$1}' | while read name; do \
+		echo "dmsetup remove $$name ..."; \
+		dmsetup remove "$$name" 2>/dev/null || true; \
+	done
+	@# Then remove integrity devices
+	@dmsetup ls --target integrity | grep '\.cryptpilot-' | awk '{print $$1}' | while read name; do \
+		echo "dmsetup remove $$name ..."; \
+		dmsetup remove "$$name" 2>/dev/null || true; \
+	done
+	@# Detach loop devices whose backing file was under /tmp/cryptpilot-*
+	@losetup -l 2>/dev/null | grep '/tmp/cryptpilot-' | awk '{print $$1}' | sed 's/://g' | while read dev; do \
+		echo "losetup -d $$dev ..."; \
+		losetup -d "$$dev" 2>/dev/null || true; \
+	done
+	@echo "Cleanup complete."
+
 .PHONY: run-test
-run-test: install-test-depend verity-testfiles
+run-test: cleanup-stale-devices install-test-depend verity-testfiles
 	cargo test -- --nocapture
 
 .PHONY: verity-testfiles
