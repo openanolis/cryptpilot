@@ -3,13 +3,25 @@ name: Build Test Image
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: 'URL of the qcow2 image to download'
+      mode:
+        description: 'Mode: "direct" to download a qcow2 image from a URL, "ubuntu" to use an Ubuntu Noble cloud image'
         required: true
+        type: choice
+        default: direct
+        options:
+          - direct
+          - ubuntu
+      url:
+        description: 'URL of the qcow2 image to download (only used when mode is "direct")'
+        required: false
         type: string
       tag:
         description: 'Tag for the resulting image (e.g., alinux3-20251030)'
-        required: true
+        required: false
+        type: string
+      ubuntu-tag:
+        description: 'Tag for the Ubuntu image (only used when mode is "ubuntu")'
+        required: false
         type: string
 
 env:
@@ -38,29 +50,90 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download qcow2 image
+      # --- Direct mode: download qcow2 image from URL ---
+      - name: Download qcow2 image (direct mode)
+        if: inputs.mode == 'direct'
         run: |
           echo "Downloading image from: ${{ inputs.url }}"
           mkdir -p /tmp/qcow2-image
           wget -O /tmp/qcow2-image/test-image.qcow2 "${{ inputs.url }}"
           ls -lh /tmp/qcow2-image/test-image.qcow2
 
+      # --- Ubuntu mode: prepare Ubuntu cloud image ---
+      - name: Install dependencies (ubuntu mode)
+        if: inputs.mode == 'ubuntu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libguestfs-tools qemu-utils
+
+      - name: Download Ubuntu Noble cloud image (ubuntu mode)
+        if: inputs.mode == 'ubuntu'
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          mkdir -p /tmp/qcow2-image
+          wget -O /tmp/qcow2-image/test-image.qcow2 \
+            https://cloud-images.ubuntu.com/noble/20260108/noble-server-cloudimg-amd64.img
+          ls -lh /tmp/qcow2-image/test-image.qcow2
+
+      - name: Set root password (ubuntu mode)
+        if: inputs.mode == 'ubuntu'
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          virt-customize --root-password password:cryptpilot \
+            -a /tmp/qcow2-image/test-image.qcow2
+
+      - name: Resize Ubuntu disk to 10G (ubuntu mode)
+        if: inputs.mode == 'ubuntu'
+        run: |
+          qemu-img resize /tmp/qcow2-image/test-image.qcow2 10G
+
+      - name: Expand GPT partition table (ubuntu mode)
+        if: inputs.mode == 'ubuntu'
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          virt-customize -a /tmp/qcow2-image/test-image.qcow2 \
+            --run-command 'sgdisk -e /dev/sda || sgdisk -e /dev/vda'
+
+      - name: Install dracut and systemd-boot (ubuntu mode)
+        if: inputs.mode == 'ubuntu'
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          virt-customize -a /tmp/qcow2-image/test-image.qcow2 \
+            --run-command 'apt-get update' \
+            --run-command 'apt-get install -y dracut dracut-core' \
+            --run-command 'apt-get install -y systemd-boot-efi'
+
+      # --- Common: build container image ---
       - name: Copy Dockerfile
         run: |
           cp tests/test-image.Dockerfile /tmp/qcow2-image/Dockerfile
+
+      - name: Set image tag
+        id: set-tag
+        run: |
+          if [ "${{ inputs.mode }}" = "ubuntu" ]; then
+            echo "tag=${{ inputs.ubuntu-tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build and push container image
         uses: docker/build-push-action@v5
         with:
           context: /tmp/qcow2-image
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.description=Test image with qcow2 for cryptpilot-convert integration tests
-            qcow2.source.url=${{ inputs.url }}
+            qcow2.source.mode=${{ inputs.mode }}
+            qcow2.source.url=${{ inputs.url || '' }}
 
       - name: Output image reference
         run: |
           echo "Test image built and pushed:"
-          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}"
