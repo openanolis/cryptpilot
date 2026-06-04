@@ -191,7 +191,7 @@ jobs:
 
       - name: Extract qcow2 from container
         run: |
-          CONTAINER_ID=$(sudo docker create ghcr.io/openanolis/cryptpilot-fde-test-image:noble-dracut-20260518)
+          CONTAINER_ID=$(sudo docker create ghcr.io/openanolis/cryptpilot-fde-test-image:noble-dracut-20260518 echo ok)
           sudo docker cp "$CONTAINER_ID":/image.qcow2 ./test-image.qcow2
           sudo docker rm "$CONTAINER_ID"
 
