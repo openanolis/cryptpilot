@@ -175,8 +175,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          # Install core deps first without libguestfs-tools to avoid dependency conflicts
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get install -y \
             qemu-utils \
             lvm2 \
             cryptsetup-bin \
@@ -186,12 +185,6 @@ jobs:
             dmsetup \
             fuse3 \
             docker.io
-          # Install libguestfs-tools with relaxed dependency checks
-          sudo apt-get install -y --allow-downgrades --allow-remove-essential \
-            libguestfs-tools 2>/dev/null || \
-          sudo apt-get install -y -f libguestfs-tools 2>/dev/null || \
-          sudo apt-get install -y --no-install-recommends libguestfs-tools 2>/dev/null || \
-          echo "WARNING: libguestfs-tools installation failed, continuing anyway"
 
       - name: Pull Ubuntu test image
         run: |

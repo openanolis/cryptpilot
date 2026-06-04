@@ -95,7 +95,12 @@ check_root() {
 
 # Check required tools
 check_tools() {
-    local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4" "virt-customize")
+    local custom_input="${1:-}"
+    local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4")
+    # virt-customize is only needed when we prepare images ourselves
+    if [[ -z "${custom_input}" ]]; then
+        tools+=("virt-customize")
+    fi
     local missing=()
 
     for tool in "${tools[@]}"; do
@@ -324,6 +329,12 @@ EOF
 run_enhance() {
     local test_name="$1"
     local input_image="$2"
+
+    # Skip if virt-customize is not available
+    if ! command -v virt-customize &>/dev/null; then
+        log::warn "Skipping cryptpilot-enhance (virt-customize not available)"
+        return 0
+    fi
 
     log::step "Running cryptpilot-enhance for test: ${test_name}"
 
@@ -841,7 +852,7 @@ main() {
     # Pre-flight checks
     log::step "Running pre-flight checks..."
     check_root
-    check_tools
+    check_tools "${custom_input}"
     check_diskspace
     if ! load_nbd_module; then
         fatal "NBD module is required but not available. Cannot proceed with tests."
