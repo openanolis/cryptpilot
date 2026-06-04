@@ -695,13 +695,14 @@ Usage: $(basename "$0") --rpm <path> --bootloader <uki|grub> --rootfs-enc|--root
 
 Integration tests for cryptpilot-convert
 
-Required:
+Required (specify one of --rpm, --deb, --package):
     --bootloader <uki|grub>   Boot mode
     --rootfs-enc              Enable rootfs encryption
     --rootfs-noenc            Disable rootfs encryption
     --delta-location <value>  Delta partition location: ram | disk | disk-persist
     --rpm <path>              Path to cryptpilot-fde-guest RPM package (alinux3)
     --deb <path>              Path to cryptpilot-fde-guest DEB package (ubuntu)
+    --package <path>          Path to package file (.rpm or .deb)
 
 Options:
     --distro <alinux3|ubuntu>  Target distro (default: alinux3)
@@ -722,6 +723,7 @@ main() {
     local custom_input=""
     local rpm_path=""
     local deb_path=""
+    local pkg_path=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -732,6 +734,10 @@ main() {
                 ;;
             --deb)
                 deb_path="$2"
+                shift 2
+                ;;
+            --package)
+                pkg_path="$2"
                 shift 2
                 ;;
             --distro)
@@ -768,29 +774,31 @@ main() {
         esac
     done
 
-    # Validate --rpm and --deb are mutually exclusive; at least one is required
-    if [[ -n "${rpm_path}" && -n "${deb_path}" ]]; then
-        fatal "--rpm and --deb are mutually exclusive; specify only one"
+    # Validate --rpm, --deb, --package: at most one, at least one
+    local pkg_count=0
+    [[ -n "${rpm_path}" ]] && pkg_count=$((pkg_count + 1))
+    [[ -n "${deb_path}" ]] && pkg_count=$((pkg_count + 1))
+    [[ -n "${pkg_path}" ]] && pkg_count=$((pkg_count + 1))
+    if [[ $pkg_count -gt 1 ]]; then
+        fatal "--rpm, --deb, and --package are mutually exclusive; specify only one"
     fi
-    if [[ -z "${rpm_path}" && -z "${deb_path}" ]]; then
+    if [[ $pkg_count -eq 0 ]]; then
         show_help
-        fatal "Missing required argument: --rpm <path> or --deb <path>"
+        fatal "Missing required argument: --rpm, --deb, or --package"
     fi
 
     # Set the package path and validate file exists
-    if [[ -n "${rpm_path}" ]]; then
+    if [[ -n "${pkg_path}" ]]; then
+        CRYPTPILOT_FDE_PACKAGE="${pkg_path}"
+    elif [[ -n "${rpm_path}" ]]; then
         CRYPTPILOT_FDE_PACKAGE="${rpm_path}"
-        if [[ ! -f "${CRYPTPILOT_FDE_PACKAGE}" ]]; then
-            fatal "cryptpilot-fde-guest RPM package not found: ${CRYPTPILOT_FDE_PACKAGE}"
-        fi
-        log::info "Using cryptpilot-fde-guest RPM: ${CRYPTPILOT_FDE_PACKAGE}"
     else
         CRYPTPILOT_FDE_PACKAGE="${deb_path}"
-        if [[ ! -f "${CRYPTPILOT_FDE_PACKAGE}" ]]; then
-            fatal "cryptpilot-fde-guest DEB package not found: ${CRYPTPILOT_FDE_PACKAGE}"
-        fi
-        log::info "Using cryptpilot-fde-guest DEB: ${CRYPTPILOT_FDE_PACKAGE}"
     fi
+    if [[ ! -f "${CRYPTPILOT_FDE_PACKAGE}" ]]; then
+        fatal "Package not found: ${CRYPTPILOT_FDE_PACKAGE}"
+    fi
+    log::info "Using cryptpilot-fde-guest package: ${CRYPTPILOT_FDE_PACKAGE}"
 
     # Validate --distro
     if [[ "${DISTRO}" != "alinux3" && "${DISTRO}" != "ubuntu" ]]; then
