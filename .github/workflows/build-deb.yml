@@ -176,7 +176,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libguestfs-tools \
+            libguestfs-toolsc \
             qemu-utils \
             lvm2 \
             cryptsetup-bin \
