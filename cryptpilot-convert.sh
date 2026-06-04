@@ -1698,7 +1698,7 @@ main() {
     if command -v apt-get >/dev/null 2>&1; then
         local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gawk)
         if [[ "$uki" == "true" ]]; then
-            tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+            tool_packages+=(grub-efi-amd64-bin sbsigntool) # Required for UKI (Unified Kernel Image) boot setup
         fi
         apt-get update
         apt-get install -y "${tool_packages[@]}"

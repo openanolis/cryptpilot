@@ -176,6 +176,7 @@ jobs:
         run: |
           sudo apt-get update
           # GH runner already has Docker installed; install only additional deps
+          # Include grub packages for cryptpilot-convert UKI support
           sudo apt-get install -y \
             qemu-utils \
             cryptsetup-bin \
@@ -183,7 +184,10 @@ jobs:
             dosfstools \
             kmod \
             fuse3 \
-            lvm2
+            lvm2 \
+            grub-common \
+            grub-efi-amd64-bin \
+            sbsigntool
 
       - name: Pull Ubuntu test image
         run: |
