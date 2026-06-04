@@ -32,7 +32,7 @@ readonly NC='\033[0m' # No Color
 # Test image URLs and cache paths per distro
 readonly ALINUX3_IMAGE_URL="https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2"
 readonly ALINUX3_IMAGE_CACHE="/tmp/test-input-alinux3.qcow2"
-readonly UBUNTU_IMAGE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+readonly UBUNTU_IMAGE_URL="https://cloud-images.ubuntu.com/noble/20260518/noble-server-cloudimg-amd64.img"
 readonly UBUNTU_IMAGE_CACHE="/tmp/test-input-ubuntu.qcow2"
 
 readonly TEST_PASSPHRASE="test-passphrase-12345"
