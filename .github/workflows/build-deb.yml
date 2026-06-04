@@ -192,7 +192,7 @@ jobs:
       - name: Extract qcow2 from container
         run: |
           CONTAINER_ID=$(sudo docker create ghcr.io/openanolis/cryptpilot-fde-test-image:noble-dracut-20260518 echo ok)
-          sudo docker cp "$CONTAINER_ID":/image.qcow2 ./test-image.qcow2
+          sudo docker cp "$CONTAINER_ID":/image.qcow2 "$GITHUB_WORKSPACE/test-image.qcow2"
           sudo docker rm "$CONTAINER_ID"
 
       - name: Download DEB packages
@@ -203,13 +203,14 @@ jobs:
 
       - name: Run conversion test
         run: |
+          DEB_PKG=$(ls "$GITHUB_WORKSPACE"/deb-packages/cryptpilot-fde-guest_*.deb | head -1)
           sudo LIBGUESTFS_BACKEND=direct ./tests/test-convert.sh \
             --distro ubuntu \
-            --package ./deb-packages/cryptpilot-fde-guest_*.deb \
+            --package "$DEB_PKG" \
             --bootloader ${{ matrix.bootloader }} \
             --rootfs-enc \
             --delta-location ram \
-            --input ./test-image.qcow2
+            --input "$GITHUB_WORKSPACE/test-image.qcow2"
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
