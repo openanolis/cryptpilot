@@ -137,8 +137,6 @@ jobs:
             dmsetup \
             fuse3 \
             docker.io
-          # Pre-build the libguestfs appliance to avoid supermin failures
-          sudo update-guestfs-appliance || true
 
       - name: Pull Ubuntu test image
         run: |

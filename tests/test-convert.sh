@@ -260,51 +260,6 @@ download_file() {
     fatal "Failed to download test image after $max_retries attempts"
 }
 
-# Prepare Ubuntu image: download, set root password, resize, install dracut
-prepare_ubuntu_image() {
-    local cache_path="${UBUNTU_IMAGE_CACHE}"
-
-    # Download if not cached
-    download_file "${UBUNTU_IMAGE_URL}" "${cache_path}"
-
-    # Use 'direct' backend for all virt-customize calls
-    export LIBGUESTFS_BACKEND=direct
-
-    # Set root password via virt-customize
-    log::step "Setting root password in Ubuntu image..."
-    virt-customize -a "${cache_path}" \
-        --root-password password:root \
-        --run-command 'echo "root:root" | chpasswd'
-
-    # Resize to 10G
-    log::step "Resizing Ubuntu image to 10G..."
-    qemu-img resize "${cache_path}" 10G
-
-    # Repair GPT (sgdisk -e) to account for new size
-    log::step "Repairing GPT partition table..."
-    # We need to connect via NBD to run sgdisk on the image
-    local nbd_device
-    nbd_device=$(get_available_nbd)
-    log::info "Connecting image to NBD device: ${nbd_device}"
-    qemu-nbd --connect="${nbd_device}" "${cache_path}"
-    sleep 2
-    partprobe "${nbd_device}" 2>/dev/null || true
-    sleep 1
-
-    sgdisk -e "${nbd_device}"
-
-    # Disconnect NBD
-    qemu-nbd --disconnect "${nbd_device}" 2>/dev/null || true
-    sleep 1
-
-    # Install dracut and dracut-core via virt-customize
-    log::step "Installing dracut and dracut-core in Ubuntu image..."
-    virt-customize -a "${cache_path}" \
-        --run-command 'apt-get update && apt-get install -y dracut dracut-core'
-
-    log::success "Ubuntu image prepared successfully"
-}
-
 # Download and cache the test image based on distro
 download_test_image() {
     case "${DISTRO}" in
@@ -312,7 +267,9 @@ download_test_image() {
             download_file "${ALINUX3_IMAGE_URL}" "${ALINUX3_IMAGE_CACHE}"
             ;;
         ubuntu)
-            prepare_ubuntu_image
+            # For Ubuntu, download raw cloud image; dracut is pre-installed
+            # by the build-test-image workflow (GHCR image has dracut ready)
+            download_file "${UBUNTU_IMAGE_URL}" "${UBUNTU_IMAGE_CACHE}"
             ;;
         *)
             fatal "Unknown distro: ${DISTRO}"
