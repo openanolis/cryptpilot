@@ -64,14 +64,12 @@ jobs:
         if: inputs.mode == 'ubuntu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libguestfs-tools qemu-utils linux-image-generic
-          # Pre-build the libguestfs appliance to avoid supermin failures
-          sudo update-guestfs-appliance
+          sudo apt-get install -y qemu-utils sgdisk kmod
+          # Load NBD kernel module for qemu-nbd
+          sudo modprobe nbd max_part=16
 
       - name: Download Ubuntu Noble cloud image (ubuntu mode)
         if: inputs.mode == 'ubuntu'
-        env:
-          LIBGUESTFS_BACKEND: direct
         run: |
           mkdir -p /tmp/qcow2-image
           wget -O /tmp/qcow2-image/test-image.qcow2 \
@@ -80,11 +78,36 @@ jobs:
 
       - name: Set root password (ubuntu mode)
         if: inputs.mode == 'ubuntu'
-        env:
-          LIBGUESTFS_BACKEND: direct
         run: |
-          virt-customize --root-password password:cryptpilot \
-            -a /tmp/qcow2-image/test-image.qcow2
+          # Connect via qemu-nbd to modify the image directly
+          NBD_DEV=$(sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 /tmp/qcow2-image/test-image.qcow2 --show-format 2>/dev/null || sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 /tmp/qcow2-image/test-image.qcow2; echo /dev/nbd0)
+          sudo qemu-nbd --show-devices /dev/nbd0
+          sleep 2
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sleep 1
+
+          # Find and mount the root partition
+          MOUNT_POINT=/tmp/img-root
+          sudo mkdir -p $MOUNT_POINT
+          ROOT_PART=$(sudo lsblk -lnpo NAME,PARTTYPENAME /dev/nbd0 2>/dev/null | grep -i linux | awk '{print $1}' | head -1)
+          if [ -z "$ROOT_PART" ]; then
+            # Fallback: try common partition names
+            for p in /dev/nbd0p1 /dev/nbd0p2 /dev/nbd0p3; do
+              if [ -e "$p" ] && sudo file -sL "$p" 2>/dev/null | grep -q ext4; then
+                ROOT_PART="$p"
+                break
+              fi
+            done
+          fi
+          echo "Mounting root partition: $ROOT_PART"
+          sudo mount "$ROOT_PART" $MOUNT_POINT
+
+          # Set root password and configure
+          sudo chroot $MOUNT_POINT /bin/bash -c 'echo "root:cryptpilot" | chpasswd'
+          sudo chroot $MOUNT_POINT /bin/bash -c 'echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/root-login.conf 2>/dev/null || true'
+
+          sudo umount $MOUNT_POINT
+          sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
 
       - name: Resize Ubuntu disk to 10G (ubuntu mode)
         if: inputs.mode == 'ubuntu'
@@ -93,21 +116,53 @@ jobs:
 
       - name: Expand GPT partition table (ubuntu mode)
         if: inputs.mode == 'ubuntu'
-        env:
-          LIBGUESTFS_BACKEND: direct
         run: |
-          virt-customize -a /tmp/qcow2-image/test-image.qcow2 \
-            --run-command 'sgdisk -e /dev/sda || sgdisk -e /dev/vda'
+          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 /tmp/qcow2-image/test-image.qcow2
+          sleep 2
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sleep 1
+          sudo sgdisk -e /dev/nbd0
+          sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
 
       - name: Install dracut and systemd-boot (ubuntu mode)
         if: inputs.mode == 'ubuntu'
-        env:
-          LIBGUESTFS_BACKEND: direct
         run: |
-          virt-customize -a /tmp/qcow2-image/test-image.qcow2 \
-            --run-command 'apt-get update' \
-            --run-command 'apt-get install -y dracut dracut-core' \
-            --run-command 'apt-get install -y systemd-boot-efi'
+          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 /tmp/qcow2-image/test-image.qcow2
+          sleep 2
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sleep 1
+
+          # Find and mount the root partition
+          MOUNT_POINT=/tmp/img-root2
+          sudo mkdir -p $MOUNT_POINT
+          ROOT_PART=$(sudo lsblk -lnpo NAME,PARTTYPENAME /dev/nbd0 2>/dev/null | grep -i linux | awk '{print $1}' | head -1)
+          if [ -z "$ROOT_PART" ]; then
+            for p in /dev/nbd0p1 /dev/nbd0p2 /dev/nbd0p3; do
+              if [ -e "$p" ] && sudo file -sL "$p" 2>/dev/null | grep -q ext4; then
+                ROOT_PART="$p"
+                break
+              fi
+            done
+          fi
+          echo "Mounting root partition: $ROOT_PART"
+          sudo mount "$ROOT_PART" $MOUNT_POINT
+
+          # Mount necessary virtual filesystems for chroot
+          sudo mount --bind /dev $MOUNT_POINT/dev
+          sudo mount --bind /proc $MOUNT_POINT/proc
+          sudo mount --bind /sys $MOUNT_POINT/sys
+          sudo mount --bind /run $MOUNT_POINT/run 2>/dev/null || true
+
+          # Install packages
+          sudo chroot $MOUNT_POINT /bin/bash -c 'apt-get update && apt-get install -y dracut dracut-core systemd-boot-efi'
+
+          # Unmount in reverse order
+          sudo umount $MOUNT_POINT/run 2>/dev/null || true
+          sudo umount $MOUNT_POINT/sys 2>/dev/null || true
+          sudo umount $MOUNT_POINT/proc 2>/dev/null || true
+          sudo umount $MOUNT_POINT/dev 2>/dev/null || true
+          sudo umount $MOUNT_POINT
+          sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
 
       # --- Common: build container image ---
       - name: Copy Dockerfile
