@@ -134,9 +134,12 @@ jobs:
             e2fsprogs \
             dosfstools \
             kmod \
-            device-mapper \
+            dmsetup \
             fuse3 \
-            docker.io
+            docker.io \
+            linux-image-generic
+          # Pre-build the libguestfs appliance to avoid supermin failures
+          sudo update-guestfs-appliance
 
       - name: Pull Ubuntu test image
         run: |

@@ -64,7 +64,9 @@ jobs:
         if: inputs.mode == 'ubuntu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libguestfs-tools qemu-utils
+          sudo apt-get install -y libguestfs-tools qemu-utils linux-image-generic
+          # Pre-build the libguestfs appliance to avoid supermin failures
+          sudo update-guestfs-appliance
 
       - name: Download Ubuntu Noble cloud image (ubuntu mode)
         if: inputs.mode == 'ubuntu'
@@ -73,7 +75,7 @@ jobs:
         run: |
           mkdir -p /tmp/qcow2-image
           wget -O /tmp/qcow2-image/test-image.qcow2 \
-            https://cloud-images.ubuntu.com/noble/20260518/noble-server-cloudimg-amd64.img
+            https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
           ls -lh /tmp/qcow2-image/test-image.qcow2
 
       - name: Set root password (ubuntu mode)
