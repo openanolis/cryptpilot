@@ -64,9 +64,16 @@ jobs:
         if: inputs.mode == 'ubuntu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-utils gdisk kmod file
-          # Load NBD kernel module for qemu-nbd
-          sudo modprobe nbd max_part=16
+          # Install all tools needed: qemu-utils for qemu-img/qemu-nbd,
+          # parted for partition table repair, util-linux for lsblk/partprobe
+          sudo apt-get install -y \
+            qemu-utils \
+            parted \
+            util-linux \
+            kmod \
+            file \
+            dosfstools \
+            e2fsprogs
 
       - name: Download Ubuntu Noble cloud image (ubuntu mode)
         if: inputs.mode == 'ubuntu'
@@ -76,93 +83,105 @@ jobs:
             https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
           ls -lh /tmp/qcow2-image/test-image.qcow2
 
-      - name: Set root password (ubuntu mode)
+      - name: Prepare Ubuntu image (password, resize, GPT fix, install dracut)
         if: inputs.mode == 'ubuntu'
         run: |
-          # Connect via qemu-nbd to modify the image directly
-          NBD_DEV=$(sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 /tmp/qcow2-image/test-image.qcow2 --show-format 2>/dev/null || sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 /tmp/qcow2-image/test-image.qcow2; echo /dev/nbd0)
-          sudo qemu-nbd --show-devices /dev/nbd0
+          IMAGE=/tmp/qcow2-image/test-image.qcow2
+          MOUNT_POINT=/tmp/img-mnt
+
+          # ---------- Step 1: Set root password ----------
+          sudo modprobe nbd max_part=16 || true
+          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 "$IMAGE"
           sleep 2
           sudo partprobe /dev/nbd0 2>/dev/null || true
           sleep 1
 
-          # Find and mount the root partition
-          MOUNT_POINT=/tmp/img-root
+          # Find root partition: look for ext4 partition
           sudo mkdir -p $MOUNT_POINT
-          ROOT_PART=$(sudo lsblk -lnpo NAME,PARTTYPENAME /dev/nbd0 2>/dev/null | grep -i linux | awk '{print $1}' | head -1)
-          if [ -z "$ROOT_PART" ]; then
-            # Fallback: try common partition names
-            for p in /dev/nbd0p1 /dev/nbd0p2 /dev/nbd0p3; do
-              if [ -e "$p" ] && sudo file -sL "$p" 2>/dev/null | grep -q ext4; then
+          ROOT_PART=""
+          for p in /dev/nbd0p1 /dev/nbd0p2 /dev/nbd0p3 /dev/nbd0p4; do
+            if [ -e "$p" ]; then
+              FSTYPE=$(sudo blkid -s TYPE -o value "$p" 2>/dev/null || true)
+              if [ "$FSTYPE" = "ext4" ]; then
                 ROOT_PART="$p"
                 break
               fi
-            done
+            fi
+          done
+          if [ -z "$ROOT_PART" ]; then
+            echo "ERROR: Cannot find ext4 root partition"
+            sudo blkid /dev/nbd0p* 2>/dev/null || true
+            sudo lsblk /dev/nbd0 2>/dev/null || true
+            exit 1
           fi
-          echo "Mounting root partition: $ROOT_PART"
+          echo "Root partition: $ROOT_PART"
           sudo mount "$ROOT_PART" $MOUNT_POINT
-
-          # Set root password and configure
           sudo chroot $MOUNT_POINT /bin/bash -c 'echo "root:cryptpilot" | chpasswd'
-          sudo chroot $MOUNT_POINT /bin/bash -c 'echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/root-login.conf 2>/dev/null || true'
-
           sudo umount $MOUNT_POINT
           sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
+          sleep 1
 
-      - name: Resize Ubuntu disk to 10G (ubuntu mode)
-        if: inputs.mode == 'ubuntu'
-        run: |
-          qemu-img resize /tmp/qcow2-image/test-image.qcow2 10G
+          # ---------- Step 2: Resize disk ----------
+          qemu-img resize "$IMAGE" 10G
 
-      - name: Expand GPT partition table (ubuntu mode)
-        if: inputs.mode == 'ubuntu'
-        run: |
-          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 /tmp/qcow2-image/test-image.qcow2
+          # ---------- Step 3: Fix GPT partition table ----------
+          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 "$IMAGE"
           sleep 2
           sudo partprobe /dev/nbd0 2>/dev/null || true
           sleep 1
-          sudo sgdisk -e /dev/nbd0
+          # Use parted to fix/rescan the partition table after resize
+          sudo parted /dev/nbd0 print >/dev/null 2>&1 || true
+          sudo parted /dev/nbd0 resizepart 1 100% -s 2>/dev/null || true
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sudo lsblk /dev/nbd0
           sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
+          sleep 1
 
-      - name: Install dracut and systemd-boot (ubuntu mode)
-        if: inputs.mode == 'ubuntu'
-        run: |
-          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 /tmp/qcow2-image/test-image.qcow2
+          # ---------- Step 4: Install dracut and systemd-boot ----------
+          sudo modprobe nbd max_part=16 || true
+          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 "$IMAGE"
           sleep 2
           sudo partprobe /dev/nbd0 2>/dev/null || true
           sleep 1
 
-          # Find and mount the root partition
-          MOUNT_POINT=/tmp/img-root2
-          sudo mkdir -p $MOUNT_POINT
-          ROOT_PART=$(sudo lsblk -lnpo NAME,PARTTYPENAME /dev/nbd0 2>/dev/null | grep -i linux | awk '{print $1}' | head -1)
-          if [ -z "$ROOT_PART" ]; then
-            for p in /dev/nbd0p1 /dev/nbd0p2 /dev/nbd0p3; do
-              if [ -e "$p" ] && sudo file -sL "$p" 2>/dev/null | grep -q ext4; then
+          # Find root partition again
+          ROOT_PART=""
+          for p in /dev/nbd0p1 /dev/nbd0p2 /dev/nbd0p3 /dev/nbd0p4; do
+            if [ -e "$p" ]; then
+              FSTYPE=$(sudo blkid -s TYPE -o value "$p" 2>/dev/null || true)
+              if [ "$FSTYPE" = "ext4" ]; then
                 ROOT_PART="$p"
                 break
               fi
-            done
+            fi
+          done
+          if [ -z "$ROOT_PART" ]; then
+            echo "ERROR: Cannot find ext4 root partition after resize"
+            exit 1
           fi
-          echo "Mounting root partition: $ROOT_PART"
+          echo "Root partition (after resize): $ROOT_PART"
+          sudo mkdir -p $MOUNT_POINT
           sudo mount "$ROOT_PART" $MOUNT_POINT
 
-          # Mount necessary virtual filesystems for chroot
+          # Mount virtual filesystems for chroot
           sudo mount --bind /dev $MOUNT_POINT/dev
           sudo mount --bind /proc $MOUNT_POINT/proc
           sudo mount --bind /sys $MOUNT_POINT/sys
           sudo mount --bind /run $MOUNT_POINT/run 2>/dev/null || true
 
-          # Install packages
-          sudo chroot $MOUNT_POINT /bin/bash -c 'apt-get update && apt-get install -y dracut dracut-core systemd-boot-efi'
+          # Install dracut and systemd-boot-efi
+          sudo chroot $MOUNT_POINT /bin/bash -c 'DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y dracut dracut-core systemd-boot-efi'
 
-          # Unmount in reverse order
+          # Unmount
           sudo umount $MOUNT_POINT/run 2>/dev/null || true
           sudo umount $MOUNT_POINT/sys 2>/dev/null || true
           sudo umount $MOUNT_POINT/proc 2>/dev/null || true
           sudo umount $MOUNT_POINT/dev 2>/dev/null || true
           sudo umount $MOUNT_POINT
           sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
+          sleep 1
+
+          echo "Ubuntu image preparation complete!"
 
       # --- Common: build container image ---
       - name: Copy Dockerfile
