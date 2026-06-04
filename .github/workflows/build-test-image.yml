@@ -64,7 +64,7 @@ jobs:
         if: inputs.mode == 'ubuntu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-utils sgdisk kmod
+          sudo apt-get install -y qemu-utils gptfdisk kmod file
           # Load NBD kernel module for qemu-nbd
           sudo modprobe nbd max_part=16
 
