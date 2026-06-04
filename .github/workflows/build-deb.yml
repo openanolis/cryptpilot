@@ -176,7 +176,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libguestfs-toolsc \
             qemu-utils \
             lvm2 \
             cryptsetup-bin \
@@ -186,6 +185,9 @@ jobs:
             dmsetup \
             fuse3 \
             docker.io
+          # Install libguestfs-tools separately with dependency resolution
+          sudo apt-get install -y libguestfs-tools || \
+            sudo apt-get install -y --fix-broken libguestfs-tools
 
       - name: Pull Ubuntu test image
         run: |
