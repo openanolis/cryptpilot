@@ -175,16 +175,15 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          # Install in groups to avoid dependency conflicts on GH runner
+          # GH runner already has Docker installed; install only additional deps
           sudo apt-get install -y \
             qemu-utils \
             cryptsetup-bin \
             e2fsprogs \
             dosfstools \
             kmod \
-            fuse3
-          sudo apt-get install -y lvm2
-          sudo apt-get install -y docker.io
+            fuse3 \
+            lvm2
 
       - name: Pull Ubuntu test image
         run: |
