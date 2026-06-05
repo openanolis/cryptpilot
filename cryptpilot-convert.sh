@@ -1314,40 +1314,75 @@ step::prepare_output_and_snapshots() {
     # The source image may have a small EFI partition that's too small for the UKI.
     if [ "$uki" = true ]; then
         local uki_efi_size="512M"
-        log::info "UKI mode: resizing EFI partition to ${uki_efi_size}"
 
-        # Save partition UUIDs before parted modifies them.
-        # parted rm/mkpart generates new UUIDs, losing the originals.
-        local saved_efi_uuid saved_rootfs_uuid
-        saved_efi_uuid=$(blkid -s PART_UUID -o value "${output_device}p${efi_part_num}" 2>/dev/null || true)
-        saved_rootfs_uuid=$(blkid -s PART_UUID -o value "${output_device}p${rootfs_orig_part_num}" 2>/dev/null || true)
+        # Check if EFI partition is already large enough (>= 250M)
+        local efi_size_bytes
+        efi_size_bytes=$(blockdev --getsize64 "${output_device}p${efi_part_num}" 2>/dev/null || echo 0)
+        local efi_size_mb=$((efi_size_bytes / 1024 / 1024))
+        if [[ $efi_size_mb -ge 250 ]]; then
+            log::info "UKI mode: EFI partition already large enough (${efi_size_mb}M), skipping resize"
+        else
+            log::info "UKI mode: resizing EFI partition to ${uki_efi_size} (currently ${efi_size_mb}M)"
 
-        # Must delete rootfs partition first to avoid overlap, then resize EFI,
-        # then recreate rootfs. All partition table modifications must complete
-        # BEFORE formatting the EFI partition, because partprobe re-reading the
-        # partition table invalidates the kernel page cache for all partitions
-        # on the device, discarding any unsynced filesystem data.
-        parted "${output_device}" --script -- rm "${rootfs_orig_part_num}"
-        parted "${output_device}" --script -- resizepart "${efi_part_num}" "${uki_efi_size}"
+            # Save partition UUIDs before parted modifies them.
+            # parted rm/mkpart generates new UUIDs, losing the originals.
+            local saved_efi_uuid saved_rootfs_uuid
+            saved_efi_uuid=$(blkid -s PART_UUID -o value "${output_device}p${efi_part_num}" 2>/dev/null || true)
+            saved_rootfs_uuid=$(blkid -s PART_UUID -o value "${output_device}p${rootfs_orig_part_num}" 2>/dev/null || true)
 
-        # Recreate rootfs partition to fill remaining space
-        local rootfs_new_start
-        rootfs_new_start=$(parted "${output_device}" --script -- unit s print | awk '/^ *'"${efi_part_num}"' / {gsub(/s$/,"",$3); print $3; exit}')
-        rootfs_new_start=$((rootfs_new_start + 1))
-        rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
-        log::info "Recreating rootfs partition from sector ${rootfs_new_start} to end"
-        parted "${output_device}" --script -- mkpart primary ext4 "${rootfs_new_start}s" '100%'
+            # Sync kernel partition table view before modifying
+            partprobe "${output_device}" 2>/dev/null || true
+            udevadm settle --timeout=10
 
-        # Restore original partition UUIDs
-        if [ -n "$saved_efi_uuid" ]; then
-            log::info "Restoring EFI partition UUID: $saved_efi_uuid"
-            sgdisk -u "${efi_part_num}:${saved_efi_uuid}" "${output_device}" >/dev/null 2>&1 || true
+            # Use sfdisk to modify partition table instead of parted to avoid
+            # "overlapping partitions" errors on cloud images with non-sequential
+            # partition numbering (e.g., partitions 1, 14, 15, 16).
+            local sfdisk_dump="${workdir}/output_before_uki.sfdisk"
+            sfdisk -d "${output_device}" > "${sfdisk_dump}"
+
+            # Extract EFI partition info and modify its size
+            local efi_start efi_type efi_uuid
+            efi_start=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${efi_part_num}" | sed 's/.*start=\s*\([0-9]*\).*/\1/')
+            efi_type=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${efi_part_num}" | sed 's/.*type=\s*\([^ ,]*\).*/\1/')
+            efi_uuid=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${efi_part_num}" | sed 's/.*uuid=\s*\([^ ,]*\).*/\1/')
+
+            # Calculate EFI partition end sector for 512M
+            local sector_size=512
+            local efi_end=$(( (512 * 1024 * 1024) / sector_size + efi_start - 1 ))
+
+            # Delete rootfs and EFI partitions, recreate with new EFI size
+            # Use sed to modify the sfdisk dump
+            sed -i "/${output_device}p${rootfs_orig_part_num}/d" "${sfdisk_dump}"
+            sed -i "s|${output_device}p${efi_part_num} : start=.*|${output_device}p${efi_part_num} : start=${efi_start}, size=$((efi_end - efi_start + 1)), type=${efi_type}, uuid=${efi_uuid}|" "${sfdisk_dump}"
+
+            # Apply modified partition table
+            sfdisk "${output_device}" < "${sfdisk_dump}" >/dev/null 2>&1 || {
+                # Fallback: use parted if sfdisk approach fails
+                log::info "sfdisk approach failed, falling back to parted"
+                parted "${output_device}" --script -- rm "${rootfs_orig_part_num}"
+                parted "${output_device}" --script -- resizepart "${efi_part_num}" "${uki_efi_size}"
+            }
+
+            # Recreate rootfs partition to fill remaining space
+            partprobe "${output_device}" 2>/dev/null || true
+            udevadm settle --timeout=10
+            local rootfs_new_start
+            rootfs_new_start=$(parted "${output_device}" --script -- unit s print | awk '/^ *'"${efi_part_num}"' / {gsub(/s$/,"",$3); print $3; exit}')
+            rootfs_new_start=$((rootfs_new_start + 1))
+            rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
+            log::info "Recreating rootfs partition from sector ${rootfs_new_start} to end"
+            parted "${output_device}" --script -- mkpart primary ext4 "${rootfs_new_start}s" '100%'
+
+            # Restore original partition UUIDs
+            if [ -n "$saved_efi_uuid" ]; then
+                log::info "Restoring EFI partition UUID: $saved_efi_uuid"
+                sgdisk -u "${efi_part_num}:${saved_efi_uuid}" "${output_device}" >/dev/null 2>&1 || true
+            fi
+            if [ -n "$saved_rootfs_uuid" ]; then
+                log::info "Restoring rootfs partition UUID: $saved_rootfs_uuid"
+                sgdisk -u "${rootfs_orig_part_num}:${saved_rootfs_uuid}" "${output_device}" >/dev/null 2>&1 || true
+            fi
         fi
-        if [ -n "$saved_rootfs_uuid" ]; then
-            log::info "Restoring rootfs partition UUID: $saved_rootfs_uuid"
-            sgdisk -u "${rootfs_orig_part_num}:${saved_rootfs_uuid}" "${output_device}" >/dev/null 2>&1 || true
-        fi
-
     fi
 
     # If source had no separate boot partition, we need to create one on output
