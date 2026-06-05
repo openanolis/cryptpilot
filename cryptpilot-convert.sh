@@ -1352,8 +1352,12 @@ step::prepare_output_and_snapshots() {
 
             # Delete rootfs and EFI partitions, recreate with new EFI size
             # Use sed to modify the sfdisk dump
-            sed -i "/${output_device}p${rootfs_orig_part_num}/d" "${sfdisk_dump}"
-            sed -i "s|${output_device}p${efi_part_num} : start=.*|${output_device}p${efi_part_num} : start=${efi_start}, size=$((efi_end - efi_start + 1)), type=${efi_type}, uuid=${efi_uuid}|" "${sfdisk_dump}"
+            # Escape device path for sed regex (contains / characters)
+            local dev_escaped
+            dev_escaped=$(echo "${output_device}" | sed 's|/|\\/|g')
+            sed -i "\|${dev_escaped}p${rootfs_orig_part_num}|d" "${sfdisk_dump}"
+            local efi_size_sectors=$((efi_end - efi_start + 1))
+            sed -i "s|\(^.*p${efi_part_num}.*\)start=[0-9]*|\1start=${efi_start}, size=${efi_size_sectors}|" "${sfdisk_dump}"
 
             # Apply modified partition table
             sfdisk "${output_device}" < "${sfdisk_dump}" >/dev/null 2>&1 || {
