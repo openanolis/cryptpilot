@@ -553,7 +553,8 @@ test_qemu_boot() {
     log::info "QEMU container started: ${container_name}"
 
     # Stream logs to file and check for boot status
-    local timeout=360  # 6 minutes timeout
+    # Use longer timeout for environments without KVM (e.g., CI runners)
+    local timeout=900  # 15 minutes timeout
     local elapsed=0
     local check_interval=2
     local boot_success=false
@@ -573,7 +574,11 @@ test_qemu_boot() {
         fi
 
         # Check for login prompt (success)
-        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+        # RHEL/Alibaba Cloud Linux: " on an x86_64"
+        # Ubuntu: "login:" on ttyS0/tty1 or "Welcome to Ubuntu"
+        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null || \
+           grep -q -i "Welcome to Ubuntu" "${boot_log}" 2>/dev/null || \
+           grep -q -E "[Tt]ty[0-9]+ login:" "${boot_log}" 2>/dev/null; then
             # Verify cryptpilot-fde-guest actually ran in the guest
             if grep -q "cryptpilot-fde-guest\[" "${boot_log}" 2>/dev/null; then
                 log::success "cryptpilot-fde-guest verified in boot log"
