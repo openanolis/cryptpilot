@@ -526,6 +526,13 @@ test_qemu_boot() {
 
     log::step "Testing QEMU boot for: ${test_name}"
 
+    # Skip QEMU boot test if KVM is not available (GH Actions runners don't have KVM)
+    # Without KVM, QEMU is ~10x slower and boot takes > 15 minutes
+    if [[ ! -e /dev/kvm ]]; then
+        log::warn "Skipping QEMU boot test (no KVM available)"
+        return 0
+    fi
+
     local boot_log="${WORKDIR}/${test_name}-boot.log"
 
     log::info "Starting QEMU container with UEFI boot mode"
