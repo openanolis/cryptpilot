@@ -1738,7 +1738,11 @@ main() {
 
     # Create output file upfront (same virtual size as input)
     local virtual_size_bytes
-    virtual_size_bytes=$(qemu-img info --output=json "${input_file}" | grep '"virtual-size"' | grep -o '[0-9]\+')
+    # Parse virtual size from text output: "virtual size: 10 GiB (10737418240 bytes)"
+    virtual_size_bytes=$(qemu-img info "${input_file}" | grep 'virtual size:' | sed 's/.*(\([0-9]*\) bytes).*/\1/')
+    if [[ -z "${virtual_size_bytes}" || ! "${virtual_size_bytes}" =~ ^[0-9]+$ ]]; then
+        proc::fatal "Failed to determine virtual size of input image"
+    fi
     qemu-img create -f qcow2 -o size="${virtual_size_bytes}" "${output_file}" >/dev/null
     log::info "Created output file: ${output_file} (virtual size: ${virtual_size_bytes} bytes)"
 
