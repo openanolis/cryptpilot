@@ -526,10 +526,15 @@ test_qemu_boot() {
 
     log::step "Testing QEMU boot for: ${test_name}"
 
-    # Skip QEMU boot test if KVM is not available (GH Actions runners don't have KVM)
+    # Skip QEMU boot test if KVM acceleration is not available
+    # GH Actions runners may have /dev/kvm but lack nested virtualization
     # Without KVM, QEMU is ~10x slower and boot takes > 15 minutes
-    if [[ ! -e /dev/kvm ]]; then
-        log::warn "Skipping QEMU boot test (no KVM available)"
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        log::warn "Skipping QEMU boot test (no KVM on GH Actions runners)"
+        return 0
+    fi
+    if [[ ! -e /dev/kvm ]] || ! grep -q "vmx\|svm" /proc/cpuinfo 2>/dev/null; then
+        log::warn "Skipping QEMU boot test (no KVM hardware support)"
         return 0
     fi
 
