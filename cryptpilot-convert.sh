@@ -1308,16 +1308,12 @@ step::prepare_output_and_snapshots() {
     # (rootfs partition is preserved since we didn't delete it in shrink)
     log::info "Copying partition table to output file"
     sfdisk -d "${source_read_device}" > "${workdir}/partition_table.sfdisk"
-    log::debug "Partition table dump from source:"
-    log::debug "$(cat "${workdir}/partition_table.sfdisk")"
     if ! sfdisk "${output_device}" < "${workdir}/partition_table.sfdisk"; then
         log::error "Failed to copy partition table to output"
         return 1
     fi
     partprobe "${output_device}" 2>/dev/null || true
     udevadm settle --timeout=10
-    log::debug "Partition table on output after copy:"
-    log::debug "$(sfdisk -d "${output_device}" 2>/dev/null || echo "Failed to dump output partition table")"
 
     # In UKI mode, resize the EFI partition to accommodate the UKI image (~250MB).
     # The source image may have a small EFI partition that's too small for the UKI.
@@ -1358,33 +1354,49 @@ step::prepare_output_and_snapshots() {
             # Calculate EFI partition end sector for 512M
             local sector_size=512
             local efi_end=$(( (512 * 1024 * 1024) / sector_size + efi_start - 1 ))
+            local efi_size_sectors=$((efi_end - efi_start + 1))
 
-            # Delete rootfs and EFI partitions, recreate with new EFI size
-            # Use sed to modify the sfdisk dump
-            # Escape device path for sed regex (contains / characters)
+            # Get the total disk size in sectors
+            local disk_sectors
+            disk_sectors=$(blockdev --getsz "${output_device}" 2>/dev/null || echo 0)
+
+            # Calculate new rootfs partition: starts after EFI, fills remaining space
+            local rootfs_new_start
+            rootfs_new_start=$((efi_end + 1))
+            rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
+            local rootfs_size_sectors=$((disk_sectors - rootfs_new_start))
+
+            log::info "New rootfs partition: start=${rootfs_new_start}, size=${rootfs_size_sectors} sectors"
+
+            # Modify the sfdisk dump:
+            # 1. Delete the old rootfs partition line
+            # 2. Modify the EFI partition size
+            # 3. Add a new rootfs partition line at the end
             local dev_escaped
             dev_escaped=$(echo "${output_device}" | sed 's|/|\\/|g')
+
+            # Delete old rootfs partition
             sed -i "\|${dev_escaped}p${rootfs_orig_part_num}|d" "${sfdisk_dump}"
-            local efi_size_sectors=$((efi_end - efi_start + 1))
+
+            # Modify EFI partition size
             sed -i "s|\(^.*p${efi_part_num}.*\)start=[0-9]*|\1start=${efi_start}, size=${efi_size_sectors}|" "${sfdisk_dump}"
 
-            # Apply modified partition table
-            sfdisk "${output_device}" < "${sfdisk_dump}" >/dev/null 2>&1 || {
-                # Fallback: use parted if sfdisk approach fails
-                log::info "sfdisk approach failed, falling back to parted"
-                parted "${output_device}" --script -- rm "${rootfs_orig_part_num}"
-                parted "${output_device}" --script -- resizepart "${efi_part_num}" "${uki_efi_size}"
-            }
+            # Get the EFI partition line to extract type and uuid for the new rootfs line
+            # Actually, we need to create a new rootfs partition line
+            # The format is: /dev/nbdXpY : start=..., size=..., type=..., uuid=...
+            # We'll use a standard Linux partition type (83 for MBR, 0FC63DAF-8483-4772-8E79-3D69D8477DE4 for GPT)
+            local rootfs_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 
-            # Recreate rootfs partition to fill remaining space
-            partprobe "${output_device}" 2>/dev/null || true
-            udevadm settle --timeout=10
-            local rootfs_new_start
-            rootfs_new_start=$(parted "${output_device}" --script -- unit s print | awk '/^ *'"${efi_part_num}"' / {gsub(/s$/,"",$3); print $3; exit}')
-            rootfs_new_start=$((rootfs_new_start + 1))
-            rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
-            log::info "Recreating rootfs partition from sector ${rootfs_new_start} to end"
-            parted "${output_device}" --script -- mkpart primary ext4 "${rootfs_new_start}s" '100%'
+            # Add new rootfs partition line to the dump
+            echo "${output_device}p${rootfs_orig_part_num} : start=${rootfs_new_start}, size=${rootfs_size_sectors}, type=${rootfs_type}" >> "${sfdisk_dump}"
+
+            log::info "Applying modified partition table with sfdisk"
+
+            # Apply the modified partition table
+            if ! sfdisk "${output_device}" < "${sfdisk_dump}" >/dev/null 2>&1; then
+                log::error "Failed to apply modified partition table"
+                # Try to continue anyway, the partition table might still be usable
+            fi
 
             # Restore original partition UUIDs
             if [ -n "$saved_efi_uuid" ]; then
@@ -1395,9 +1407,6 @@ step::prepare_output_and_snapshots() {
                 log::info "Restoring rootfs partition UUID: $saved_rootfs_uuid"
                 sgdisk -u "${rootfs_orig_part_num}:${saved_rootfs_uuid}" "${output_device}" >/dev/null 2>&1 || true
             fi
-
-            log::debug "Partition table on output after UKI resize:"
-            log::debug "$(sfdisk -d "${output_device}" 2>/dev/null || echo "Failed to dump output partition table")"
         fi
     fi
 
