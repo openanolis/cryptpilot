@@ -1919,8 +1919,11 @@ main() {
     # BOOTX64.EFI (UKI mode) which must be preserved.
     local efi_backup="${workdir}/efi_backup.tar"
     local efi_backup_mount="${workdir}/efi_backup_mnt"
+    local efi_label=""
     mkdir -p "$efi_backup_mount"
     if mount "${output_device}p${efi_part_num}" "$efi_backup_mount" 2>/dev/null; then
+        # Save the EFI partition label before backing up
+        efi_label=$(blkid -s LABEL -o value "${output_device}p${efi_part_num}" 2>/dev/null || true)
         tar cf "$efi_backup" -C "$efi_backup_mount" .
         disk::umount_wait_busy "$efi_backup_mount"
         rmdir "$efi_backup_mount" 2>/dev/null || true
@@ -1940,17 +1943,27 @@ main() {
         # guestfish uses /dev/sda instead of /dev/nbdX, but partition numbers should match
         # The EFI partition number is determined from the output device partition table
         log::info "Restoring EFI partition (partition ${efi_part_num}) using guestfish"
+        if [ -n "$efi_label" ]; then
+            log::info "EFI partition label: ${efi_label}"
+        fi
 
-        if guestfish -a "${output_file}" -- <<GUESTFISH_EOF
-run
-# Verify the partition exists before trying to format it
+        # Build guestfish command with optional label setting
+        local guestfish_cmd="run
 list-partitions
-mkfs vfat /dev/sda${efi_part_num}
+mkfs vfat /dev/sda${efi_part_num}"
+
+        # Set label if it was saved
+        if [ -n "$efi_label" ]; then
+            guestfish_cmd+="
+set-label /dev/sda${efi_part_num} ${efi_label}"
+        fi
+
+        guestfish_cmd+="
 mount /dev/sda${efi_part_num} /
 copy-in ${extract_dir}/. /
-sync
-GUESTFISH_EOF
-        then
+sync"
+
+        if echo "$guestfish_cmd" | guestfish -a "${output_file}"; then
             log::info "EFI partition restored using guestfish"
         else
             log::warn "guestfish failed to restore EFI partition"
