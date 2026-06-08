@@ -2001,11 +2001,15 @@ sync"
                 mkdir -p "$fallback_mount"
 
                 # Format and mount the EFI partition
-                if mkfs.vfat -F 32 "$fallback_efi_part" 2>/dev/null; then
-                    if [ -n "$efi_label" ]; then
-                        fatlabel "$fallback_efi_part" "$efi_label" 2>/dev/null || true
-                    fi
+                # Use -n option to set label during filesystem creation
+                local mkfs_cmd="mkfs.vfat -F 32"
+                if [ -n "$efi_label" ]; then
+                    mkfs_cmd+=" -n \"$efi_label\""
+                    log::info "Setting EFI partition label: $efi_label"
+                fi
+                mkfs_cmd+=" \"$fallback_efi_part\""
 
+                if eval "$mkfs_cmd" 2>/dev/null; then
                     if mount "$fallback_efi_part" "$fallback_mount" 2>/dev/null; then
                         # Copy EFI files
                         cp -a "${extract_dir}/." "$fallback_mount/" 2>/dev/null || true
