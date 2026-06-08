@@ -1329,11 +1329,13 @@ step::prepare_output_and_snapshots() {
         else
             log::info "UKI mode: resizing EFI partition to ${uki_efi_size} (currently ${efi_size_mb}M)"
 
-            # Save partition UUIDs before parted modifies them.
-            # parted rm/mkpart generates new UUIDs, losing the originals.
-            local saved_efi_uuid saved_rootfs_uuid
+            # Save partition UUIDs before modifying them.
+            local saved_efi_uuid saved_rootfs_uuid saved_boot_uuid=""
             saved_efi_uuid=$(blkid -s PART_UUID -o value "${output_device}p${efi_part_num}" 2>/dev/null || true)
             saved_rootfs_uuid=$(blkid -s PART_UUID -o value "${output_device}p${rootfs_orig_part_num}" 2>/dev/null || true)
+            if [ "$boot_part_exist" = "true" ]; then
+                saved_boot_uuid=$(blkid -s PART_UUID -o value "${output_device}p${boot_part_num}" 2>/dev/null || true)
+            fi
 
             # Sync kernel partition table view before modifying
             partprobe "${output_device}" 2>/dev/null || true
@@ -1345,7 +1347,7 @@ step::prepare_output_and_snapshots() {
             local sfdisk_dump="${workdir}/output_before_uki.sfdisk"
             sfdisk -d "${output_device}" > "${sfdisk_dump}"
 
-            # Extract EFI partition info and modify its size
+            # Extract EFI partition info
             local efi_start efi_type efi_uuid
             efi_start=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${efi_part_num}" | sed 's/.*start=\s*\([0-9]*\).*/\1/')
             efi_type=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${efi_part_num}" | sed 's/.*type=\s*\([^ ,]*\).*/\1/')
@@ -1360,13 +1362,6 @@ step::prepare_output_and_snapshots() {
             local disk_sectors
             disk_sectors=$(blockdev --getsz "${output_device}" 2>/dev/null || echo 0)
 
-            # Calculate new rootfs partition: starts after EFI, fills remaining space
-            # Note: GPT uses some sectors at the end for backup header, so we need to
-            # account for that. The sfdisk dump shows last-lba which is the usable last sector.
-            local rootfs_new_start
-            rootfs_new_start=$((efi_end + 1))
-            rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
-
             # Get the last usable sector from sfdisk dump (GPT backup header uses some space)
             local last_usable_lba
             last_usable_lba=$(grep "^last-lba:" "${sfdisk_dump}" | awk '{print $2}')
@@ -1374,37 +1369,67 @@ step::prepare_output_and_snapshots() {
                 # Fallback: use disk sectors minus GPT backup (typically 33 sectors)
                 last_usable_lba=$((disk_sectors - 34))
             fi
+
+            # Calculate new partition positions
+            # Layout will be: EFI -> BOOT (if exists) -> rootfs
+            local next_free_sector=$((efi_end + 1))
+            next_free_sector=$(disk::align_start_sector "${next_free_sector}")
+
+            # Extract BOOT partition info if it exists
+            local boot_start="" boot_size_sectors="" boot_type="" boot_uuid=""
+            if [ "$boot_part_exist" = "true" ]; then
+                boot_start=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${boot_part_num}" | sed 's/.*start=\s*\([0-9]*\).*/\1/')
+                boot_size_sectors=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${boot_part_num}" | sed 's/.*size=\s*\([0-9]*\).*/\1/')
+                boot_type=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${boot_part_num}" | sed 's/.*type=\s*\([^ ,]*\).*/\1/')
+                boot_uuid=$(sfdisk -d "${output_device}" 2>/dev/null | grep "${output_device}p${boot_part_num}" | sed 's/.*uuid=\s*\([^ ,]*\).*/\1/')
+                log::info "Original BOOT partition: start=${boot_start}, size=${boot_size_sectors}"
+            fi
+
+            # Calculate new rootfs position (after EFI, or after BOOT if it exists)
+            local rootfs_new_start="${next_free_sector}"
+            if [ "$boot_part_exist" = "true" ]; then
+                # BOOT partition will be placed after EFI
+                rootfs_new_start=$((next_free_sector + boot_size_sectors))
+                rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
+            fi
             local rootfs_size_sectors=$((last_usable_lba - rootfs_new_start + 1))
 
-            log::info "New rootfs partition: start=${rootfs_new_start}, size=${rootfs_size_sectors} sectors (last-lba=${last_usable_lba})"
+            log::info "New partition layout: EFI(start=${efi_start}, size=${efi_size_sectors}), rootfs(start=${rootfs_new_start}, size=${rootfs_size_sectors}), last-lba=${last_usable_lba}"
+            if [ "$boot_part_exist" = "true" ]; then
+                local boot_new_start="${next_free_sector}"
+                log::info "BOOT partition will be moved to: start=${boot_new_start}, size=${boot_size_sectors}"
+            fi
 
-            # Modify the sfdisk dump:
-            # 1. Delete the old rootfs partition line
-            # 2. Modify the EFI partition size
-            # 3. Add a new rootfs partition line at the end
+            # Modify the sfdisk dump
             local dev_escaped
             dev_escaped=$(echo "${output_device}" | sed 's|/|\\/|g')
 
-            # Delete old rootfs partition - use precise pattern to avoid matching p14, p15, p16 etc.
-            # Match partition number followed by space/colon (sfdisk format: "/dev/nbdXpY : start=...")
+            # Delete old rootfs partition
             sed -i "\|^${dev_escaped}p${rootfs_orig_part_num}[[:space:]]*:|d" "${sfdisk_dump}"
 
+            # Delete old BOOT partition if it exists (we'll add it back at new position)
+            if [ "$boot_part_exist" = "true" ]; then
+                sed -i "\|^${dev_escaped}p${boot_part_num}[[:space:]]*:|d" "${sfdisk_dump}"
+            fi
+
             # Modify EFI partition size - replace the entire line with new values
-            # sfdisk dump format: "/dev/nbdXpY : start=    N, size=    N, type=..., uuid=..."
-            # We need to preserve type and uuid but update size
             if [ -n "$efi_uuid" ]; then
                 sed -i "s|^${dev_escaped}p${efi_part_num}[[:space:]]*:.*|${output_device}p${efi_part_num} : start=${efi_start}, size=${efi_size_sectors}, type=${efi_type}, uuid=${efi_uuid}|" "${sfdisk_dump}"
             else
                 sed -i "s|^${dev_escaped}p${efi_part_num}[[:space:]]*:.*|${output_device}p${efi_part_num} : start=${efi_start}, size=${efi_size_sectors}, type=${efi_type}|" "${sfdisk_dump}"
             fi
 
-            # Get the EFI partition line to extract type and uuid for the new rootfs line
-            # Actually, we need to create a new rootfs partition line
-            # The format is: /dev/nbdXpY : start=..., size=..., type=..., uuid=...
-            # We'll use a standard Linux partition type (83 for MBR, 0FC63DAF-8483-4772-8E79-3D69D8477DE4 for GPT)
-            local rootfs_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+            # Add BOOT partition at new position (after EFI, before rootfs)
+            if [ "$boot_part_exist" = "true" ]; then
+                local boot_line="${output_device}p${boot_part_num} : start=${next_free_sector}, size=${boot_size_sectors}, type=${boot_type}"
+                if [ -n "$boot_uuid" ]; then
+                    boot_line+=", uuid=${boot_uuid}"
+                fi
+                echo "$boot_line" >> "${sfdisk_dump}"
+            fi
 
-            # Add new rootfs partition line to the dump
+            # Add rootfs partition at the end
+            local rootfs_type="0FC63DAF-8483-4772-8E79-3D69D8477DE4"
             echo "${output_device}p${rootfs_orig_part_num} : start=${rootfs_new_start}, size=${rootfs_size_sectors}, type=${rootfs_type}" >> "${sfdisk_dump}"
 
             log::info "Applying modified partition table with sfdisk"
@@ -1430,6 +1455,10 @@ step::prepare_output_and_snapshots() {
             if [ -n "$saved_rootfs_uuid" ]; then
                 log::info "Restoring rootfs partition UUID: $saved_rootfs_uuid"
                 sgdisk -u "${rootfs_orig_part_num}:${saved_rootfs_uuid}" "${output_device}" >/dev/null 2>&1 || true
+            fi
+            if [ -n "${saved_boot_uuid:-}" ]; then
+                log::info "Restoring BOOT partition UUID: $saved_boot_uuid"
+                sgdisk -u "${boot_part_num}:${saved_boot_uuid}" "${output_device}" >/dev/null 2>&1 || true
             fi
         fi
     fi
