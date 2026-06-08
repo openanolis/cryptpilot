@@ -534,8 +534,7 @@ test_qemu_boot() {
     local container_name="qemu-test-${test_name}-$$"
     if ! docker run -d --rm --privileged \
         -v "${output_image}:${output_image}:ro" \
-        -e "IMAGE=${output_image}" \
-        -e BOOT="" \
+        -e "BOOT=/boot.qcow2" \
         -e "KVM=N" \
         -e "CPU_CORES=$(nproc)" \
         -e "RAM_SIZE=$(awk '/MemTotal/{printf "%d", $2 * 0.8 / 1024}' /proc/meminfo)" \
