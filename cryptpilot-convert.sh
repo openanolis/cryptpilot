@@ -1950,6 +1950,21 @@ main() {
         rmdir "$efi_backup_mount" 2>/dev/null || true
     fi
 
+    # Also back up boot partition if it exists
+    local boot_backup="${workdir}/boot_backup.tar"
+    local boot_backup_mount="${workdir}/boot_backup_mnt"
+    local boot_label=""
+    if [ -n "${boot_part_num:-}" ]; then
+        mkdir -p "$boot_backup_mount"
+        if mount "${output_device}p${boot_part_num}" "$boot_backup_mount" 2>/dev/null; then
+            # Save the boot partition label before backing up
+            boot_label=$(blkid -s LABEL -o value "${output_device}p${boot_part_num}" 2>/dev/null || true)
+            tar cf "$boot_backup" -C "$boot_backup_mount" .
+            disk::umount_wait_busy "$boot_backup_mount"
+            rmdir "$boot_backup_mount" 2>/dev/null || true
+        fi
+    fi
+
     qemu-nbd -d "${output_device}" 2>/dev/null || true
     qemu-nbd -d "${source_read_device}" 2>/dev/null || true
     qemu-nbd -d "${source_write_device}" 2>/dev/null || true
@@ -2031,6 +2046,58 @@ sync"
         fi
 
         rm -rf "$extract_dir"
+    fi
+
+    # Restore boot partition if it was backed up
+    if [ -f "$boot_backup" ] && [ -n "${boot_part_num:-}" ]; then
+        local boot_extract_dir="${workdir}/boot_extract"
+        mkdir -p "$boot_extract_dir"
+        tar xf "$boot_backup" -C "$boot_extract_dir"
+
+        log::info "Restoring boot partition (partition ${boot_part_num}) using NBD"
+        if [ -n "$boot_label" ]; then
+            log::info "Boot partition label: $boot_label"
+        fi
+
+        # Use NBD to restore boot partition (boot is ext4, not vfat)
+        local fallback_device="/dev/nbd4"
+        if qemu-nbd -c "$fallback_device" --format=qcow2 "${output_file}" 2>/dev/null; then
+            sleep 2
+            partprobe "$fallback_device" 2>/dev/null || true
+            udevadm settle --timeout=10
+
+            local fallback_boot_part="${fallback_device}p${boot_part_num}"
+            local fallback_mount="${workdir}/boot_fallback_mnt"
+            mkdir -p "$fallback_mount"
+
+            # Format and mount the boot partition (ext4)
+            local mkfs_cmd="mkfs.ext4 -F"
+            if [ -n "$boot_label" ]; then
+                mkfs_cmd+=" -L \"$boot_label\""
+            fi
+            mkfs_cmd+=" \"$fallback_boot_part\""
+
+            if eval "$mkfs_cmd" 2>/dev/null; then
+                if mount "$fallback_boot_part" "$fallback_mount" 2>/dev/null; then
+                    # Copy boot files
+                    cp -a "${boot_extract_dir}/." "$fallback_mount/" 2>/dev/null || true
+                    sync
+                    umount "$fallback_mount" 2>/dev/null || true
+                    log::info "Boot partition restored using NBD fallback"
+                else
+                    log::warn "Failed to mount boot partition in fallback"
+                fi
+            else
+                log::warn "Failed to format boot partition in fallback"
+            fi
+
+            rmdir "$fallback_mount" 2>/dev/null || true
+            qemu-nbd -d "$fallback_device" 2>/dev/null || true
+        else
+            log::warn "Failed to reconnect NBD for boot partition fallback"
+        fi
+
+        rm -rf "$boot_extract_dir"
     fi
 
     log::success "--------------------------------"
