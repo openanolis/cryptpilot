@@ -178,6 +178,7 @@ jobs:
           # GH runner already has Docker installed; install only additional deps
           # Include grub packages for cryptpilot-convert UKI support
           # Include libguestfs-tools for EFI partition restoration
+          # Include passt for libguestfs network access
           sudo apt-get install -y \
             qemu-utils \
             cryptsetup-bin \
@@ -189,7 +190,8 @@ jobs:
             grub-common \
             grub-efi-amd64-bin \
             sbsigntool \
-            libguestfs-tools
+            libguestfs-tools \
+            passt
 
       - name: Pull Ubuntu test image
         run: |
