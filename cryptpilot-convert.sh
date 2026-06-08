@@ -1391,11 +1391,18 @@ step::prepare_output_and_snapshots() {
             echo "${output_device}p${rootfs_orig_part_num} : start=${rootfs_new_start}, size=${rootfs_size_sectors}, type=${rootfs_type}" >> "${sfdisk_dump}"
 
             log::info "Applying modified partition table with sfdisk"
+            log::info "sfdisk dump content:"
+            cat "${sfdisk_dump}" | while IFS= read -r line; do log::info "  $line"; done
 
             # Apply the modified partition table
-            if ! sfdisk "${output_device}" < "${sfdisk_dump}" >/dev/null 2>&1; then
-                log::error "Failed to apply modified partition table"
+            local sfdisk_output sfdisk_exit_code
+            sfdisk_output=$(sfdisk "${output_device}" < "${sfdisk_dump}" 2>&1) && sfdisk_exit_code=0 || sfdisk_exit_code=$?
+            if [ $sfdisk_exit_code -ne 0 ]; then
+                log::error "Failed to apply modified partition table (exit code: $sfdisk_exit_code)"
+                log::error "sfdisk output: $sfdisk_output"
                 # Try to continue anyway, the partition table might still be usable
+            else
+                log::info "sfdisk succeeded: $sfdisk_output"
             fi
 
             # Restore original partition UUIDs
