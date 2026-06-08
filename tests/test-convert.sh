@@ -541,10 +541,10 @@ test_qemu_boot() {
         --entrypoint /bin/bash \
         --name "${container_name}" \
         ghcr.io/qemus/qemu:7.29 \
-            -c 'echo "Creating temporary COW layer..." && \
-            qemu-img create -f qcow2 -F qcow2 -b ${IMAGE} /boot.qcow2 && \
-            echo "COW layer created, starting QEMU..." && \
-            exec /usr/bin/tini -s /run/entry.sh'; then
+            -c "echo 'Creating temporary COW layer...' && \
+            qemu-img create -f qcow2 -F qcow2 -b ${output_image} /boot.qcow2 && \
+            echo 'COW layer created, starting QEMU...' && \
+            exec /usr/bin/tini -s /run/entry.sh"; then
         log::error "Failed to start QEMU container: ${container_name}"
         return 1
     fi
