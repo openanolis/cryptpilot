@@ -1954,11 +1954,13 @@ main() {
     local boot_backup="${workdir}/boot_backup.tar"
     local boot_backup_mount="${workdir}/boot_backup_mnt"
     local boot_label=""
+    local boot_uuid=""
     if [ -n "${boot_part_num:-}" ]; then
         mkdir -p "$boot_backup_mount"
         if mount "${output_device}p${boot_part_num}" "$boot_backup_mount" 2>/dev/null; then
-            # Save the boot partition label before backing up
+            # Save the boot partition label and UUID before backing up
             boot_label=$(blkid -s LABEL -o value "${output_device}p${boot_part_num}" 2>/dev/null || true)
+            boot_uuid=$(blkid -s UUID -o value "${output_device}p${boot_part_num}" 2>/dev/null || true)
             tar cf "$boot_backup" -C "$boot_backup_mount" .
             disk::umount_wait_busy "$boot_backup_mount"
             rmdir "$boot_backup_mount" 2>/dev/null || true
@@ -2074,6 +2076,9 @@ sync"
             local mkfs_cmd="mkfs.ext4 -F"
             if [ -n "$boot_label" ]; then
                 mkfs_cmd+=" -L \"$boot_label\""
+            fi
+            if [ -n "$boot_uuid" ]; then
+                mkfs_cmd+=" -U \"$boot_uuid\""
             fi
             mkfs_cmd+=" \"$fallback_boot_part\""
 
