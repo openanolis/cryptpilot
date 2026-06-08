@@ -1937,8 +1937,14 @@ main() {
         mkdir -p "$extract_dir"
         tar xf "$efi_backup" -C "$extract_dir"
 
+        # guestfish uses /dev/sda instead of /dev/nbdX, but partition numbers should match
+        # The EFI partition number is determined from the output device partition table
+        log::info "Restoring EFI partition (partition ${efi_part_num}) using guestfish"
+
         if guestfish -a "${output_file}" -- <<GUESTFISH_EOF
 run
+# Verify the partition exists before trying to format it
+list-partitions
 mkfs vfat /dev/sda${efi_part_num}
 mount /dev/sda${efi_part_num} /
 copy-in ${extract_dir}/. /
@@ -1948,6 +1954,13 @@ GUESTFISH_EOF
             log::info "EFI partition restored using guestfish"
         else
             log::warn "guestfish failed to restore EFI partition"
+            # Debug: show what partitions guestfish sees
+            log::warn "Debug: Listing partitions that guestfish sees:"
+            guestfish -a "${output_file}" -- readonly:true <<GUESTFISH_EOF 2>&1 | grep -E '(sda|partition)' || true
+run
+list-partitions
+part-list /dev/sda
+GUESTFISH_EOF
         fi
 
         rm -rf "$extract_dir"
