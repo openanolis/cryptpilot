@@ -1361,12 +1361,22 @@ step::prepare_output_and_snapshots() {
             disk_sectors=$(blockdev --getsz "${output_device}" 2>/dev/null || echo 0)
 
             # Calculate new rootfs partition: starts after EFI, fills remaining space
+            # Note: GPT uses some sectors at the end for backup header, so we need to
+            # account for that. The sfdisk dump shows last-lba which is the usable last sector.
             local rootfs_new_start
             rootfs_new_start=$((efi_end + 1))
             rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
-            local rootfs_size_sectors=$((disk_sectors - rootfs_new_start))
 
-            log::info "New rootfs partition: start=${rootfs_new_start}, size=${rootfs_size_sectors} sectors"
+            # Get the last usable sector from sfdisk dump (GPT backup header uses some space)
+            local last_usable_lba
+            last_usable_lba=$(grep "^last-lba:" "${sfdisk_dump}" | awk '{print $2}')
+            if [ -z "$last_usable_lba" ]; then
+                # Fallback: use disk sectors minus GPT backup (typically 33 sectors)
+                last_usable_lba=$((disk_sectors - 34))
+            fi
+            local rootfs_size_sectors=$((last_usable_lba - rootfs_new_start + 1))
+
+            log::info "New rootfs partition: start=${rootfs_new_start}, size=${rootfs_size_sectors} sectors (last-lba=${last_usable_lba})"
 
             # Modify the sfdisk dump:
             # 1. Delete the old rootfs partition line
@@ -1375,11 +1385,13 @@ step::prepare_output_and_snapshots() {
             local dev_escaped
             dev_escaped=$(echo "${output_device}" | sed 's|/|\\/|g')
 
-            # Delete old rootfs partition
-            sed -i "\|${dev_escaped}p${rootfs_orig_part_num}|d" "${sfdisk_dump}"
+            # Delete old rootfs partition - use precise pattern to avoid matching p14, p15, p16 etc.
+            # Match partition number followed by space/colon (sfdisk format: "/dev/nbdXpY : start=...")
+            sed -i "\|^${dev_escaped}p${rootfs_orig_part_num}[[:space:]]*:|d" "${sfdisk_dump}"
 
-            # Modify EFI partition size
-            sed -i "s|\(^.*p${efi_part_num}.*\)start=[0-9]*|\1start=${efi_start}, size=${efi_size_sectors}|" "${sfdisk_dump}"
+            # Modify EFI partition size - use precise pattern to match exact partition
+            # Match: /dev/nbdXpY : start=..., size=... -> /dev/nbdXpY : start=..., size=NEW, ...
+            sed -i "s|^\(${dev_escaped}p${efi_part_num}[[:space:]]*:.*start=[0-9]*\).*|\1, size=${efi_size_sectors}|" "${sfdisk_dump}"
 
             # Get the EFI partition line to extract type and uuid for the new rootfs line
             # Actually, we need to create a new rootfs partition line
