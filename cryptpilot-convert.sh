@@ -1389,9 +1389,14 @@ step::prepare_output_and_snapshots() {
             # Match partition number followed by space/colon (sfdisk format: "/dev/nbdXpY : start=...")
             sed -i "\|^${dev_escaped}p${rootfs_orig_part_num}[[:space:]]*:|d" "${sfdisk_dump}"
 
-            # Modify EFI partition size - use precise pattern to match exact partition
-            # Match: /dev/nbdXpY : start=..., size=... -> /dev/nbdXpY : start=..., size=NEW, ...
-            sed -i "s|^\(${dev_escaped}p${efi_part_num}[[:space:]]*:.*start=[0-9]*\).*|\1, size=${efi_size_sectors}|" "${sfdisk_dump}"
+            # Modify EFI partition size - replace the entire line with new values
+            # sfdisk dump format: "/dev/nbdXpY : start=    N, size=    N, type=..., uuid=..."
+            # We need to preserve type and uuid but update size
+            if [ -n "$efi_uuid" ]; then
+                sed -i "s|^${dev_escaped}p${efi_part_num}[[:space:]]*:.*|${output_device}p${efi_part_num} : start=${efi_start}, size=${efi_size_sectors}, type=${efi_type}, uuid=${efi_uuid}|" "${sfdisk_dump}"
+            else
+                sed -i "s|^${dev_escaped}p${efi_part_num}[[:space:]]*:.*|${output_device}p${efi_part_num} : start=${efi_start}, size=${efi_size_sectors}, type=${efi_type}|" "${sfdisk_dump}"
+            fi
 
             # Get the EFI partition line to extract type and uuid for the new rootfs line
             # Actually, we need to create a new rootfs partition line
