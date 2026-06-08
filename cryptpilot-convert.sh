@@ -1987,14 +1987,43 @@ sync"
         if echo "$guestfish_cmd" | guestfish -a "${output_file}"; then
             log::info "EFI partition restored using guestfish"
         else
-            log::warn "guestfish failed to restore EFI partition"
-            # Debug: show what partitions guestfish sees
-            log::warn "Debug: Listing partitions that guestfish sees:"
-            guestfish -a "${output_file}" -- readonly:true <<GUESTFISH_EOF 2>&1 | grep -E '(sda|partition)' || true
-run
-list-partitions
-part-list /dev/sda
-GUESTFISH_EOF
+            log::warn "guestfish failed to restore EFI partition, trying NBD fallback"
+
+            # Fallback: reconnect NBD and restore EFI partition directly
+            local fallback_device="/dev/nbd3"
+            if qemu-nbd -c "$fallback_device" --format=qcow2 "${output_file}" 2>/dev/null; then
+                sleep 2
+                partprobe "$fallback_device" 2>/dev/null || true
+                udevadm settle --timeout=10
+
+                local fallback_efi_part="${fallback_device}p${efi_part_num}"
+                local fallback_mount="${workdir}/efi_fallback_mnt"
+                mkdir -p "$fallback_mount"
+
+                # Format and mount the EFI partition
+                if mkfs.vfat -F 32 "$fallback_efi_part" 2>/dev/null; then
+                    if [ -n "$efi_label" ]; then
+                        fatlabel "$fallback_efi_part" "$efi_label" 2>/dev/null || true
+                    fi
+
+                    if mount "$fallback_efi_part" "$fallback_mount" 2>/dev/null; then
+                        # Copy EFI files
+                        cp -a "${extract_dir}/." "$fallback_mount/" 2>/dev/null || true
+                        sync
+                        umount "$fallback_mount" 2>/dev/null || true
+                        log::info "EFI partition restored using NBD fallback"
+                    else
+                        log::warn "Failed to mount EFI partition in fallback"
+                    fi
+                else
+                    log::warn "Failed to format EFI partition in fallback"
+                fi
+
+                rmdir "$fallback_mount" 2>/dev/null || true
+                qemu-nbd -d "$fallback_device" 2>/dev/null || true
+            else
+                log::warn "Failed to reconnect NBD for EFI partition fallback"
+            fi
         fi
 
         rm -rf "$extract_dir"
