@@ -1308,7 +1308,16 @@ step::prepare_output_and_snapshots() {
     # (rootfs partition is preserved since we didn't delete it in shrink)
     log::info "Copying partition table to output file"
     sfdisk -d "${source_read_device}" > "${workdir}/partition_table.sfdisk"
-    sfdisk "${output_device}" < "${workdir}/partition_table.sfdisk"
+    log::debug "Partition table dump from source:"
+    log::debug "$(cat "${workdir}/partition_table.sfdisk")"
+    if ! sfdisk "${output_device}" < "${workdir}/partition_table.sfdisk"; then
+        log::error "Failed to copy partition table to output"
+        return 1
+    fi
+    partprobe "${output_device}" 2>/dev/null || true
+    udevadm settle --timeout=10
+    log::debug "Partition table on output after copy:"
+    log::debug "$(sfdisk -d "${output_device}" 2>/dev/null || echo "Failed to dump output partition table")"
 
     # In UKI mode, resize the EFI partition to accommodate the UKI image (~250MB).
     # The source image may have a small EFI partition that's too small for the UKI.
@@ -1386,6 +1395,9 @@ step::prepare_output_and_snapshots() {
                 log::info "Restoring rootfs partition UUID: $saved_rootfs_uuid"
                 sgdisk -u "${rootfs_orig_part_num}:${saved_rootfs_uuid}" "${output_device}" >/dev/null 2>&1 || true
             fi
+
+            log::debug "Partition table on output after UKI resize:"
+            log::debug "$(sfdisk -d "${output_device}" 2>/dev/null || echo "Failed to dump output partition table")"
         fi
     fi
 
