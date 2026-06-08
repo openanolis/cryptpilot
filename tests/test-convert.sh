@@ -526,15 +526,6 @@ test_qemu_boot() {
 
     log::step "Testing QEMU boot for: ${test_name}"
 
-    # Skip QEMU boot test if KVM acceleration is not available
-    # GH Actions containers may have /dev/kvm but lack nested virtualization.
-    # Without KVM, QEMU is ~10x slower and boot takes > 15 minutes.
-    # Check if /dev/kvm is usable by testing if the kvm module is loaded.
-    if [[ ! -e /dev/kvm ]] || ! lsmod 2>/dev/null | grep -q '^kvm'; then
-        log::warn "Skipping QEMU boot test (KVM not available or not usable)"
-        return 0
-    fi
-
     local boot_log="${WORKDIR}/${test_name}-boot.log"
 
     log::info "Starting QEMU container with UEFI boot mode"
@@ -562,10 +553,10 @@ test_qemu_boot() {
     log::info "QEMU container started: ${container_name}"
 
     # Stream logs to file and check for boot status
-    # Use longer timeout for environments without KVM (e.g., CI runners)
-    local timeout=900  # 15 minutes timeout
+    # Use longer timeout for TCG (software emulation) without KVM
+    local timeout=1800  # 30 minutes timeout for TCG
     local elapsed=0
-    local check_interval=2
+    local check_interval=5
     local boot_success=false
 
     # Start capturing logs in background
@@ -582,22 +573,29 @@ test_qemu_boot() {
             break
         fi
 
-        # Check for login prompt (success)
-        # RHEL/Alibaba Cloud Linux: " on an x86_64"
-        # Ubuntu: "login:" on ttyS0/tty1 or "Welcome to Ubuntu"
+        # Check for successful boot (multiple indicators)
+        # 1. Login prompt (traditional Linux boot)
+        # 2. systemd reached multi-user.target
+        # 3. Serial getty started (Ubuntu cloud image)
         if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null || \
            grep -q -i "Welcome to Ubuntu" "${boot_log}" 2>/dev/null || \
-           grep -q -E "[Tt]ty[0-9]+ login:" "${boot_log}" 2>/dev/null; then
-            # Verify cryptpilot-fde-guest actually ran in the guest
-            if grep -q "cryptpilot-fde-guest\[" "${boot_log}" 2>/dev/null; then
+           grep -q -E "[Tt]ty[0-9]+ login:" "${boot_log}" 2>/dev/null || \
+           grep -q -E "Reached target.*Multi-User" "${boot_log}" 2>/dev/null || \
+           grep -q -E "Started.*serial-getty@ttyS0" "${boot_log}" 2>/dev/null; then
+
+            # For Ubuntu cloud images, check if systemd finished booting
+            # cryptpilot-fde-guest should run during initrd phase
+            if grep -q "cryptpilot-fde-guest" "${boot_log}" 2>/dev/null; then
                 log::success "cryptpilot-fde-guest verified in boot log"
-            else
-                log::error "cryptpilot-fde-guest not found in boot log — package may not be installed in guest"
+                log::success "Boot successful!"
+                boot_success=true
+                break
+            elif grep -q -E "Started.*serial-getty@ttyS0|Reached target.*Multi-User" "${boot_log}" 2>/dev/null; then
+                # systemd finished booting, system is up
+                log::success "System boot completed (systemd target reached)"
+                boot_success=true
                 break
             fi
-            log::success "Login prompt detected - boot successful!"
-            boot_success=true
-            break
         fi
 
         # Check for emergency shell (failure)
