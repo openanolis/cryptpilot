@@ -40,6 +40,9 @@ readonly TEST_PASSPHRASE="test-passphrase-12345"
 # Source image path (can be overridden via --input)
 SOURCE_IMAGE=""
 
+# Flag to indicate if using custom input image (skip enhancement)
+USE_CUSTOM_INPUT=false
+
 # Path to cryptpilot-fde-guest package (.rpm or .deb)
 CRYPTPILOT_FDE_PACKAGE=""
 
@@ -329,6 +332,12 @@ EOF
 run_enhance() {
     local test_name="$1"
     local input_image="$2"
+
+    # Skip if using custom input image (already prepared)
+    if [[ "${USE_CUSTOM_INPUT}" == "true" ]]; then
+        log::info "Skipping cryptpilot-enhance (using custom input image)"
+        return 0
+    fi
 
     # Skip if virt-customize is not available
     if ! command -v virt-customize &>/dev/null; then
@@ -877,6 +886,7 @@ main() {
     # Set source image path
     if [[ -n "${custom_input}" ]]; then
         SOURCE_IMAGE="${custom_input}"
+        USE_CUSTOM_INPUT=true
         log::info "Using custom input image: ${SOURCE_IMAGE}"
     else
         # Download/prepare test image based on distro
