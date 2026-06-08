@@ -1546,40 +1546,40 @@ step::copy_partitions() {
     dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
 
     # Populate the output boot partition.
-    # Two cases:
+    # Cases:
     # 1. Source already had a boot partition → dd from source-read (raw copy, preserves filesystem)
     # 2. Source had /boot inside rootfs → copy kernel files from boot.img to the ext4-formatted output partition
-    if [ "$uki" = false ]; then
-        if [ "$boot_part_exist" = "true" ]; then
-            # Source already had a separate boot partition — raw copy preserves UUID and filesystem
-            log::info "Copying boot partition from source"
-            dd if="${source_read_device}p${boot_part_num}" of="${output_device}p${boot_part_num}" bs=4M status=progress
-        else
-            # Boot partition was created in step 5, formatted with ext4.
-            # Get the boot.img filesystem UUID before copying, then set the
-            # output boot partition to the same UUID so that grub.cfg (which
-            # references the boot.img UUID) points to the correct partition.
-            local boot_img_uuid
-            boot_img_uuid=$(blkid -s UUID -o value "${boot_file_path}" 2>/dev/null || true)
+    # Note: In UKI mode with boot_part_exist=true, we still need to copy the boot partition
+    # because the partition was moved to a new location in step 5.
+    if [ "$boot_part_exist" = "true" ]; then
+        # Source already had a separate boot partition — raw copy preserves UUID and filesystem
+        log::info "Copying boot partition from source"
+        dd if="${source_read_device}p${boot_part_num}" of="${output_device}p${boot_part_num}" bs=4M status=progress
+    elif [ "$uki" = false ]; then
+        # Boot partition was created in step 5, formatted with ext4.
+        # Get the boot.img filesystem UUID before copying, then set the
+        # output boot partition to the same UUID so that grub.cfg (which
+        # references the boot.img UUID) points to the correct partition.
+        local boot_img_uuid
+        boot_img_uuid=$(blkid -s UUID -o value "${boot_file_path}" 2>/dev/null || true)
 
-            log::info "Copying boot content from boot.img to output boot partition"
-            local boot_img_mount="${workdir}/boot_img"
-            local boot_part_mount="${workdir}/boot_part"
-            mkdir -p "$boot_img_mount" "$boot_part_mount"
+        log::info "Copying boot content from boot.img to output boot partition"
+        local boot_img_mount="${workdir}/boot_img"
+        local boot_part_mount="${workdir}/boot_part"
+        mkdir -p "$boot_img_mount" "$boot_part_mount"
 
-            mount -o ro "${boot_file_path}" "$boot_img_mount"
-            mount "${output_device}p${boot_part_num}" "$boot_part_mount"
-            cp -a "$boot_img_mount/." "$boot_part_mount/"
-            disk::umount_wait_busy "$boot_part_mount"
-            disk::umount_wait_busy "$boot_img_mount"
+        mount -o ro "${boot_file_path}" "$boot_img_mount"
+        mount "${output_device}p${boot_part_num}" "$boot_part_mount"
+        cp -a "$boot_img_mount/." "$boot_part_mount/"
+        disk::umount_wait_busy "$boot_part_mount"
+        disk::umount_wait_busy "$boot_img_mount"
 
-            # Set the output boot partition UUID to match boot.img's UUID.
-            # tune2fs requires a freshly checked filesystem, so run e2fsck first.
-            if [ -n "$boot_img_uuid" ]; then
-                log::info "Setting boot partition UUID to $boot_img_uuid"
-                e2fsck -f -y "${output_device}p${boot_part_num}" >/dev/null 2>&1 || true
-                tune2fs -U "$boot_img_uuid" "${output_device}p${boot_part_num}"
-            fi
+        # Set the output boot partition UUID to match boot.img's UUID.
+        # tune2fs requires a freshly checked filesystem, so run e2fsck first.
+        if [ -n "$boot_img_uuid" ]; then
+            log::info "Setting boot partition UUID to $boot_img_uuid"
+            e2fsck -f -y "${output_device}p${boot_part_num}" >/dev/null 2>&1 || true
+            tune2fs -U "$boot_img_uuid" "${output_device}p${boot_part_num}"
         fi
     fi
 }
