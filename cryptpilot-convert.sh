@@ -1039,7 +1039,15 @@ if [ "${uki:-false}" = false ]; then
     if [ -n "$grub2_cfg" ]; then
         if command -v grub2-mkconfig >/dev/null 2>&1; then
             echo "Generating grub config with grub2-mkconfig -> $grub2_cfg"
+            # Debug: list /boot content before running grub2-mkconfig
+            echo "=== /boot content before grub2-mkconfig ==="
+            ls -la /boot/ 2>/dev/null || echo "Cannot list /boot"
+            echo "=== end of /boot content ==="
             grub2-mkconfig -o "$grub2_cfg" || true
+            # Debug: show generated grub.cfg
+            echo "=== Generated grub.cfg menuentry lines ==="
+            grep -E "^menuentry|^linux|^initrd|^}" "$grub2_cfg" 2>/dev/null | head -20 || echo "Cannot read grub.cfg"
+            echo "=== end of grub.cfg excerpt ==="
         elif command -v grub-mkconfig >/dev/null 2>&1; then
             echo "Generating grub config with grub-mkconfig -> $grub2_cfg"
             grub-mkconfig -o "$grub2_cfg" || true
