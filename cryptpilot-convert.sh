@@ -1402,7 +1402,7 @@ step::prepare_output_and_snapshots() {
 
             # Modify the sfdisk dump
             local dev_escaped
-            dev_escaped=$(echo "${output_device}" | sed 's|/|\\/|g')
+            dev_escaped=${output_device//\//\\/}
 
             # Delete old rootfs partition
             sed -i "\|^${dev_escaped}p${rootfs_orig_part_num}[[:space:]]*:|d" "${sfdisk_dump}"
