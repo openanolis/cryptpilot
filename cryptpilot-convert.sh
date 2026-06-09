@@ -2026,12 +2026,6 @@ main() {
             # Save the boot partition label and UUID before backing up
             boot_label=$(blkid -s LABEL -o value "${output_device}p${boot_part_num}" 2>/dev/null || true)
             boot_uuid=$(blkid -s UUID -o value "${output_device}p${boot_part_num}" 2>/dev/null || true)
-            # Diagnostic: show grub.cfg menuentry and linux lines
-            if [ -f "$boot_backup_mount/grub2/grub.cfg" ]; then
-                log::info "=== grub.cfg menuentry and linux lines ==="
-                grep -E "^menuentry|^linux|^initrd|^}" "$boot_backup_mount/grub2/grub.cfg" 2>/dev/null | head -30 | while IFS= read -r line; do log::info "  $line"; done
-                log::info "=== end of grub.cfg excerpt ==="
-            fi
             tar cf "$boot_backup" -C "$boot_backup_mount" .
             disk::umount_wait_busy "$boot_backup_mount"
             rmdir "$boot_backup_mount" 2>/dev/null || true
