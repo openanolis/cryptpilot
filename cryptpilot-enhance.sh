@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2086,SC1012
 
 set -euo pipefail
 
@@ -222,6 +223,7 @@ if [[ "$MODE" == "full" ]]; then
     fi
     '
 elif [[ "$MODE" == "partial" ]]; then
+    # shellcheck disable=SC2016
     add_run_cmd '
     # Disable password login, allow public key only
     sshd_conf=/etc/ssh/sshd_config
