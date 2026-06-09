@@ -1003,6 +1003,22 @@ if [ "${uki:-false}" = false ]; then
         grub_add_args "GRUB_CMDLINE_LINUX_DEFAULT"
     fi
 
+    # Disable os-prober to avoid device-mapper errors in containerized environments
+    # os-prober scans all devices and may fail with "Device or resource busy" errors
+    # when running inside Docker containers with NBD devices
+    echo "Disabling os-prober to avoid device scanning issues..."
+    if [ -f /etc/default/grub ]; then
+        if ! grep -q "^GRUB_DISABLE_OS_PROBER=" /etc/default/grub; then
+            echo "GRUB_DISABLE_OS_PROBER=true" >> /etc/default/grub
+        else
+            sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=true/' /etc/default/grub
+        fi
+    fi
+    # Also set in grub.d config if the directory exists
+    if [ -d /etc/default/grub.d ]; then
+        echo "GRUB_DISABLE_OS_PROBER=true" > /etc/default/grub.d/99-disable-os-prober.cfg
+    fi
+
     echo "Updating grub2.cfg"
     grub2_cfg=""
     if [ -e /etc/grub2.cfg ] ; then
