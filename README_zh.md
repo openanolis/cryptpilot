@@ -3,6 +3,7 @@
 [![Building](/../../actions/workflows/build-rpm.yml/badge.svg)](/../../actions/workflows/build-rpm.yml)
 ![GitHub Release](https://img.shields.io/github/v/release/openanolis/cryptpilot)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![codecov](https://codecov.io/gh/openanolis/cryptpilot/branch/master/graph/badge.svg)](https://codecov.io/gh/openanolis/cryptpilot)
 
 cryptpilot 为机密计算环境提供全面的加密解决方案，保护系统启动完整性和静态数据。
 

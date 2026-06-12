@@ -3,6 +3,7 @@
 [![Building](/../../actions/workflows/build-rpm.yml/badge.svg)](/../../actions/workflows/build-rpm.yml)
 ![GitHub Release](https://img.shields.io/github/v/release/openanolis/cryptpilot)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![codecov](https://codecov.io/gh/openanolis/cryptpilot/branch/master/graph/badge.svg)](https://codecov.io/gh/openanolis/cryptpilot)
 
 cryptpilot provides comprehensive encryption solutions for confidential computing environments, protecting both system boot integrity and data at rest.
 
