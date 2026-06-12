@@ -169,6 +169,26 @@ cleanup-stale-devices:
 run-test: cleanup-stale-devices install-test-depend verity-testfiles
 	cargo test -- --nocapture
 
+# cargo-llvm-cov v0.6.16 (pinned 2026-06-12, update as needed)
+.PHONY: install-cargo-llvm-cov
+install-cargo-llvm-cov:
+	@if command -v cargo-llvm-cov >/dev/null 2>&1; then \
+		echo "cargo-llvm-cov is already installed"; \
+	else \
+		echo "Installing cargo-llvm-cov..."; \
+		rustup component add llvm-tools; \
+		HOST=$$(rustc -vV | grep '^host:' | cut -d' ' -f2); \
+		curl -fsSL "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.16/cargo-llvm-cov-$${HOST}.tar.gz" | tar xzf - -C $$HOME/.cargo/bin; \
+		echo "cargo-llvm-cov installed"; \
+	fi
+
+.PHONY: run-test-coverage
+run-test-coverage: cleanup-stale-devices install-test-depend verity-testfiles install-cargo-llvm-cov
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov --no-report --workspace --bins --lib -- --nocapture
+	cargo llvm-cov report --codecov --output-path target/codecov.json
+	@echo "Coverage report generated at target/codecov.json"
+
 .PHONY: verity-testfiles
 verity-testfiles:
 	@cd verity-core && python3 make_testfiles.py
