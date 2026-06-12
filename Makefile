@@ -178,6 +178,7 @@ install-cargo-llvm-cov:
 		echo "Installing cargo-llvm-cov..."; \
 		rustup component add llvm-tools; \
 		HOST=$$(rustc -vV | grep '^host:' | cut -d' ' -f2); \
+		mkdir -p $$HOME/.cargo/bin; \
 		curl -fsSL "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.6.16/cargo-llvm-cov-$${HOST}.tar.gz" | tar xzf - -C $$HOME/.cargo/bin; \
 		echo "cargo-llvm-cov installed"; \
 	fi
@@ -185,7 +186,7 @@ install-cargo-llvm-cov:
 .PHONY: run-test-coverage
 run-test-coverage: cleanup-stale-devices install-test-depend verity-testfiles install-cargo-llvm-cov
 	cargo llvm-cov clean --workspace
-	cargo llvm-cov --no-report --workspace --bins --lib -- --nocapture
+	cargo llvm-cov --no-report --workspace --all-targets -- --nocapture
 	cargo llvm-cov report --codecov --output-path target/codecov.json
 	@echo "Coverage report generated at target/codecov.json"
 
