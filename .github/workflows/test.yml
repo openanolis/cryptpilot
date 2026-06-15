@@ -20,8 +20,15 @@ jobs:
         include:
           - arch: x86_64
             runner: ubuntu-latest
+            # x86_64 does not need the profiler builtins workaround
+            rust_version: "1.85.0"
           - arch: aarch64
             runner: ubuntu-24.04-arm
+            # aarch64 requires Rust >= 1.86.0 for cargo-llvm-cov:
+            # Rust 1.85.0 libprofiler_builtins on aarch64 references
+            # __aarch64_cas8_sync / __aarch64_ldadd8_sync atomic builtins
+            # that are not linked by gcc. Fixed in Rust 1.86.0.
+            rust_version: "1.86.0"
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
@@ -60,7 +67,7 @@ jobs:
           yum install -y device-mapper kmod systemd systemd-udev lvm2 util-linux veritysetup dosfstools xfsprogs e2fsprogs fuse3 fuse3-libs
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@${{ matrix.rust_version }}
 
       - name: Checkout repository
         uses: actions/checkout@v6
