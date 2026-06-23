@@ -162,14 +162,16 @@ nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
             },
             encrypt: EncryptConfig {
                 key_provider: KeyProviderConfig::Kms(cryptpilot::provider::kms::KmsConfig {
-                    client_key: r#"{
+                    kms_instance_id: "kst-bjj66bdba95w1m0xfm3bt".to_owned(),
+                    secret_name: "luks_passphrase".to_owned(),
+                    auth: cryptpilot::provider::kms::AuthMode::ClientKey {
+                        client_key: r#"{
   "KeyId": "KAAP.f4c8****",
   "PrivateKeyData": "MIIJ****"
 }"#
-                    .to_owned(),
-                    client_key_password: "fa79****".to_owned(),
-                    kms_instance_id: "kst-bjj66bdba95w1m0xfm3bt".to_owned(),
-                    kms_cert_pem: r#"-----BEGIN CERTIFICATE-----
+                        .to_owned(),
+                        client_key_password: "fa79****".to_owned(),
+                        kms_cert_pem: r#"-----BEGIN CERTIFICATE-----
 MIIDuzCCAqOgAwIBAgIJALTKwWAjvbMiMA0GCSqGSIb3DQEBCwUAMHQxCzAJBgNV
 BAYTAkNOMREwDwYDVQQIDAhaaGVKaWFuZzERMA8GA1UEBwwISGFuZ1pob3UxEDAO
 BgNVBAoMB0FsaWJhYmExDzANBgNVBAsMBkFsaXl1bjEcMBoGA1UEAwwTUHJpdmF0
@@ -215,8 +217,8 @@ PpVsaCU9401qPWRWftXJgb3vIVOsYB6l3KYYKdOpudaCzSbZVROmC4a693/E5hWM
 nc8BTncWI0KGWIzTQasuSEye50R6gc9wZCGIElmhWcu3NYk=
 -----END CERTIFICATE-----
 "#
-                    .to_owned(),
-                    secret_name: "luks_passphrase".to_owned(),
+                        .to_owned(),
+                    },
                 }),
             },
         };
