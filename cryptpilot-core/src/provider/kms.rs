@@ -134,6 +134,10 @@ impl KmsConfig {
 /// IMDS metadata endpoint base URL
 const IMDS_BASE: &str = "http://100.100.100.200/latest/meta-data";
 
+// TODO: Support IMDSv2 for instances that enforce token-only metadata access.
+// IMDSv2 requires: PUT http://100.100.100.200/latest/api/token with
+// X-aliyun-ecs-metadata-token-ttl-seconds header, then use the token in
+// subsequent GET requests via X-aliyun-ecs-metadata-token header.
 /// Discover the region ID from IMDS
 async fn discover_region() -> Result<String> {
     let client = reqwest::Client::builder()
@@ -141,11 +145,20 @@ async fn discover_region() -> Result<String> {
         .build()
         .context("Failed to create HTTP client for IMDS")?;
 
-    let region_id = client
+    let resp = client
         .get(format!("{IMDS_BASE}/region-id"))
         .send()
         .await
-        .context("Failed to request region ID from IMDS")?
+        .context("Failed to request region ID from IMDS")?;
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        anyhow::bail!(
+            "IMDS region endpoint not reachable. \
+             This may not be running on Alibaba Cloud ECS."
+        );
+    }
+
+    let region_id = resp
         .text()
         .await
         .context("Failed to read region ID from IMDS response")?;
