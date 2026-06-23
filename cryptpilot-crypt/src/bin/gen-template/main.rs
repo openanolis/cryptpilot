@@ -77,22 +77,22 @@ impl VolumeType {
     pub fn get_volume_config(self) -> VolumeConfig {
         let key_provider = match self {
             VolumeType::Otp => KeyProviderConfig::Otp(OtpConfig {}),
-            VolumeType::Kms => KeyProviderConfig::Kms(KmsConfig {
-                secret_name: "XXXXXXXXX".into(),
-                client_key: r#"{
+            VolumeType::Kms => KeyProviderConfig::Kms(KmsConfig::new_client_key(
+                "kst-XXXXXXXXX".into(),
+                "XXXXXXXXX".into(),
+                r#"{
   "KeyId": "KAAP.XXXXXXXXX",
   "PrivateKeyData": "XXXXXXXXX"
 }"#
                 .into(),
-                client_key_password: "XXXXXXXXX".into(),
-                kms_instance_id: "kst-XXXXXXXXX".into(),
-                kms_cert_pem: r#"-----BEGIN CERTIFICATE-----
+                "XXXXXXXXX".into(),
+                r#"-----BEGIN CERTIFICATE-----
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 -----END CERTIFICATE-----
 "#
                 .into(),
-            }),
+            )),
             VolumeType::Kbs => KeyProviderConfig::Kbs(KbsConfig {
                 cdh_type: CdhType::OneShot {
                     kbs_url: "https://1.2.3.4:8080".into(),

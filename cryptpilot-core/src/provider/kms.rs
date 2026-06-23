@@ -12,7 +12,7 @@ use crate::types::Passphrase;
 use super::KeyProvider;
 
 /// Aliyun KMS
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone, Documented)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone, Documented, DocumentedFields)]
 #[serde(deny_unknown_fields)]
 pub struct KmsConfig {
     /// The id of KMS instance
