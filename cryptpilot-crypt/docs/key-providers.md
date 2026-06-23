@@ -74,23 +74,62 @@ Template: [kbs.toml.template](../../dist/etc/volumes/kbs.toml.template)
 
 ---
 
-### KMS: Key Management Service (Access Key)
+### KMS: Key Management Service
 
-Fetches keys from [Alibaba Cloud KMS](https://yundun.console.aliyun.com/) using Access Key authentication.
+Fetches keys from [Alibaba Cloud KMS](https://yundun.console.aliyun.com/).
 
-**Configuration:**
+Two authentication modes are supported:
+
+#### Mode 1: Client Key (Application Access Point) — Default
+
+Uses a pre-generated client key for authentication.
 
 ```toml
 [encrypt.kms]
 kms_instance_id = "kst-****"
-client_key_id = "LTAI****"
-client_key_password_from_kms = "alias/ClientKey_****"
+secret_name = "my-secret"
+client_key = '{"KeyId":"KAAP.****","PrivateKeyData":"****"}'
+client_key_password = "****"
+kms_cert_pem = """
+-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----
+"""
 ```
+
+#### Mode 2: ECS RAM Role — No Static Credentials
+
+Bind a RAM role to your ECS instance. cryptpilot automatically discovers the region and role name from the instance metadata service (IMDS).
+
+**Minimal configuration (auto-discover everything):**
+
+```toml
+[encrypt.kms]
+auth_mode = "ecs_ram_role"
+kms_instance_id = "kst-****"
+secret_name = "my-secret"
+# ecs_ram_role_name and region_id are auto-discovered from IMDS
+```
+
+**Explicit configuration:**
+
+```toml
+[encrypt.kms]
+auth_mode = "ecs_ram_role"
+kms_instance_id = "kst-****"
+secret_name = "my-secret"
+ecs_ram_role_name = "MyKmsRamRole"
+region_id = "cn-shanghai"
+```
+
+> [!NOTE]
+> Auto-discovery of `ecs_ram_role_name` requires the ECS instance to have exactly one RAM role bound. If multiple roles are bound, you must specify `ecs_ram_role_name` explicitly.
 
 **Use cases:**
 - Cloud-managed key lifecycle
 - Centralized key management
 - Integration with Alibaba Cloud services
+- Zero static credentials on instances (RAM role mode)
 
 **Supported by:** cryptpilot-fde, cryptpilot-crypt
 

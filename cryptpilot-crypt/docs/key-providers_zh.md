@@ -74,23 +74,62 @@ key_uri = "kbs:///default/mykey/volume_data0"
 
 ---
 
-### KMS：密钥管理服务（Access Key）
+### KMS：密钥管理服务
 
-从[阿里云密钥管理服务 KMS](https://yundun.console.aliyun.com/) 获取密钥，使用 Access Key 进行身份验证。
+从[阿里云密钥管理服务 KMS](https://yundun.console.aliyun.com/) 获取密钥。
 
-**配置：**
+支持两种认证模式：
+
+#### 模式一：Client Key（应用接入点）— 默认
+
+使用预生成的 Client Key 进行认证。
 
 ```toml
 [encrypt.kms]
 kms_instance_id = "kst-****"
-client_key_id = "LTAI****"
-client_key_password_from_kms = "alias/ClientKey_****"
+secret_name = "my-secret"
+client_key = '{"KeyId":"KAAP.****","PrivateKeyData":"****"}'
+client_key_password = "****"
+kms_cert_pem = """
+-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----
+"""
 ```
+
+#### 模式二：ECS RAM 角色 — 无静态凭证
+
+为 ECS 实例绑定 RAM 角色。cryptpilot 自动从实例元数据服务（IMDS）发现区域和角色名称。
+
+**最简配置（全自动发现）：**
+
+```toml
+[encrypt.kms]
+auth_mode = "ecs_ram_role"
+kms_instance_id = "kst-****"
+secret_name = "my-secret"
+# ecs_ram_role_name 和 region_id 从 IMDS 自动发现
+```
+
+**显式配置：**
+
+```toml
+[encrypt.kms]
+auth_mode = "ecs_ram_role"
+kms_instance_id = "kst-****"
+secret_name = "my-secret"
+ecs_ram_role_name = "MyKmsRamRole"
+region_id = "cn-shanghai"
+```
+
+> [!NOTE]
+> 自动发现 `ecs_ram_role_name` 要求 ECS 实例仅绑定一个 RAM 角色。如果绑定了多个角色，必须显式指定 `ecs_ram_role_name`。
 
 **使用场景：**
 - 云托管的密钥生命周期
 - 集中式密钥管理
 - 与阿里云服务集成
+- 实例上无静态凭证（RAM 角色模式）
 
 **支持范围：** cryptpilot-fde, cryptpilot-crypt
 
