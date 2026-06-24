@@ -70,112 +70,144 @@ async fn test_is_initialized_only_true_for_ready() -> Result<()> {
     Ok(())
 }
 
-/// Test: full init lifecycle (None → Initializing → Ready) detected via blkid -p
+/// Test: full init lifecycle (None → Initializing → Ready) with parallel blkid monitoring
 ///
-/// This test runs `blkid -p` in a parallel monitoring loop while performing
-/// a full initialization (format + mkfs + mark). It verifies that all three
-/// states are observable:
-/// - None: no SUBSYSTEM field (raw device before format)
-/// - Initializing: SUBSYSTEM="cryptpilot-initializing" (after format)
-/// - Ready: SUBSYSTEM="cryptpilot" (after mark_volume_as_initialized)
+/// Runs `blkid -p` in a parallel monitoring loop while performing
+/// a full initialization (format + mkfs + mark). After each step, verifies
+/// the state via `get_init_state()` AND checks that `blkid -p` reports
+/// the correct SUBSYSTEM field.
+///
+/// Uses `serial_test` to avoid interference from other parallel tests.
+#[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_full_init_lifecycle_with_blkid_probe() -> Result<()> {
     let dummy = DummyDevice::setup_on_tmpfs(100 * 1024 * 1024).await?;
     let dev_path = dummy.path()?;
     let dev_path_clone = dev_path.clone();
 
-    // Shared state for the monitor to record observed states
-    let observed_states: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let states_clone = observed_states.clone();
+    // Shared state for the monitor to record observed SUBSYSTEM values
+    let observed_subsystems: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let systems_clone = observed_subsystems.clone();
 
-    // Spawn a parallel monitor that runs blkid -p every 100ms
-    let monitor_handle = tokio::spawn(async move {
-        for i in 0..200 {
-            // Max 20 seconds total
+    // Spawn a parallel monitor that polls blkid every 100ms
+    let _monitor = tokio::spawn(async move {
+        for _ in 0..300 {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            let output = Command::new("blkid")
+            if let Ok(output) = Command::new("blkid")
                 .arg("-p")
+                .arg("-c")
+                .arg("/dev/null")
                 .arg("-o")
                 .arg("export")
                 .arg(&dev_path_clone)
                 .output()
-                .await;
-            if let Ok(output) = output {
+                .await
+            {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Some(subsystem) = extract_blkid_field(&stdout, "SUBSYSTEM") {
-                    let mut states = states_clone.lock().await;
-                    // Only record new states (dedup consecutive duplicates)
-                    if states.last().map(|s| s != &subsystem).unwrap_or(true) {
-                        tracing::debug!("Monitor probe #{}: observed SUBSYSTEM={}", i, subsystem);
-                        states.push(subsystem);
+                    let mut systems = systems_clone.lock().await;
+                    if systems.last().map(|s| s != &subsystem).unwrap_or(true) {
+                        systems.push(subsystem);
                     }
                 }
             }
         }
     });
 
-    // Wait for the monitor to do at least one probe on the raw device
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-    // Perform full initialization with some delays to allow monitor to catch states
-    let passphrase = Passphrase::from(b"test-passphrase-1234567890123456".to_vec());
-
-    // Format: transitions to Initializing
-    format(Path::new(&dev_path), &passphrase, IntegrityType::None).await?;
-    // Give the monitor time to observe the Initializing state
+    // Wait for monitor to probe raw device
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-    // Open the LUKS volume to create a filesystem
+    let passphrase = Passphrase::from(b"test-passphrase-1234567890123456".to_vec());
+
+    // Step 1: Verify raw device is None
+    let state = get_init_state(Path::new(&dev_path)).await?;
+    assert_eq!(state, VolumeInitState::None, "Expected None before format");
+
+    // Step 2: Format → Initializing
+    format(Path::new(&dev_path), &passphrase, IntegrityType::None).await?;
+    let state = get_init_state(Path::new(&dev_path)).await?;
+    assert_eq!(
+        state,
+        VolumeInitState::Initializing,
+        "Expected Initializing after format"
+    );
+    // Wait and retry blkid until it sees the state (up to 3s)
+    wait_for_blkid_subsystem(&dev_path.to_str().unwrap(), "cryptpilot-initializing", 30).await?;
+
+    // Step 3: Open LUKS + mkfs
     let tmp_volume = cryptpilot::fs::luks2::TempLuksVolume::open(
         Path::new(&dev_path),
         &passphrase,
         IntegrityType::None,
     )
     .await?;
-
-    // Create filesystem inside the encrypted volume
     cryptpilot::fs::mkfs::force_mkfs(
         &tmp_volume.volume_path(),
         &MakeFsType::Ext4,
         IntegrityType::None,
     )
     .await?;
-    drop(tmp_volume); // Close the temporary volume
-                      // Give the monitor time to observe (still Initializing at this point)
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    drop(tmp_volume);
 
-    // Mark as ready: transitions to Ready
+    // Still Initializing after mkfs
+    let state = get_init_state(Path::new(&dev_path)).await?;
+    assert_eq!(
+        state,
+        VolumeInitState::Initializing,
+        "Expected Initializing after mkfs"
+    );
+
+    // Step 4: Mark as ready → Ready
     mark_volume_as_initialized(Path::new(&dev_path)).await?;
-    // Give the monitor time to observe the Ready state
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    // Stop the monitor
-    monitor_handle.abort();
-
-    // Verify we observed all three states
-    let states = observed_states.lock().await;
-    tracing::info!("Observed blkid states: {:?}", states);
-
-    // We should have seen at least "cryptpilot-initializing" and "cryptpilot"
-    let has_initializing = states.iter().any(|s| s == "cryptpilot-initializing");
-    let has_ready = states.iter().any(|s| s == "cryptpilot");
-    assert!(
-        has_initializing,
-        "blkid should have observed SUBSYSTEM=cryptpilot-initializing, got: {:?}",
-        states
-    );
-    assert!(
-        has_ready,
-        "blkid should have observed SUBSYSTEM=cryptpilot, got: {:?}",
-        states
-    );
+    let state = get_init_state(Path::new(&dev_path)).await?;
+    assert_eq!(state, VolumeInitState::Ready, "Expected Ready after mark");
+    // Wait and retry blkid until it sees the state (up to 5s)
+    wait_for_blkid_subsystem(&dev_path.to_str().unwrap(), "cryptpilot", 50).await?;
 
     Ok(())
 }
 
-/// Extract a field value from blkid -p -o export output.
+/// Poll blkid until it reports the expected SUBSYSTEM value.
 ///
-/// blkid outputs key-value pairs like: `SUBSYSTEM=cryptpilot-initializing`
+/// Retries `max_attempts` times with 100ms between attempts.
+/// Returns Ok if the expected value is observed, Err if not.
+async fn wait_for_blkid_subsystem(
+    dev_path: &str,
+    expected: &str,
+    max_attempts: usize,
+) -> Result<()> {
+    for attempt in 1..=max_attempts {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if let Ok(output) = Command::new("blkid")
+            .arg("-p")
+            .arg("-c")
+            .arg("/dev/null")
+            .arg("-o")
+            .arg("export")
+            .arg(dev_path)
+            .output()
+            .await
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(subsystem) = extract_blkid_field(&stdout, "SUBSYSTEM") {
+                if subsystem == expected {
+                    return Ok(());
+                }
+            }
+        }
+        if attempt == max_attempts {
+            anyhow::bail!(
+                "blkid did not report SUBSYSTEM={} after {} attempts ({}ms)",
+                expected,
+                max_attempts,
+                max_attempts * 100
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Extract a field value from blkid -p -o export output.
 fn extract_blkid_field(output: &str, key: &str) -> Option<String> {
     for line in output.lines() {
         if line.starts_with(&format!("{}=", key)) {

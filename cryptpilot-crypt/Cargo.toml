@@ -38,5 +38,6 @@ cgroups-rs = "0.3.4"
 ctor = "=0.4.1"
 rstest = "0.25.0"
 rstest_reuse = "0.7.0"
+serial_test = "3.0"
 tokio-util = {workspace = true}
 two-rusty-forks = {version = "0.4.0", features = ["macro"]}
