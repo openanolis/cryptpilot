@@ -173,9 +173,11 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
                 }
             }
 
-            // Mark the delta volume as initialized so it can be reused on next boot
-            // (only for DiskPersist with recreation, since Disk is always recreated)
-            if recreate && matches!(delta_location, DeltaLocation::DiskPersist) {
+            // Mark the delta volume as initialized after format + mkfs.
+            // format() always sets subsystem="cryptpilot-initializing";
+            // this transitions it to "cryptpilot" (Ready) for consistency,
+            // regardless of delta_location or provider type.
+            if recreate {
                 cryptpilot::fs::luks2::mark_volume_as_initialized(Path::new(DELTA_LOGICAL_VOLUME))
                     .await?;
             }
