@@ -325,12 +325,14 @@ pub trait FdeDisk: Send + Sync {
                 break;
             }
 
-            // Process lines within the target menuentry
+            // Process lines within the target menuentry.
+            // GRUB uses `linuxefi`/`initrdefi` (e.g. alinux UEFI grub2) or
+            // `linux`/`initrd` (e.g. Ubuntu); the first token identifies it.
             if in_target_entry {
-                if line.starts_with("linuxefi") {
-                    kernel_line = Some(line.to_string());
-                } else if line.starts_with("initrdefi") {
-                    initrd_line = Some(line.to_string());
+                match line.split_whitespace().next() {
+                    Some("linux") | Some("linuxefi") => kernel_line = Some(line.to_string()),
+                    Some("initrd") | Some("initrdefi") => initrd_line = Some(line.to_string()),
+                    _ => {}
                 }
             }
         }
@@ -340,16 +342,14 @@ pub trait FdeDisk: Send + Sync {
         let mut cmdline = String::new();
 
         if let Some(kernel_line) = kernel_line {
-            let parts: Vec<&str> = kernel_line.splitn(2, ' ').collect();
-            if parts.len() >= 2 {
-                kernel_path = parts[1].to_string();
-
-                // Extract command line parameters if present
-                if let Some(space_pos) = kernel_path.find(' ') {
-                    cmdline = kernel_path[space_pos + 1..].to_string();
-                    kernel_path = kernel_path[..space_pos].to_string();
-                }
+            // Split on any whitespace (GRUB uses spaces or tabs):
+            //   <directive> <kernel-path> [cmdline...]
+            let mut it = kernel_line.split_whitespace();
+            let _ = it.next(); // skip the "linux"/"linuxefi" directive
+            if let Some(path) = it.next() {
+                kernel_path = path.to_string();
             }
+            cmdline = it.collect::<Vec<_>>().join(" ");
         }
 
         if let Some(path) = kernel_path.strip_prefix('/') {
@@ -361,13 +361,10 @@ pub trait FdeDisk: Send + Sync {
         // Extract initrd path
         let mut initrd_path = String::new();
         if let Some(initrd_line) = initrd_line {
-            let parts: Vec<&str> = initrd_line.splitn(2, ' ').collect();
-            if parts.len() >= 2 {
-                initrd_path = parts[1].to_string();
-                // Clean up if there's extra content
-                if let Some(space_pos) = initrd_path.find(' ') {
-                    initrd_path = initrd_path[..space_pos].to_string();
-                }
+            let mut it = initrd_line.split_whitespace();
+            let _ = it.next(); // skip the "initrd"/"initrdefi" directive
+            if let Some(path) = it.next() {
+                initrd_path = path.to_string();
             }
         }
 
