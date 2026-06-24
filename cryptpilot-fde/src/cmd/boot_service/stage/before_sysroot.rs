@@ -172,6 +172,13 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
                     resize_ext4_filesystem(Path::new(ROOTFS_DEVICE)).await?;
                 }
             }
+
+            // Mark the delta volume as initialized so it can be reused on next boot
+            // (only for DiskPersist with recreation, since Disk is always recreated)
+            if recreate && matches!(delta_location, DeltaLocation::DiskPersist) {
+                cryptpilot::fs::luks2::mark_volume_as_initialized(Path::new(DELTA_LOGICAL_VOLUME))
+                    .await?;
+            }
         } else {
             // No need to set up delta volume
             match backend {
