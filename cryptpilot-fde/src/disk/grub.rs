@@ -131,6 +131,30 @@ impl BootArtifacts for GrubBootArtifacts {
     }
 }
 
+/// Resolve the id of GRUB's default menuentry from a `grub.cfg`.
+///
+/// Used when the GRUB environment block has no `saved_entry` (e.g. an image that
+/// has never been booted). The default selection on such images is
+/// `set default="0"`, i.e. the first menuentry, so its id is returned. The id is
+/// the quoted token right before the entry's opening brace, e.g.
+/// `menuentry 'Ubuntu' --class os $menuentry_id_option 'gnulinux-simple-<uuid>' {`.
+fn default_menuentry_id(grub_cfg: &str) -> Option<String> {
+    for line in grub_cfg.lines() {
+        let line = line.trim();
+        // Match an actual menuentry definition (not e.g. `menuentry_id_option=...`).
+        if !line.starts_with("menuentry ") || !line.contains('{') {
+            continue;
+        }
+        let head = line.split('{').next().unwrap_or(line).trim_end();
+        if let Some(end) = head.rfind('\'') {
+            if let Some(start) = head[..end].rfind('\'') {
+                return Some(head[start + 1..end].to_string());
+            }
+        }
+    }
+    None
+}
+
 fn parse_pe(bytes: &[u8]) -> Result<Box<dyn PeTrait + '_>, object::read::Error> {
     if let Ok(pe) = PeFile64::parse(bytes) {
         Ok(Box::new(pe))
@@ -382,12 +406,30 @@ pub(super) trait FdeDiskGrubExt: Disk {
         grub_vars: &HashMap<String, String>,
         grub_cfg: &str,
     ) -> Result<KernelArtifacts> {
-        let saved_entry = grub_vars
-            .get("saved_entry")
-            .ok_or_else(|| anyhow::anyhow!("saved_entry not found in GRUB environment"))?;
+        // GRUB's default selection order is: next_entry > saved_entry > `set default`.
+        // Freshly built / never-booted images have an empty GRUB environment block
+        // (no `saved_entry`); GRUB then boots the default entry (`set default="0"`,
+        // i.e. the first menuentry). Fall back to that instead of failing, so that
+        // reference values can be computed for images that have never been booted.
+        let saved_entry = match grub_vars.get("saved_entry") {
+            Some(entry) => entry.clone(),
+            None => {
+                let entry = default_menuentry_id(grub_cfg).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "saved_entry not found in GRUB environment and no menuentry found in grub.cfg"
+                    )
+                })?;
+                tracing::warn!(
+                    %entry,
+                    "saved_entry not set in GRUB environment (image likely never booted); \
+                     falling back to the default grub.cfg menuentry"
+                );
+                entry
+            }
+        };
 
         let (mut kernel_path, mut initrd_path, cmdline) = match self
-            .load_from_loader_entry_file(saved_entry, grub_vars)
+            .load_from_loader_entry_file(&saved_entry, grub_vars)
             .await
         {
             Ok(v) => v,
@@ -397,7 +439,7 @@ pub(super) trait FdeDiskGrubExt: Disk {
                     "Failed to parse kernel artifacts info from loader entry file, fallback to parse from grub.cfg"
                 );
 
-                self.load_from_grub_cfg(saved_entry, grub_cfg).await?
+                self.load_from_grub_cfg(&saved_entry, grub_cfg).await?
             }
         };
 
