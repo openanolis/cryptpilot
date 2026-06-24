@@ -108,26 +108,28 @@ pub async fn format(dev: &Path, passphrase: &Passphrase, integrity: IntegrityTyp
             libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
         }
 
-        let params = CryptParamsLuks2 {
-            integrity: Some("hmac(sha256)".to_owned()),
+        let mut params = CryptParamsLuks2 {
+            integrity: None,
             pbkdf: None,
             integrity_params: None,
             data_alignment: 0,
             data_device: None,
             sector_size: LUKS2_SECTOR_SIZE,
             label: None,
-            subsystem: None,
+            subsystem: Some(LUKS2_SUBSYSTEM_INITIALIZING.to_owned()),
         };
-        let mut params_ref = (&params).try_into()?;
 
         let volume_key = match integrity {
             IntegrityType::None => {
                 libcryptsetup_rs::Either::Right(LUKS2_VOLUME_KEY_SIZE_BIT_WITHOUT_INTEGRITY / 8)
             }
             IntegrityType::Journal | IntegrityType::NoJournal => {
+                params.integrity = Some("hmac(sha256)".to_owned());
                 libcryptsetup_rs::Either::Right(LUKS2_VOLUME_KEY_SIZE_BIT_WITH_INTEGRITY / 8)
             }
         };
+
+        let mut params_ref = (&params).try_into()?;
 
         let mut device = CryptInit::init(&device_path)?;
 
@@ -136,10 +138,7 @@ pub async fn format(dev: &Path, passphrase: &Passphrase, integrity: IntegrityTyp
             ("aes", "xts-plain64"),
             None,
             volume_key,
-            match integrity {
-                IntegrityType::None => None,
-                IntegrityType::Journal | IntegrityType::NoJournal => Some(&mut params_ref),
-            },
+            Some(&mut params_ref),
         )?;
         device.keyslot_handle().add_by_key(
             None,
@@ -147,11 +146,6 @@ pub async fn format(dev: &Path, passphrase: &Passphrase, integrity: IntegrityTyp
             passphrase.as_bytes(),
             CryptVolumeKey::empty(),
         )?;
-
-        // Mark the volume as being initialized (prevents ambiguous no-marker state)
-        device
-            .context_handle()
-            .set_label(None, Some(LUKS2_SUBSYSTEM_INITIALIZING))?;
 
         Ok::<_, anyhow::Error>(())
     })

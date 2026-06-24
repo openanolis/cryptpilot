@@ -516,7 +516,9 @@ async fn setup_dm_snapshot_device_chain(
                 // No need to wipe and just use the metadata header
                 tracing::info!("COW device has dm-snapshot metadata, using it");
             }
-            cryptpilot::fs::blkid::BlkidProbeResult::KnownSignature { fs_type, pt_type } => {
+            cryptpilot::fs::blkid::BlkidProbeResult::KnownSignature {
+                fs_type, pt_type, ..
+            } => {
                 // Some other filesystem/partition signature detected — protect user data
                 bail!(
                     "COW device has valuable data (fs_type={fs_type:?}, pt_type={pt_type:?}), \

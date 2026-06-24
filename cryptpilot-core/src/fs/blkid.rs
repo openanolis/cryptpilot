@@ -16,6 +16,8 @@ pub enum BlkidProbeResult {
         fs_type: Option<String>,
         /// Partition table type from `PTTYPE="..."`, if present.
         pt_type: Option<String>,
+        /// LUKS2 subsystem string from `SUBSYSTEM="..."`, if present.
+        subsystem: Option<String>,
     },
 }
 
@@ -62,6 +64,8 @@ pub async fn probe_device(device_path: &Path) -> Result<BlkidProbeResult> {
                     let fs_type = parse_blkid_field(&trimmed, "TYPE");
                     // Parse PTTYPE="..."
                     let pt_type = parse_blkid_field(&trimmed, "PTTYPE");
+                    // Parse SUBSYSTEM="..." (LUKS2 subsystem field)
+                    let subsystem = parse_blkid_field(&trimmed, "SUBSYSTEM");
 
                     // Treat atari partition table as no signature (known false positive)
                     // See: https://bugs.launchpad.net/ubuntu/+source/util-linux/+bug/2015355
@@ -76,7 +80,7 @@ pub async fn probe_device(device_path: &Path) -> Result<BlkidProbeResult> {
                         "blkid probe on {device_path:?}: fs_type={fs_type:?}, pt_type={pt_type:?}"
                     );
 
-                    Ok(BlkidProbeResult::KnownSignature { fs_type, pt_type })
+                    Ok(BlkidProbeResult::KnownSignature { fs_type, pt_type, subsystem })
                 }
                 2 => {
                     // blkid exit code 2 = no signatures found
