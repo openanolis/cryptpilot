@@ -2,8 +2,6 @@
 // Tests the None → Initializing → Ready lifecycle and interrupted init recovery
 
 use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use cryptpilot::fs::{
     block::dummy::DummyDevice,
@@ -70,12 +68,11 @@ async fn test_is_initialized_only_true_for_ready() -> Result<()> {
     Ok(())
 }
 
-/// Test: full init lifecycle (None → Initializing → Ready) with parallel blkid monitoring
+/// Test: full init lifecycle (None → Initializing → Ready) with blkid probing
 ///
-/// Runs `blkid -p` in a parallel monitoring loop while performing
-/// a full initialization (format + mkfs + mark). After each step, verifies
-/// the state via `get_init_state()` AND checks that `blkid -p` reports
-/// the correct SUBSYSTEM field.
+/// Performs a full initialization (format + mkfs + mark). After each step,
+/// verifies the state via `get_init_state()` AND checks that `blkid -p`
+/// reports the correct SUBSYSTEM field.
 ///
 /// Uses `serial_test` to avoid interference from other parallel tests.
 #[serial_test::serial]
@@ -83,39 +80,6 @@ async fn test_is_initialized_only_true_for_ready() -> Result<()> {
 async fn test_full_init_lifecycle_with_blkid_probe() -> Result<()> {
     let dummy = DummyDevice::setup_on_tmpfs(100 * 1024 * 1024).await?;
     let dev_path = dummy.path()?;
-    let dev_path_clone = dev_path.clone();
-
-    // Shared state for the monitor to record observed SUBSYSTEM values
-    let observed_subsystems: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let systems_clone = observed_subsystems.clone();
-
-    // Spawn a parallel monitor that polls blkid every 100ms
-    let _monitor = tokio::spawn(async move {
-        for _ in 0..300 {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            if let Ok(output) = Command::new("blkid")
-                .arg("-p")
-                .arg("-c")
-                .arg("/dev/null")
-                .arg("-o")
-                .arg("export")
-                .arg(&dev_path_clone)
-                .output()
-                .await
-            {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(subsystem) = extract_blkid_field(&stdout, "SUBSYSTEM") {
-                    let mut systems = systems_clone.lock().await;
-                    if systems.last().map(|s| s != &subsystem).unwrap_or(true) {
-                        systems.push(subsystem);
-                    }
-                }
-            }
-        }
-    });
-
-    // Wait for monitor to probe raw device
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
     let passphrase = Passphrase::from(b"test-passphrase-1234567890123456".to_vec());
 
