@@ -20,6 +20,21 @@ const LUKS2_VOLUME_KEY_SIZE_BIT_WITH_INTEGRITY: usize = 768;
 const LUKS2_VOLUME_KEY_SIZE_BIT_WITHOUT_INTEGRITY: usize = 512;
 const LUKS2_SECTOR_SIZE: u32 = 4096;
 const LUKS2_SUBSYSTEM_NAME: &str = "cryptpilot";
+const LUKS2_SUBSYSTEM_INITIALIZING: &str = "cryptpilot-initializing";
+
+/// Represents the initialization state of a LUKS2 volume managed by cryptpilot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VolumeInitState {
+    /// No LUKS2 header, or LUKS2 header exists but has no cryptpilot subsystem marker.
+    /// Safe to format.
+    None,
+    /// LUKS2 header exists with subsystem="cryptpilot-initializing".
+    /// A previous init was interrupted mid-way. Safe to re-init.
+    Initializing,
+    /// LUKS2 header exists with subsystem="cryptpilot".
+    /// Volume is fully initialized and ready to open.
+    Ready,
+}
 
 async fn get_luks2_subsystem(dev: &Path) -> Result<Option<String>> {
     /// LUKS2 header structure according to the specification
@@ -266,42 +281,33 @@ pub async fn is_initialized(dev: &Path) -> Result<bool> {
     is_a_cryptpilot_initialized_luks2_volume(dev).await
 }
 
-async fn is_a_cryptpilot_initialized_luks2_volume(dev: &Path) -> Result<bool> {
-    let verbose = get_verbose().await;
-    let device_path = PathBuf::from(&dev);
+/// Returns the initialization state of a LUKS2 volume.
+///
+/// - `None`: no valid LUKS2 header, or header exists but has no cryptpilot marker
+/// - `Initializing`: subsystem is "cryptpilot-initializing" (partial init)
+/// - `Ready`: subsystem is "cryptpilot" (fully initialized)
+pub async fn get_init_state(dev: &Path) -> Result<VolumeInitState> {
+    // Try to read the subsystem from the raw header.
+    // If the device is not a valid LUKS2 volume or the header can't be read,
+    // return None.
+    let subsystem = match get_luks2_subsystem(dev).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return Ok(VolumeInitState::None),
+        Err(_) => return Ok(VolumeInitState::None),
+    };
 
-    // First check if it's a LUKS2 volume using the blocking operation
-    let is_luks2 = tokio::task::spawn_blocking(move || {
-        if verbose {
-            libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
-        } else {
-            libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
-        }
-
-        let mut device = CryptInit::init(&device_path)?;
-
-        let load_success = device.context_handle().load::<()>(None, None).is_ok();
-
-        let is_luks2 =
-            load_success && device.format_handle().get_type()? == EncryptionFormat::Luks2;
-
-        Ok::<_, anyhow::Error>(is_luks2)
-    })
-    .await?
-    .with_context(|| format!("Failed to check luks2 initialization status of device {dev:?}"))?;
-
-    if !is_luks2 {
-        return Ok(false);
+    if subsystem == LUKS2_SUBSYSTEM_NAME {
+        Ok(VolumeInitState::Ready)
+    } else if subsystem == LUKS2_SUBSYSTEM_INITIALIZING {
+        Ok(VolumeInitState::Initializing)
+    } else {
+        Ok(VolumeInitState::None)
     }
+}
 
-    // Check if the subsystem is set to "cryptpilot"
-    let subsystem_is_set = get_luks2_subsystem(dev)
-        .await
-        .with_context(|| format!("Failed to get LUKS2 device subsystem for {dev:?}"))?
-        .map(|subsystem| subsystem == LUKS2_SUBSYSTEM_NAME)
-        .unwrap_or(false);
-
-    Ok(subsystem_is_set)
+async fn is_a_cryptpilot_initialized_luks2_volume(dev: &Path) -> Result<bool> {
+    let state = get_init_state(dev).await?;
+    Ok(state == VolumeInitState::Ready)
 }
 
 pub fn is_active(volume: &str) -> bool {
@@ -376,5 +382,25 @@ impl Drop for TempLuksVolume {
             tracing::info!("Closing the temporary luks volume {name}");
             let _ = crate::fs::luks2::close(&name).await;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_volume_init_state_variants() {
+        // Verify enum derives and values are correct
+        assert_eq!(VolumeInitState::None, VolumeInitState::None);
+        assert_ne!(VolumeInitState::Ready, VolumeInitState::Initializing);
+        assert_ne!(VolumeInitState::Ready, VolumeInitState::None);
+    }
+
+    #[test]
+    fn test_subsystem_constants() {
+        assert_eq!(LUKS2_SUBSYSTEM_NAME, "cryptpilot");
+        assert_eq!(LUKS2_SUBSYSTEM_INITIALIZING, "cryptpilot-initializing");
+        assert_ne!(LUKS2_SUBSYSTEM_NAME, LUKS2_SUBSYSTEM_INITIALIZING);
     }
 }
