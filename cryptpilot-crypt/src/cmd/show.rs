@@ -19,8 +19,10 @@ pub enum VolumeStatusKind {
     DeviceNotFound,
     /// Device exists but initialization check failed (with error details)
     CheckFailed,
-    /// Device requires initialization
+    /// Device requires initialization (raw disk or no marker)
     RequiresInit,
+    /// Device is in initializing state (partial init, interrupted)
+    Initializing,
     /// Volume is ready to open (either initialized persistent volume or temporary volume)
     ReadyToOpen,
     /// Volume is currently opened/mapped
@@ -153,6 +155,7 @@ impl PrintAsTable for [VolumeConfig] {
                 VolumeStatusKind::Opened => Color::Green,
                 VolumeStatusKind::ReadyToOpen => Color::Green,
                 VolumeStatusKind::RequiresInit => Color::Yellow,
+                VolumeStatusKind::Initializing => Color::Yellow,
                 VolumeStatusKind::CheckFailed => Color::Red,
                 VolumeStatusKind::DeviceNotFound => Color::Red,
             };
@@ -261,16 +264,23 @@ impl VolumeConfig {
             };
         }
 
-        // For persistent volumes, check initialization status
-        match cryptpilot::fs::luks2::is_initialized(&self.dev).await {
-            Ok(true) => VolumeStatus {
+        // For persistent volumes, check initialization state
+        match cryptpilot::fs::luks2::get_init_state(&self.dev).await {
+            Ok(cryptpilot::fs::luks2::VolumeInitState::Ready) => VolumeStatus {
                 kind: VolumeStatusKind::ReadyToOpen,
                 description: format!(
                     "Device '{:?}' is properly initialized as LUKS2 volume and ready to open",
                     self.dev
                 ),
             },
-            Ok(false) => VolumeStatus {
+            Ok(cryptpilot::fs::luks2::VolumeInitState::Initializing) => VolumeStatus {
+                kind: VolumeStatusKind::Initializing,
+                description: format!(
+                    "\u{26a0} Device '{:?}' is in initializing state - previous initialization was interrupted",
+                    self.dev
+                ),
+            },
+            Ok(cryptpilot::fs::luks2::VolumeInitState::None) => VolumeStatus {
                 kind: VolumeStatusKind::RequiresInit,
                 description: format!(
                     "Device '{:?}' exists but is not a valid LUKS2 volume - needs initialization",
@@ -278,7 +288,6 @@ impl VolumeConfig {
                 ),
             },
             Err(e) => {
-                // This is the critical case - check failed
                 let error_msg = format!("{:?}", e);
                 VolumeStatus {
                     kind: VolumeStatusKind::CheckFailed,

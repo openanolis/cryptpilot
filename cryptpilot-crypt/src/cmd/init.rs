@@ -66,8 +66,8 @@ async fn persistent_disk_init(
                 status.description
             );
         }
-        VolumeStatusKind::RequiresInit => {
-            // This is expected, continue with initialization
+        VolumeStatusKind::RequiresInit | VolumeStatusKind::Initializing => {
+            // This is expected (or init was interrupted), continue with initialization
         }
         VolumeStatusKind::ReadyToOpen => {
             if !init_options.force_reinit {
