@@ -5,6 +5,7 @@ use std::path::Path;
 
 use cryptpilot::fs::{
     block::dummy::DummyDevice,
+    cmd::CheckCommandOutput as _,
     luks2::{format, get_init_state, is_initialized, mark_volume_as_initialized, VolumeInitState},
 };
 use cryptpilot::types::{IntegrityType, MakeFsType, Passphrase};
@@ -96,7 +97,7 @@ async fn test_full_init_lifecycle_with_blkid_probe() -> Result<()> {
         "Expected Initializing after format"
     );
     // Wait and retry blkid until it sees the state (up to 3s)
-    wait_for_blkid_subsystem(&dev_path.to_str().unwrap(), "cryptpilot-initializing", 30).await?;
+    wait_for_blkid_subsystem(dev_path.to_str().unwrap(), "cryptpilot-initializing", 30).await?;
 
     // Step 3: Open LUKS + mkfs
     let tmp_volume = cryptpilot::fs::luks2::TempLuksVolume::open(
@@ -126,7 +127,7 @@ async fn test_full_init_lifecycle_with_blkid_probe() -> Result<()> {
     let state = get_init_state(Path::new(&dev_path)).await?;
     assert_eq!(state, VolumeInitState::Ready, "Expected Ready after mark");
     // Wait and retry blkid until it sees the state (up to 5s)
-    wait_for_blkid_subsystem(&dev_path.to_str().unwrap(), "cryptpilot", 50).await?;
+    wait_for_blkid_subsystem(dev_path.to_str().unwrap(), "cryptpilot", 50).await?;
 
     Ok(())
 }
@@ -142,17 +143,27 @@ async fn wait_for_blkid_subsystem(
 ) -> Result<()> {
     for attempt in 1..=max_attempts {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        if let Ok(output) = Command::new("blkid")
+        let result = Command::new("blkid")
             .arg("-p")
             .arg("-c")
             .arg("/dev/null")
             .arg("-o")
             .arg("export")
             .arg(dev_path)
-            .output()
-            .await
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
+            .run_with_status_checker(|code, stdout, stderr| {
+                // blkid -p exits with 2 if no signature found, 0 if found
+                if code == 0 || code == 2 {
+                    Ok(String::from_utf8_lossy(&stdout).to_string())
+                } else {
+                    Err(anyhow::anyhow!(
+                        "blkid failed with code {}: stderr={}",
+                        code,
+                        String::from_utf8_lossy(&stderr)
+                    ))
+                }
+            })
+            .await;
+        if let Ok(stdout) = result {
             if let Some(subsystem) = extract_blkid_field(&stdout, "SUBSYSTEM") {
                 if subsystem == expected {
                     return Ok(());
