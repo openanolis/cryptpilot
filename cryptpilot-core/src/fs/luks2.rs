@@ -148,13 +148,15 @@ pub async fn format(dev: &Path, passphrase: &Passphrase, integrity: IntegrityTyp
             CryptVolumeKey::empty(),
         )?;
 
+        // Mark the volume as being initialized (prevents ambiguous no-marker state)
+        device
+            .context_handle()
+            .set_label(None, Some(LUKS2_SUBSYSTEM_INITIALIZING))?;
+
         Ok::<_, anyhow::Error>(())
     })
     .await?
     .with_context(|| format!("Failed to format {dev:?} as LUKS2 volume"))?;
-
-    // Mark the volume as being initialized (prevents ambiguous no-marker state)
-    mark_volume_as_initializing(dev).await?;
 
     Ok(())
 }
@@ -189,42 +191,6 @@ pub async fn mark_volume_as_initialized(dev: &Path) -> Result<()> {
     .with_context(|| {
         format!(
             "Failed to mark volume as initialized for {:?}",
-            dev_path_for_error
-        )
-    })?;
-
-    Ok(())
-}
-
-/// Marks a freshly formatted LUKS2 volume as being in the "initializing" state.
-/// This is called internally by format() to ensure the volume is never left
-/// in an ambiguous no-marker state.
-pub(crate) async fn mark_volume_as_initializing(dev: &Path) -> Result<()> {
-    let verbose = get_verbose().await;
-    let dev_path = dev.to_path_buf();
-    let dev_path_for_error = dev_path.clone();
-
-    tokio::task::spawn_blocking(move || {
-        if verbose {
-            libcryptsetup_rs::set_debug_level(CryptDebugLevel::All);
-        } else {
-            libcryptsetup_rs::set_debug_level(CryptDebugLevel::None);
-        }
-
-        let mut device = CryptInit::init(&dev_path)?;
-        device
-            .context_handle()
-            .load::<()>(Some(EncryptionFormat::Luks2), None)?;
-        device
-            .context_handle()
-            .set_label(None, Some(LUKS2_SUBSYSTEM_INITIALIZING))?;
-
-        Ok::<_, anyhow::Error>(())
-    })
-    .await?
-    .with_context(|| {
-        format!(
-            "Failed to mark volume as initializing for {:?}",
             dev_path_for_error
         )
     })?;
