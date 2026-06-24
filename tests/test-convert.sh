@@ -11,6 +11,7 @@
 #
 # Usage:
 #   ./tests/test-convert.sh --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist>
+#   ./tests/test-convert.sh --deb <path> --distro ubuntu --bootloader grub --rootfs-enc --delta-location disk
 #   ./tests/test-convert.sh --help              # Show usage
 #
 
@@ -28,16 +29,25 @@ readonly YELLOW='\033[1;33m'
 readonly CYAN='\033[0;36m'
 readonly NC='\033[0m' # No Color
 
-# Test configuration
-readonly TEST_IMAGE_URL="https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2"
-readonly TEST_IMAGE_CACHE="/tmp/test-input-alinux3.qcow2"
+# Test image URLs and cache paths per distro
+readonly ALINUX3_IMAGE_URL="https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2"
+readonly ALINUX3_IMAGE_CACHE="/tmp/test-input-alinux3.qcow2"
+readonly UBUNTU_IMAGE_URL="https://cloud-images.ubuntu.com/noble/20260518/noble-server-cloudimg-amd64.img"
+readonly UBUNTU_IMAGE_CACHE="/tmp/test-input-ubuntu.qcow2"
+
 readonly TEST_PASSPHRASE="test-passphrase-12345"
 
 # Source image path (can be overridden via --input)
 SOURCE_IMAGE=""
 
-# Path to cryptpilot-fde-guest RPM package (required)
-CRYPTPILOT_FDE_RPM=""
+# Flag to indicate if using custom input image (skip enhancement)
+USE_CUSTOM_INPUT=false
+
+# Path to cryptpilot-fde-guest package (.rpm or .deb)
+CRYPTPILOT_FDE_PACKAGE=""
+
+# Distro: "alinux3" (default) or "ubuntu"
+DISTRO="alinux3"
 
 # Script directory (where this script is located)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,7 +98,12 @@ check_root() {
 
 # Check required tools
 check_tools() {
-    local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4" "virt-customize")
+    local custom_input="${1:-}"
+    local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4")
+    # virt-customize is only needed when we prepare images ourselves
+    if [[ -z "${custom_input}" ]]; then
+        tools+=("virt-customize")
+    fi
     local missing=()
 
     for tool in "${tools[@]}"; do
@@ -103,7 +118,7 @@ check_tools() {
 }
 
 # Check available disk space in /tmp
-check_disk_space() {
+check_diskspace() {
     local required_gb=10
     local available_kb
     available_kb=$(df /tmp | awk 'NR==2 {print $4}')
@@ -219,25 +234,28 @@ cleanup() {
 # Test image functions
 # ============================================================================
 
-# Download test image with caching
-download_test_image() {
-    if [[ -f "${TEST_IMAGE_CACHE}" ]]; then
-        log::info "Using cached test image: ${TEST_IMAGE_CACHE}"
+# Download a file with caching and retry support
+download_file() {
+    local url="$1"
+    local cache_path="$2"
+
+    if [[ -f "${cache_path}" ]]; then
+        log::info "Using cached image: ${cache_path}"
         return 0
     fi
 
     log::step "Downloading test image..."
-    log::info "URL: ${TEST_IMAGE_URL}"
-    log::info "Destination: ${TEST_IMAGE_CACHE}"
+    log::info "URL: ${url}"
+    log::info "Destination: ${cache_path}"
 
-    local tmp_file="${TEST_IMAGE_CACHE}.downloading"
+    local tmp_file="${cache_path}.downloading"
 
     # Download with resume support and retry
     local retry=0
     local max_retries=3
     while [[ $retry -lt $max_retries ]]; do
-        if wget -c -O "${tmp_file}" "${TEST_IMAGE_URL}"; then
-            mv "${tmp_file}" "${TEST_IMAGE_CACHE}"
+        if wget -c -O "${tmp_file}" "${url}"; then
+            mv "${tmp_file}" "${cache_path}"
             log::success "Test image downloaded successfully"
             return 0
         fi
@@ -248,6 +266,23 @@ download_test_image() {
 
     rm -f "${tmp_file}"
     fatal "Failed to download test image after $max_retries attempts"
+}
+
+# Download and cache the test image based on distro
+download_test_image() {
+    case "${DISTRO}" in
+        alinux3)
+            download_file "${ALINUX3_IMAGE_URL}" "${ALINUX3_IMAGE_CACHE}"
+            ;;
+        ubuntu)
+            # For Ubuntu, download raw cloud image; dracut is pre-installed
+            # by the build-test-image workflow (GHCR image has dracut ready)
+            download_file "${UBUNTU_IMAGE_URL}" "${UBUNTU_IMAGE_CACHE}"
+            ;;
+        *)
+            fatal "Unknown distro: ${DISTRO}"
+            ;;
+    esac
 }
 
 # Create test configuration directory with OTP provider
@@ -298,6 +333,18 @@ run_enhance() {
     local test_name="$1"
     local input_image="$2"
 
+    # Skip if using custom input image (already prepared)
+    if [[ "${USE_CUSTOM_INPUT}" == "true" ]]; then
+        log::info "Skipping cryptpilot-enhance (using custom input image)"
+        return 0
+    fi
+
+    # Skip if virt-customize is not available
+    if ! command -v virt-customize &>/dev/null; then
+        log::warn "Skipping cryptpilot-enhance (virt-customize not available)"
+        return 0
+    fi
+
     log::step "Running cryptpilot-enhance for test: ${test_name}"
 
     # Use 'direct' backend to avoid libvirtd dependency in CI/containers
@@ -345,7 +392,7 @@ run_convert() {
         cmd+=("--rootfs-no-encryption")
     fi
 
-    cmd+=("--package" "${CRYPTPILOT_FDE_RPM}")
+    cmd+=("--package" "${CRYPTPILOT_FDE_PACKAGE}")
 
     log::info "Command: ${cmd[*]}"
 
@@ -496,18 +543,17 @@ test_qemu_boot() {
     local container_name="qemu-test-${test_name}-$$"
     if ! docker run -d --rm --privileged \
         -v "${output_image}:${output_image}:ro" \
-        -e "IMAGE=${output_image}" \
-        -e BOOT="" \
+        -e "BOOT=/boot.qcow2" \
         -e "KVM=N" \
         -e "CPU_CORES=$(nproc)" \
         -e "RAM_SIZE=$(awk '/MemTotal/{printf "%d", $2 * 0.8 / 1024}' /proc/meminfo)" \
         --entrypoint /bin/bash \
         --name "${container_name}" \
         ghcr.io/qemus/qemu:7.29 \
-            -c 'echo "📦 Creating temporary COW layer..." && \
-            qemu-img create -f qcow2 -F qcow2 -b ${IMAGE} /boot.qcow2 && \
-            echo "✅ COW layer created, starting QEMU..." && \
-            exec /usr/bin/tini -s /run/entry.sh'; then
+            -c "echo 'Creating temporary COW layer...' && \
+            qemu-img create -f qcow2 -F qcow2 -b ${output_image} /boot.qcow2 && \
+            echo 'COW layer created, starting QEMU...' && \
+            exec /usr/bin/tini -s /run/entry.sh"; then
         log::error "Failed to start QEMU container: ${container_name}"
         return 1
     fi
@@ -515,9 +561,10 @@ test_qemu_boot() {
     log::info "QEMU container started: ${container_name}"
 
     # Stream logs to file and check for boot status
-    local timeout=360  # 6 minutes timeout
+    # Use longer timeout for TCG (software emulation) without KVM
+    local timeout=1800  # 30 minutes timeout for TCG
     local elapsed=0
-    local check_interval=2
+    local check_interval=5
     local boot_success=false
 
     # Start capturing logs in background
@@ -534,11 +581,29 @@ test_qemu_boot() {
             break
         fi
 
-        # Check for login prompt (success)
-        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
-            log::success "Login prompt detected - boot successful!"
-            boot_success=true
-            break
+        # Check for successful boot (multiple indicators)
+        # 1. Login prompt (traditional Linux boot)
+        # 2. systemd reached multi-user.target
+        # 3. Serial getty started (Ubuntu cloud image)
+        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null || \
+           grep -q -i "Welcome to Ubuntu" "${boot_log}" 2>/dev/null || \
+           grep -q -E "[Tt]ty[0-9]+ login:" "${boot_log}" 2>/dev/null || \
+           grep -q -E "Reached target.*Multi-User" "${boot_log}" 2>/dev/null || \
+           grep -q -E "Started.*serial-getty@ttyS0" "${boot_log}" 2>/dev/null; then
+
+            # For Ubuntu cloud images, check if systemd finished booting
+            # cryptpilot-fde-guest should run during initrd phase
+            if grep -q "cryptpilot-fde-guest" "${boot_log}" 2>/dev/null; then
+                log::success "cryptpilot-fde-guest verified in boot log"
+                log::success "Boot successful!"
+                boot_success=true
+                break
+            elif grep -q -E "Started.*serial-getty@ttyS0|Reached target.*Multi-User" "${boot_log}" 2>/dev/null; then
+                # systemd finished booting, system is up
+                log::success "System boot completed (systemd target reached)"
+                boot_success=true
+                break
+            fi
         fi
 
         # Check for emergency shell (failure)
@@ -577,7 +642,7 @@ test_qemu_boot() {
         fi
         log::error "QEMU boot test failed for: ${test_name}"
         return 1
-    fi 
+    fi
 }
 
 
@@ -657,23 +722,28 @@ run_test_case() {
 show_help() {
     cat <<EOF
 Usage: $(basename "$0") --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist> [OPTIONS]
+       $(basename "$0") --deb <path> --distro ubuntu --bootloader <uki|grub> ...
 
 Integration tests for cryptpilot-convert
 
-Required:
-    --rpm <path>              Path to cryptpilot-fde-guest RPM package
+Required (specify one of --rpm, --deb, --package):
     --bootloader <uki|grub>   Boot mode
     --rootfs-enc              Enable rootfs encryption
     --rootfs-noenc            Disable rootfs encryption
     --delta-location <value>  Delta partition location: ram | disk | disk-persist
+    --rpm <path>              Path to cryptpilot-fde-guest RPM package (alinux3)
+    --deb <path>              Path to cryptpilot-fde-guest DEB package (ubuntu)
+    --package <path>          Path to package file (.rpm or .deb)
 
 Options:
-    --input <path>  Use specified qcow2 image instead of downloading
-    --help          Show this help message
+    --distro <alinux3|ubuntu>  Target distro (default: alinux3)
+    --input <path>             Use specified qcow2 image instead of downloading
+    --help                     Show this help message
 
 Examples:
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location ram
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader grub --rootfs-noenc --delta-location disk --input /path/to/image.qcow2
+    $(basename "$0") --deb ./cryptpilot-fde-guest-*.deb --distro ubuntu --bootloader grub --rootfs-enc --delta-location disk
 EOF
 }
 
@@ -682,12 +752,27 @@ main() {
     local rootfs_enc=""
     local delta_location=""
     local custom_input=""
+    local rpm_path=""
+    local deb_path=""
+    local pkg_path=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --rpm)
-                CRYPTPILOT_FDE_RPM="$2"
+                rpm_path="$2"
+                shift 2
+                ;;
+            --deb)
+                deb_path="$2"
+                shift 2
+                ;;
+            --package)
+                pkg_path="$2"
+                shift 2
+                ;;
+            --distro)
+                DISTRO="$2"
                 shift 2
                 ;;
             --bootloader)
@@ -720,15 +805,36 @@ main() {
         esac
     done
 
-    # Validate required --rpm argument
-    if [[ -z "${CRYPTPILOT_FDE_RPM}" ]]; then
+    # Validate --rpm, --deb, --package: at most one, at least one
+    local pkg_count=0
+    [[ -n "${rpm_path}" ]] && pkg_count=$((pkg_count + 1))
+    [[ -n "${deb_path}" ]] && pkg_count=$((pkg_count + 1))
+    [[ -n "${pkg_path}" ]] && pkg_count=$((pkg_count + 1))
+    if [[ $pkg_count -gt 1 ]]; then
+        fatal "--rpm, --deb, and --package are mutually exclusive; specify only one"
+    fi
+    if [[ $pkg_count -eq 0 ]]; then
         show_help
-        fatal "Missing required argument: --rpm <path>"
+        fatal "Missing required argument: --rpm, --deb, or --package"
     fi
-    if [[ ! -f "${CRYPTPILOT_FDE_RPM}" ]]; then
-        fatal "cryptpilot-fde-guest RPM package not found: ${CRYPTPILOT_FDE_RPM}"
+
+    # Set the package path and validate file exists
+    if [[ -n "${pkg_path}" ]]; then
+        CRYPTPILOT_FDE_PACKAGE="${pkg_path}"
+    elif [[ -n "${rpm_path}" ]]; then
+        CRYPTPILOT_FDE_PACKAGE="${rpm_path}"
+    else
+        CRYPTPILOT_FDE_PACKAGE="${deb_path}"
     fi
-    log::info "Using cryptpilot-fde-guest RPM: ${CRYPTPILOT_FDE_RPM}"
+    if [[ ! -f "${CRYPTPILOT_FDE_PACKAGE}" ]]; then
+        fatal "Package not found: ${CRYPTPILOT_FDE_PACKAGE}"
+    fi
+    log::info "Using cryptpilot-fde-guest package: ${CRYPTPILOT_FDE_PACKAGE}"
+
+    # Validate --distro
+    if [[ "${DISTRO}" != "alinux3" && "${DISTRO}" != "ubuntu" ]]; then
+        fatal "Invalid --distro: must be 'alinux3' or 'ubuntu'"
+    fi
 
     # Validate --bootloader
     if [[ "${bootloader}" != "uki" && "${bootloader}" != "grub" ]]; then
@@ -766,8 +872,8 @@ main() {
     # Pre-flight checks
     log::step "Running pre-flight checks..."
     check_root
-    check_tools
-    check_disk_space
+    check_tools "${custom_input}"
+    check_diskspace
     if ! load_nbd_module; then
         fatal "NBD module is required but not available. Cannot proceed with tests."
     fi
@@ -780,11 +886,19 @@ main() {
     # Set source image path
     if [[ -n "${custom_input}" ]]; then
         SOURCE_IMAGE="${custom_input}"
+        USE_CUSTOM_INPUT=true
         log::info "Using custom input image: ${SOURCE_IMAGE}"
     else
-        # Download test image if not using custom input
+        # Download/prepare test image based on distro
         download_test_image
-        SOURCE_IMAGE="${TEST_IMAGE_CACHE}"
+        case "${DISTRO}" in
+            alinux3)
+                SOURCE_IMAGE="${ALINUX3_IMAGE_CACHE}"
+                ;;
+            ubuntu)
+                SOURCE_IMAGE="${UBUNTU_IMAGE_CACHE}"
+                ;;
+        esac
     fi
 
     # Run test

@@ -8,9 +8,17 @@ on:
         required: true
         type: string
       tag:
-        description: 'Tag for the resulting image (e.g., alinux3-20251030)'
+        description: 'Tag for the resulting image (e.g., alinux3-20251030, noble-dracut-20260518)'
         required: true
         type: string
+      distro:
+        description: 'Distribution type: "direct" for raw qcow2, "ubuntu" for Noble cloud image requiring dracut pre-installation'
+        required: true
+        type: choice
+        default: direct
+        options:
+          - direct
+          - ubuntu
 
 env:
   REGISTRY: ghcr.io
@@ -38,13 +46,133 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # --- Direct mode: download qcow2 image from URL ---
       - name: Download qcow2 image
+        if: inputs.distro == 'direct'
         run: |
           echo "Downloading image from: ${{ inputs.url }}"
           mkdir -p /tmp/qcow2-image
           wget -O /tmp/qcow2-image/test-image.qcow2 "${{ inputs.url }}"
           ls -lh /tmp/qcow2-image/test-image.qcow2
 
+      # --- Ubuntu mode: prepare Ubuntu cloud image ---
+      - name: Install dependencies (ubuntu mode)
+        if: inputs.distro == 'ubuntu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-utils \
+            parted \
+            util-linux \
+            kmod \
+            file \
+            dosfstools \
+            e2fsprogs
+
+      - name: Download Ubuntu Noble cloud image (ubuntu mode)
+        if: inputs.distro == 'ubuntu'
+        run: |
+          mkdir -p /tmp/qcow2-image
+          wget -O /tmp/qcow2-image/test-image.qcow2 \
+            https://cloud-images.ubuntu.com/noble/20260518/noble-server-cloudimg-amd64.img
+          ls -lh /tmp/qcow2-image/test-image.qcow2
+
+      - name: Prepare Ubuntu image (password, resize, GPT fix, install dracut)
+        if: inputs.distro == 'ubuntu'
+        run: |
+          IMAGE=/tmp/qcow2-image/test-image.qcow2
+          MOUNT_POINT=/tmp/img-mnt
+
+          # ---------- Step 1: Set root password ----------
+          sudo modprobe nbd max_part=16 || true
+          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 "$IMAGE"
+          sleep 2
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sleep 1
+
+          # Find root partition: look for ext4 partition
+          sudo mkdir -p $MOUNT_POINT
+          ROOT_PART=""
+          for p in /dev/nbd0p1 /dev/nbd0p2 /dev/nbd0p3 /dev/nbd0p4; do
+            if [ -e "$p" ]; then
+              FSTYPE=$(sudo blkid -s TYPE -o value "$p" 2>/dev/null || true)
+              if [ "$FSTYPE" = "ext4" ]; then
+                ROOT_PART="$p"
+                break
+              fi
+            fi
+          done
+          if [ -z "$ROOT_PART" ]; then
+            echo "ERROR: Cannot find ext4 root partition"
+            sudo blkid /dev/nbd0p* 2>/dev/null || true
+            sudo lsblk /dev/nbd0 2>/dev/null || true
+            exit 1
+          fi
+          echo "Root partition: $ROOT_PART"
+          sudo mount "$ROOT_PART" $MOUNT_POINT
+          sudo chroot $MOUNT_POINT /bin/bash -c 'echo "root:cryptpilot" | chpasswd'
+          sudo umount $MOUNT_POINT
+          sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
+          sleep 1
+
+          # ---------- Step 2: Resize disk ----------
+          qemu-img resize "$IMAGE" 10G
+
+          # ---------- Step 3: Fix GPT partition table ----------
+          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 "$IMAGE"
+          sleep 2
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sleep 1
+          sudo parted /dev/nbd0 print >/dev/null 2>&1 || true
+          sudo parted /dev/nbd0 resizepart 1 100% -s 2>/dev/null || true
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sudo lsblk /dev/nbd0
+          sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
+          sleep 1
+
+          # ---------- Step 4: Install dracut and systemd-boot ----------
+          sudo modprobe nbd max_part=16 || true
+          sudo qemu-nbd --connect=/dev/nbd0 --format=qcow2 "$IMAGE"
+          sleep 2
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sleep 1
+
+          ROOT_PART=""
+          for p in /dev/nbd0p1 /dev/nbd0p2 /dev/nbd0p3 /dev/nbd0p4; do
+            if [ -e "$p" ]; then
+              FSTYPE=$(sudo blkid -s TYPE -o value "$p" 2>/dev/null || true)
+              if [ "$FSTYPE" = "ext4" ]; then
+                ROOT_PART="$p"
+                break
+              fi
+            fi
+          done
+          if [ -z "$ROOT_PART" ]; then
+            echo "ERROR: Cannot find ext4 root partition after resize"
+            exit 1
+          fi
+          echo "Root partition (after resize): $ROOT_PART"
+          sudo mkdir -p $MOUNT_POINT
+          sudo mount "$ROOT_PART" $MOUNT_POINT
+
+          sudo mount --bind /dev $MOUNT_POINT/dev
+          sudo mount --bind /proc $MOUNT_POINT/proc
+          sudo mount --bind /sys $MOUNT_POINT/sys
+          sudo mount --bind /run $MOUNT_POINT/run 2>/dev/null || true
+
+          sudo chroot $MOUNT_POINT /bin/bash -c 'DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y dracut dracut-core systemd-boot-efi'
+
+          sudo umount $MOUNT_POINT/run 2>/dev/null || true
+          sudo umount $MOUNT_POINT/sys 2>/dev/null || true
+          sudo umount $MOUNT_POINT/proc 2>/dev/null || true
+          sudo umount $MOUNT_POINT/dev 2>/dev/null || true
+          sudo umount $MOUNT_POINT
+          sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true
+          sleep 1
+
+          echo "Ubuntu image preparation complete!"
+
+      # --- Common: build container image ---
       - name: Copy Dockerfile
         run: |
           cp tests/test-image.Dockerfile /tmp/qcow2-image/Dockerfile
@@ -58,6 +186,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.description=Test image with qcow2 for cryptpilot-convert integration tests
+            qcow2.source.distro=${{ inputs.distro }}
             qcow2.source.url=${{ inputs.url }}
 
       - name: Output image reference

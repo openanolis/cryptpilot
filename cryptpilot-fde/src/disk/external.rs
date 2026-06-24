@@ -262,17 +262,31 @@ impl OnExternalFdeDisk {
         // Obtain all partitions under the device
         let lsblk_stdout = {
             let mut cmd = Command::new("lsblk");
-            cmd.args(["-lnpo", "NAME"]);
+            cmd.args(["-lnpo", "NAME,TYPE,FSTYPE"]);
             cmd.arg(hint_device);
             cmd.run().await.context("Failed to list partitions")?
         };
 
         let lsblk_str = String::from_utf8(lsblk_stdout)?;
+        // Filter for partition lines (first field NAME ends with a digit)
         let candidate_partitions = lsblk_str
             .lines()
-            .filter(|line| line.chars().last().map(|c| c.is_numeric()).unwrap_or(false))
-            .map(PathBuf::from)
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                if fields.is_empty() {
+                    return None;
+                }
+                let name = fields[0];
+                let last_char = name.chars().last()?;
+                if last_char.is_numeric() {
+                    Some(PathBuf::from(name))
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
+
+        tracing::debug!("Candidate EFI partitions: {:?}", candidate_partitions);
 
         for part in candidate_partitions {
             let is_efi_part = async {
