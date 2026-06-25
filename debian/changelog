@@ -1,3 +1,10 @@
+cryptpilot (0.3.5) unstable; urgency=medium
+
+  * ci: run workflows on PRs to any branch
+  * feat(core): add VolumeInitState enum and get_init_state() API
+
+ -- Kun Lai <laikun@linux.alibaba.com>  Thu, 25 Jun 2026 20:34:17 +0800
+
 cryptpilot (0.3.1-1) unstable; urgency=medium
 
   * feat(kbs): support both one-shot and daemon modes for CDH
