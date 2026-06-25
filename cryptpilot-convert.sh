@@ -443,9 +443,14 @@ install_zram_module_if_needed() {
     if [ -x "${rootfs_mount_point}/usr/bin/apt-get" ] && [ -x "${rootfs_mount_point}/usr/bin/dpkg" ]; then
         log::info "Detecting Ubuntu-like system, attempting to install zram kernel modules"
 
-        # Find the kernel version from the currently installed kernel image
+        # Find the kernel version from the installed kernel image. Pick the
+        # highest-versioned vmlinuz regardless of flavor (e.g. -generic, -gcp, -aws)
+        # so cloud-vendor kernels are handled too; this matches the kernel selected
+        # for the initrd later (ls /boot/vmlinuz-* | sort -V | tail -1). The previous
+        # hard-coded "-generic" match returned empty on vendor-kernel-only images and
+        # aborted with "Could not determine kernel version".
         local kernel_version
-        kernel_version=$(chroot "${rootfs_mount_point}" bash -c "dpkg -l | grep -oP 'linux-image-\K[0-9.-]+-generic' | head -n1")
+        kernel_version=$(chroot "${rootfs_mount_point}" bash -c "ls /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | grep -v rescue | sort -V | tail -n1")
 
         if [ -z "$kernel_version" ]; then
             log::error "Could not determine kernel version, zram module installation failed"
@@ -995,6 +1000,33 @@ if [ "${uki:-false}" = false ]; then
             echo "Running update-grub"
             update-grub || true
         fi
+    fi
+
+    # Some images keep a *separate*, full grub.cfg on the EFI System Partition that
+    # the firmware reads directly (e.g. GCP Ubuntu cloud images read
+    # /boot/efi/EFI/<distro>/grub.cfg, while the steps above only refreshed the
+    # boot-partition copy at /boot/grub/grub.cfg). On such layouts a kernel or
+    # cmdline change here never reaches the partition the firmware boots from, so it
+    # boots a stale (often already-removed) kernel and fails with
+    # "vmlinuz-... not found" / "*.mod not found". Propagate the regenerated
+    # grub.cfg and grub module directory to each such ESP copy. No-op when there is
+    # no separate ESP grub.cfg, or when grub-mkconfig already wrote straight to the
+    # ESP (e.g. the alinux symlink case, detected via -ef).
+    if [ -n "${grub2_cfg:-}" ] && [ -f "$grub2_cfg" ] && [ -d /boot/efi/EFI ]; then
+        boot_grub_dir=$(dirname "$grub2_cfg")
+        for esp_grub_cfg in /boot/efi/EFI/*/grub.cfg; do
+            [ -f "$esp_grub_cfg" ] || continue
+            [ "$grub2_cfg" -ef "$esp_grub_cfg" ] && continue
+            echo "Syncing regenerated grub.cfg to ESP: $esp_grub_cfg"
+            cp -f "$grub2_cfg" "$esp_grub_cfg"
+            esp_grub_dir=$(dirname "$esp_grub_cfg")
+            for moddir in x86_64-efi arm64-efi i386-efi; do
+                if [ -d "$boot_grub_dir/$moddir" ]; then
+                    rm -rf "$esp_grub_dir/$moddir"
+                    cp -a "$boot_grub_dir/$moddir" "$esp_grub_dir/$moddir"
+                fi
+            done
+        done
     fi
     echo "Cleaning up package manager cache..."
     if command -v yum >/dev/null 2>&1; then
