@@ -156,6 +156,70 @@ jobs:
 
           echo "All verification checks passed!"
 
+  test-convert:
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        bootloader: [grub, uki]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: 'true'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          # GH runner already has Docker installed; install only additional deps
+          # Include grub packages for cryptpilot-convert UKI support
+          # Include libguestfs-tools for EFI partition restoration
+          # Include passt for libguestfs network access
+          sudo apt-get install -y \
+            qemu-utils \
+            cryptsetup-bin \
+            e2fsprogs \
+            dosfstools \
+            kmod \
+            fuse3 \
+            lvm2 \
+            grub-common \
+            grub-efi-amd64-bin \
+            sbsigntool \
+            libguestfs-tools \
+            passt
+
+      - name: Pull Ubuntu test image
+        run: |
+          sudo docker pull ghcr.io/openanolis/cryptpilot-fde-test-image:noble-dracut-20260518
+
+      - name: Extract qcow2 from container
+        run: |
+          CONTAINER_ID=$(sudo docker create ghcr.io/openanolis/cryptpilot-fde-test-image:noble-dracut-20260518 echo ok)
+          sudo docker cp "$CONTAINER_ID":/image.qcow2 "$GITHUB_WORKSPACE/test-image.qcow2"
+          sudo docker rm "$CONTAINER_ID"
+
+      - name: Download DEB packages
+        uses: actions/download-artifact@v8
+        with:
+          name: deb-packages-x86_64
+          path: ./deb-packages/
+
+      - name: Run conversion test
+        run: |
+          DEB_PKG=$(ls "$GITHUB_WORKSPACE"/deb-packages/cryptpilot-fde-guest_*.deb | head -1)
+          sudo LIBGUESTFS_BACKEND=direct ./tests/test-convert.sh \
+            --distro ubuntu \
+            --package "$DEB_PKG" \
+            --bootloader ${{ matrix.bootloader }} \
+            --rootfs-enc \
+            --delta-location ram \
+            --input "$GITHUB_WORKSPACE/test-image.qcow2"
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest

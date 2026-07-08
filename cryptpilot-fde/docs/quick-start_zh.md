@@ -5,7 +5,10 @@
 ## 前置条件
 
 - 已安装 cryptpilot-fde
-- 可启动的 qcow2 磁盘镜像，或未挂载的真实磁盘
+- 可启动的 qcow2 磁盘镜像
+
+> **注意**：自 v0.7.0 起，`--device` 选项（就地磁盘加密）已被移除。
+> 请改用 `--in`/`--out` 进行基于文件的转换。
 
 ## 准备配置
 
@@ -289,59 +292,7 @@ cryptpilot-fde-host show-reference-value --disk ./uki-encrypted.qcow2
 }
 ```
 
-## 示例 5：加密真实系统磁盘
-
-对于生产系统，你需要加密真实磁盘。
-
-> [!IMPORTANT]
-> **不要加密正在启动的活动磁盘！**
-> 
-> 你必须：
-> 1. 从实例解绑磁盘
-> 2. 将其作为数据盘绑定到另一个实例
-> 3. 加密它
-> 4. 重新绑定到原始实例
-
-### 步骤
-
-1. **准备配置**（与上面相同）：
-
-```sh
-mkdir -p ./config_dir
-cat << EOF > ./config_dir/fde.toml
-[rootfs]
-delta_location = "disk"
-
-[rootfs.encrypt.exec]
-command = "echo"
-args = ["-n", "AAAaaawewe222"]
-
-[delta]
-integrity = true
-
-[delta.encrypt.exec]
-command = "echo"
-args = ["-n", "AAAaaawewe222"]
-EOF
-```
-
-2. **验证配置**：
-
-```sh
-cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
-```
-
-3. **加密磁盘**（假设磁盘是 `/dev/nvme2n1`）：
-
-```sh
-cryptpilot-convert --device /dev/nvme2n1 \
-    -c ./config_dir/ \
-    --rootfs-passphrase AAAaaawewe222
-```
-
-4. **重新绑定磁盘**到原始实例并从其启动。
-
-## 示例 6：使用 KBS 提供者（生产环境）
+## 示例 4：使用 KBS 提供者（生产环境）
 
 对于生产环境，使用带有远程证明的密钥代理服务。
 
@@ -372,10 +323,6 @@ EOF
 # 磁盘镜像
 cryptpilot-convert --in ./original.qcow2 --out ./encrypted.qcow2 \
     -c ./config_dir/ --rootfs-passphrase <实际-rootfs-密钥>
-
-# 真实磁盘
-cryptpilot-convert --device /dev/nvme2n1 \
-    -c ./config_dir/ --rootfs-passphrase <实际-rootfs-密钥>
 ```
 
 ### 启动过程
@@ -388,7 +335,7 @@ cryptpilot-convert --device /dev/nvme2n1 \
 4. 如果验证通过，KBS 返回解密密钥
 5. 系统解密并启动
 
-## 示例 7：使用 KMS 提供者（云托管）
+## 示例 5：使用 KMS 提供者（云托管）
 
 对于阿里云用户，使用 KMS 进行集中式密钥管理。
 
@@ -485,11 +432,10 @@ cryptpilot-fde-host -c ./config_dir/ config check --keep-checking
 
 如果 `cryptpilot-convert` 失败：
 
-1. **检查磁盘格式**：磁盘镜像仅支持 qcow2 格式
+1. **检查磁盘格式**：支持 qcow2 和 VHD 格式
 2. **检查磁盘大小**：确保有足够空间用于加密开销
-3. **对于真实磁盘**：确保磁盘未挂载且不在使用中
-4. **设备已存在错误**：如果出现类似 `/dev/cryptpilot: already exists in filesystem` 的错误，可能是上次 convert 失败遗留的，尝试 `dmsetup remove_all` 清除
-5. **查看日志**：最后一次 convert 的详细日志保存在 `/tmp/.cryptpilot-convert.log`
+3. **设备已存在错误**：如果出现类似 `/dev/cryptpilot: already exists in filesystem` 的错误，可能是上次 convert 失败遗留的，尝试 `dmsetup remove_all` 清除
+4. **查看日志**：最后一次 convert 的详细日志保存在 `/tmp/.cryptpilot-convert.log`
 
 ### 启动失败
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2086,SC1012
 
 set -euo pipefail
 
@@ -164,8 +165,12 @@ systemctl stop aliyun.service
 # Remove Cloud Assistant daemon
 /usr/local/share/assist-daemon/assist_daemon --delete
 
-# Uninstall package
-rpm -qa | grep aliyun_assist | xargs rpm -e
+# Uninstall package (RPM or DEB)
+if command -v rpm >/dev/null 2>&1; then
+    rpm -qa | grep aliyun_assist | xargs rpm -e
+elif command -v dpkg >/dev/null 2>&1; then
+    dpkg-query -W -f='${dpkg-Package}\n' | grep aliyun | xargs dpkg --purge 2>/dev/null || true
+fi
 
 # Clean up leftover files and service configurations
 rm -rf /usr/local/share/aliyun-assist
@@ -199,7 +204,11 @@ systemctl mask rpcbind.socket
 # 4. Remove cloud-init
 # =============================
 add_run_cmd '
-yum remove -y cloud-init
+if command -v yum >/dev/null 2>&1; then
+    yum remove -y cloud-init
+elif command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get remove -y cloud-init
+fi
 '
 
 # =============================
@@ -207,20 +216,32 @@ yum remove -y cloud-init
 # =============================
 if [[ "$MODE" == "full" ]]; then
     add_run_cmd '
-    yum remove -y openssh-server
+    if command -v yum >/dev/null 2>&1; then
+        yum remove -y openssh-server
+    elif command -v apt-get >/dev/null 2>&1; then
+        DEBIAN_FRONTEND=noninteractive apt-get remove -y openssh-server
+    fi
     '
 elif [[ "$MODE" == "partial" ]]; then
+    # shellcheck disable=SC2016
     add_run_cmd '
     # Disable password login, allow public key only
-    sed -i "s/^#*PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config
-    sed -i "s/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/" /etc/ssh/sshd_config
-
-    # Prevent root password login, but allow key-based login
-    sed -i "s/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/" /etc/ssh/sshd_config
-
-    # Disable high-risk features
-    sed -i "s/^#*X11Forwarding.*/X11Forwarding no/" /etc/ssh/sshd_config
-    sed -i "s/^#*AllowTcpForwarding.*/AllowTcpForwarding no/" /etc/ssh/sshd_config
+    sshd_conf=/etc/ssh/sshd_config
+    if ls /etc/ssh/sshd_config.d/*.conf >/dev/null 2>&1; then
+        # Ubuntu may use drop-in config
+        for f in /etc/ssh/sshd_config.d/*.conf; do
+            sed -i "s/^#*PasswordAuthentication.*/PasswordAuthentication no/" "$f"
+            sed -i "s/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/" "$f"
+            sed -i "s/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/" "$f"
+            sed -i "s/^#*X11Forwarding.*/X11Forwarding no/" "$f"
+            sed -i "s/^#*AllowTcpForwarding.*/AllowTcpForwarding no/" "$f"
+        done
+    fi
+    sed -i "s/^#*PasswordAuthentication.*/PasswordAuthentication no/" "$sshd_conf"
+    sed -i "s/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/" "$sshd_conf"
+    sed -i "s/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/" "$sshd_conf"
+    sed -i "s/^#*X11Forwarding.*/X11Forwarding no/" "$sshd_conf"
+    sed -i "s/^#*AllowTcpForwarding.*/AllowTcpForwarding no/" "$sshd_conf"
     '
 fi
 
@@ -229,7 +250,7 @@ fi
 # =============================
 # shellcheck disable=SC2016
 add_run_cmd '
-#!/bin/bash
+#!/bin/sh
 
 # 1. Lock root and admin account passwords:
 echo "1. Locking root and admin account passwords..."
@@ -238,34 +259,31 @@ sed -i "s/\(^admin:\)[^:]*/\1!!/" /etc/shadow
 echo "1. Root and admin account passwords locked!"
 
 echo "2. Processing other user accounts (excluding root and admin)..."
-# Define list of excluded usernames
-exclude_users=("root" "admin")
 
 while IFS=: read -r username _ _ _ _ homedir user_shell; do
   # Check if shell is one of the interactive shells
   case $user_shell in
-    "/bin/bash"|"/bin/sh"|"/bin/zsh" \
-    |"/usr/bin/bash"|"/usr/bin/sh"|"/usr/bin/zsh" \
-    |"/usr/local/bin/bash"|"/usr/local/bin/sh"|"/usr/local/bin/zsh")
-      
-      # Skip if username is in exclude list
-      if [[ " ${exclude_users[@]} " =~ " $username " ]]; then
-        continue
-      fi
-      
+    /bin/bash|/bin/sh|/bin/zsh \
+    |/usr/bin/bash|/usr/bin/sh|/usr/bin/zsh \
+    |/usr/local/bin/bash|/usr/local/bin/sh|/usr/local/bin/zsh)
+
+      # Skip if username is root or admin
+      case "$username" in
+        root|admin) continue ;;
+      esac
+
       # Read password field from shadow
-      pass=$(grep "^$username:" /etc/shadow | cut -d: -f2)
-      
+      pass=$(grep "^${username}:" /etc/shadow | cut -d: -f2)
+
       # If already locked (!, !!, *, etc.), skip deletion
-      if [[ "$pass" == "!" || "$pass" == "!!" || "$pass" == *\!* || "$pass" == "*" ]]; then
-        echo "Account $username is already locked or disabled, skipping."
-        continue
-      fi
-      
+      case "$pass" in
+        "!"*|"*"|"") echo "Account $username is already locked or disabled, skipping." ; continue ;;
+      esac
+
       # Delete eligible user account and home directory
       echo "Removing account: $username"
       userdel -r "$username" 2>/dev/null || true
-      if [[ -d "$homedir" ]]; then
+      if [ -d "$homedir" ]; then
         rm -rf "$homedir" 2>/dev/null || true
       fi
       ;;
@@ -282,10 +300,10 @@ echo "3. Removing directories ending with .DEL in home folders..."
 # Scan /etc/passwd again and clean *.DEL directories in valid home paths
 while IFS=: read -r username _ _ _ _ homedir user_shell; do
   case $user_shell in
-    "/bin/bash"|"/bin/sh"|"/bin/zsh" \
-    |"/usr/bin/bash"|"/usr/bin/sh"|"/usr/bin/zsh" \
-    |"/usr/local/bin/bash"|"/usr/local/bin/sh"|"/usr/local/bin/zsh")
-      if [[ -d "$homedir" ]]; then
+    /bin/bash|/bin/sh|/bin/zsh \
+    |/usr/bin/bash|/usr/bin/sh|/usr/bin/zsh \
+    |/usr/local/bin/bash|/usr/local/bin/sh|/usr/local/bin/zsh)
+      if [ -d "$homedir" ]; then
         find "$homedir" -maxdepth 1 -type d -name "*.DEL" -exec rm -rf {} \;
       fi
       ;;
@@ -298,7 +316,10 @@ echo "3. Cleanup of *.DEL directories completed!"
 # 7. Clear Bash History
 # =============================
 add_run_cmd '
-history -c && history -w
+# Remove all bash history files
+rm -f /root/.bash_history /home/*/.bash_history 2>/dev/null || true
+# Also clear system history if present
+: > /var/log/history 2>/dev/null || true
 '
 
 # =============================
