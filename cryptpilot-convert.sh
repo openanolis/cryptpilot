@@ -996,6 +996,35 @@ if [ "${uki:-false}" = false ]; then
             update-grub || true
         fi
     fi
+    # Normalize the ESP "early" grub.cfg that shim-loaded GRUB reads first.
+    # Some distros (notably Alinux 4) ship a UUID-based search here. After
+    # conversion the referenced partition (the boot partition) has been
+    # reformatted, so its UUID no longer exists and GRUB fails with
+    # "search.c: no such device: <uuid>" before it can load the main
+    # grub.cfg. Rewrite any such stub to a path-based search that locates
+    # the main grub.cfg by file path. This relies on the /boot->. symlink
+    # created earlier (so /boot/grub2/grub.cfg resolves on the boot
+    # partition) and is a no-op for distros already shipping path-based
+    # stubs (e.g. Alinux 3).
+    for _esp_early in /boot/efi/EFI/*/grub.cfg; do
+        [ -e "$_esp_early" ] || continue
+        if grep -q -- '--fs-uuid' "$_esp_early" 2>/dev/null; then
+            if [ -e /boot/grub2/grub.cfg ]; then
+                _esp_main=/boot/grub2/grub.cfg
+            elif [ -e /boot/grub/grub.cfg ]; then
+                _esp_main=/boot/grub/grub.cfg
+            else
+                echo "Cannot determine main grub.cfg path; leaving $_esp_early unchanged"
+                continue
+            fi
+            _esp_main_dir=$(dirname "$_esp_main")
+            echo "Normalizing ESP early grub.cfg ($_esp_early) -> path-based search for $_esp_main"
+            printf '%s\n' \
+                "search --no-floppy --set prefix --file ${_esp_main}" \
+                "set prefix=(\$prefix)${_esp_main_dir}" \
+                "configfile \$prefix/grub.cfg" > "$_esp_early"
+        fi
+    done
     echo "Cleaning up package manager cache..."
     if command -v yum >/dev/null 2>&1; then
         yum clean all

@@ -88,7 +88,11 @@ check_root() {
 
 # Check required tools
 check_tools() {
-    local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4" "virt-customize")
+    # virt-customize is optional: it drives cryptpilot-enhance, which skips
+    # gracefully when the binary is absent (e.g. on Alinux 4, where libguestfs
+    # no longer ships it). All other tools are mandatory for the convert/boot
+    # flow itself.
+    local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4")
     local missing=()
 
     for tool in "${tools[@]}"; do
@@ -98,7 +102,11 @@ check_tools() {
     done
 
     if [[ ${#missing[@]} -gt 0 ]]; then
-        fatal "Missing required tools: ${missing[*]}. Install libguestfs-tools for virt-customize."
+        fatal "Missing required tools: ${missing[*]}."
+    fi
+
+    if ! command -v virt-customize &>/dev/null; then
+        log::info "virt-customize not found; cryptpilot-enhance will skip image hardening."
     fi
 }
 

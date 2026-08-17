@@ -191,10 +191,22 @@ jobs:
         bootloader: [uki, grub]
         rootfs_enc: [enc, noenc]
         delta_location: [ram, disk, disk-persist]
+        # Run the full convert/boot matrix against both supported Alinux
+        # versions. The test image (a source qcow2 packaged as a ghcr image)
+        # and the privileged runtime container that runs qemu-nbd/LUKS/LVM
+        # are distro-specific.
+        distro:
+          - name: alinux3
+            test_image_tag: "alinux3-20251030"
+            runtime_image: "alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest"
+          - name: alinux4
+            test_image_tag: "alinux4-20260710"
+            runtime_image: "alibaba-cloud-linux-4-registry.cn-hangzhou.cr.aliyuncs.com/alinux4/alinux4:latest"
     runs-on: ubuntu-latest
     needs: build
     env:
-      TEST_IMAGE_TAG: "alinux3-20251030"  # Update this when test image changes
+      TEST_IMAGE_TAG: ${{ matrix.distro.test_image_tag }}
+      RUNTIME_IMAGE: ${{ matrix.distro.runtime_image }}
     steps:
       - name: Load NBD kernel module
         run: |
@@ -231,7 +243,7 @@ jobs:
             -v /dev:/dev \
             -v /run/udev/control:/run/udev/control \
             -v ${{ github.workspace }}:/workspace \
-            alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest \
+            ${{ env.RUNTIME_IMAGE }} \
             sleep infinity
 
       - name: Setup container environment

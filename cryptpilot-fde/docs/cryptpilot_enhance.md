@@ -93,6 +93,12 @@ Apply partial hardening with SSH key injection:
 
 Tested on CentOS/RHEL 7/8/9 systems. May require adaptation for other distributions.
 
+> **Note:** On Alibaba Cloud Linux 4, the `libguestfs` package no longer
+> ships `virt-customize`. When `virt-customize` is absent, `cryptpilot-enhance`
+> prints a warning and exits successfully without hardening the image, so the
+> FDE convert/boot flow is unaffected. Install `libguestfs-tools-c` (Alinux 3)
+> or `libguestfs-tools` (Ubuntu) to enable hardening.
+
 ## ENVIRONMENT VARIABLES
 
 `CRYPTPILOT_ENHANCE_VIRT_CUSTOMIZE_OPTS`  

@@ -203,7 +203,11 @@ install-test-depend:
 
 .PHONY: install-convert-test-depend
 install-convert-test-depend:
-	yum install -y wget qemu-img cryptsetup lvm2 parted e2fsprogs util-linux libguestfs-tools-c
+	yum install -y wget qemu-img cryptsetup lvm2 parted e2fsprogs util-linux
+	# Alinux 3 / RHEL 8 ship the libguestfs tools as "libguestfs-tools-c";
+	# Alinux 4 merges them into "libguestfs". Try the legacy name first,
+	# fall back to the merged package.
+	yum install -y libguestfs-tools-c || yum install -y libguestfs
 	which docker || { yum install -y docker ; }
 
 .PHONY: run-convert-test-case
