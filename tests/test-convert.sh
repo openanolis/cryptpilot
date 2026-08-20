@@ -488,6 +488,63 @@ verify_converted_image() {
 }
 
 
+# Ensure a usable container runtime for the QEMU boot test.
+#
+# On Alinux 3, the "docker" package is actually podman-docker: a daemonless
+# podman emulation, so `docker` works out of the box with no running daemon.
+# On Alinux 4, "docker" is the real Docker Engine, which needs a running
+# dockerd. But the CI test container is started with `sleep infinity` (no
+# systemd), so the daemon is never started and `docker run` fails with
+# "Cannot connect to the Docker daemon at unix:///var/run/docker.sock".
+#
+# When `docker info` already works (podman emulation or a running dockerd),
+# this is a no-op. Otherwise it launches dockerd in the background. The flags
+# keep it functional inside a privileged nested container: vfs avoids
+# overlay-in-nested-container issues; bridge/iptables/masquerading are
+# disabled because dockerd's default bridge setup fails in the nested
+# container. With no bridge, containers get no `eth0`, so the QEMU boot
+# container is launched with `--network=host` (see test_qemu_boot) so the
+# qemus entrypoint can find a network interface; qemu guest networking uses
+# SLIRP in-process, independent of the container network. Sets
+# DOCKERD_STARTED=1 so the caller knows to apply --network=host.
+ensure_docker_runtime() {
+    if docker info >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if ! command -v dockerd >/dev/null 2>&1; then
+        log::error "docker is installed but dockerd is missing and no podman emulation is available; cannot run the QEMU boot test."
+        return 1
+    fi
+
+    log::info "dockerd is not running (no systemd in the test container); starting dockerd in background..."
+    dockerd \
+        --host=unix:///var/run/docker.sock \
+        --storage-driver=vfs \
+        --iptables=false \
+        --bridge=none \
+        --ip-masq=false \
+        >/tmp/.cryptpilot-dockerd.log 2>&1 &
+    local dockerd_pid=$!
+
+    local waited=0
+    while ! docker info >/dev/null 2>&1; do
+        waited=$((waited + 1))
+        if [[ $waited -gt 30 ]]; then
+            log::error "dockerd did not become ready within 30s (see /tmp/.cryptpilot-dockerd.log)."
+            return 1
+        fi
+        if ! kill -0 "$dockerd_pid" 2>/dev/null; then
+            log::error "dockerd exited unexpectedly (see /tmp/.cryptpilot-dockerd.log)."
+            return 1
+        fi
+        sleep 1
+    done
+    log::success "dockerd is ready (pid ${dockerd_pid})."
+    DOCKERD_STARTED=1
+    return 0
+}
+
 # Test booting the converted image with QEMU in container
 # Returns 0 if login prompt appears, 1 if emergency shell or timeout
 test_qemu_boot() {
@@ -496,13 +553,30 @@ test_qemu_boot() {
 
     log::step "Testing QEMU boot for: ${test_name}"
 
+    # Alinux 4 ships real Docker (not podman-docker) and the test container
+    # has no init system, so dockerd must be started explicitly. No-op on
+    # Alinux 3 where docker is the daemonless podman emulation.
+    if ! ensure_docker_runtime; then
+        return 1
+    fi
+
     local boot_log="${WORKDIR}/${test_name}-boot.log"
 
     log::info "Starting QEMU container with UEFI boot mode"
 
     # Start QEMU container in background
     local container_name="qemu-test-${test_name}-$$"
+    # When we launched dockerd ourselves (Alinux 4), it runs with no bridge, so
+    # containers get no eth0 and the qemus entrypoint aborts asking for
+    # VM_NET_DEV. Use the host network namespace so qemus can find an
+    # interface. Not needed (and harmless) under podman on Alinux 3, but only
+    # applied when DOCKERD_STARTED is set to avoid changing the working path.
+    local docker_net_args=()
+    if [[ "${DOCKERD_STARTED:-0}" == "1" ]]; then
+        docker_net_args+=(--network=host)
+    fi
     if ! docker run -d --rm --privileged \
+        "${docker_net_args[@]}" \
         -v "${output_image}:${output_image}:ro" \
         -e "IMAGE=${output_image}" \
         -e BOOT="" \

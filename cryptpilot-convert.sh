@@ -1099,6 +1099,20 @@ if [[ -f /tmp/cryptpilot/global.toml ]]; then
 fi
 
 if [ "${uki:-false}" = true ]; then
+    # dracut --uefi needs the systemd UEFI stub (linuxx64.efi.stub) to assemble
+    # a UKI. On Alinux 3 this ships in the enabled systemd-udev package; on
+    # Alinux 4 it lives in systemd-boot-unsigned, which is only in the disabled
+    # *-devel repo. Install it on demand so UKI works across distros; this is
+    # a no-op when the stub is already present.
+    if [ ! -e /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]; then
+        echo "EFI stub linuxx64.efi.stub not found; installing systemd-boot-unsigned"
+        # mirrors.cloud.aliyuncs.com is only reachable from inside Alibaba
+        # Cloud; switch to the public mirror so the install works in CI and
+        # other non-Aliyun environments too.
+        sed -i 's|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g' /etc/yum.repos.d/*.repo 2>/dev/null || true
+        yum --enablerepo='*devel*' install -y systemd-boot-unsigned || yum install -y systemd-boot-unsigned
+    fi
+
     # Remove all existing EFI entries
     find /boot/efi/EFI -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     # Remove NvVars file
