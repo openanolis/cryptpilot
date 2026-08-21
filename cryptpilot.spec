@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.8.0
+Version: 0.9.0
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -333,6 +333,56 @@ fi
 
 
 %changelog
+* Fri Aug 21 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.0-1
+- fix(fde): enable UKI build and QEMU boot test on Alinux 4
+- feat(fde): add Alibaba Cloud Linux 4 support
+- fix(crypt): address clippy warnings in three_state_init tests
+- fix(fde): always mark delta volume as initialized after recreation
+- fix(fde): mark DiskPersist delta volume as initialized after recreation
+- test(crypt): remove unused parallel blkid monitor from init lifecycle test
+- refactor(boot_service): include subsystem in COW device error message
+- test(crypt): add serial_test and stable blkid lifecycle test with retries
+- refactor(core): set subsystem in CryptParamsLuks2, add blkid SUBTYPE field, and parallel lifecycle test
+- refactor(core): merge initializing marker into format() atomically
+- test(crypt): add three-state init integration tests
+- feat(crypt): add Initializing state to volume status display
+- feat(core): write initializing marker in format()
+- feat(core): add VolumeInitState enum and get_init_state() API
+- fix(kms): add IMDS error handling and IMDSv2 TODO note
+- fix(crypt): update KmsConfig struct literal in volume.rs test for AuthMode enum
+- docs: update KMS provider docs with ECS RAM role auth mode
+- refactor(gen-template): use new KmsConfig constructor for kms template
+- feat(provider/kms): add ECS RAM role auth mode with auto-discovery
+- ci(test): use Rust 1.86.0 for aarch64 coverage to fix profiler builtins linker error
+- docs: add Codecov badge to README
+- ci: add coverage collection and Codecov upload to test workflow
+- feat: add run-test-coverage target with cargo-llvm-cov
+- fix(make): add cleanup-stale-devices target to remove orphan dm-crypt and loop devices before test suite
+- ci: pass --define 'with_rustup 1' to all yum-builddep invocations
+- fix(metadata): use canonical JSON library for cross-language hash compatibility
+- fix(verity-go): add missing --hash-output flag to CLI example
+- fix(verity-go): correct README examples and module path
+- fix(test): increase QEMU boot timeout from 3 to 6 minutes
+- ci: remove redundant interop-test Makefile targets
+- ci: remove redundant interop-test job
+- fix(ci): cd into verity-core before running make_testfiles.py
+- refactor(cryptpilot-verity): clean up metadata module and remove cross-lang tests
+- docs(verity-go): rewrite README with serialize/verify sections
+- docs(verity-go): add bilingual README and fix CI fixture ordering
+- refactor(test): simplify testing to two clean categories
+- fix: address code review feedback for interop infrastructure
+- ci: add Go test job and interop test targets
+- chore: regenerate FlatBuffers Rust code from updated flatc
+- test(cryptpilot-verity): add cross-language deserialize tests
+- feat(verity-go): add metadata package with FlatBuffers serialization
+- refactor(verity-go): export DigestSize and BlockSize methods
+- feat(verity-go): add cross-validation tests for FsVerityDigest
+- feat(verity-go): add FsVerityDigest streaming hasher
+- feat(verity-go): add MerkleTree type
+- feat(verity-go): add FsVerityDescriptor and HashAlgorithm types
+- feat(verity-go): scaffold Go module and FlatBuffers generated code
+- ci: print cryptpilot-convert diagnostic log on test failure
+
 * Sat May 09 2026 Kun Lai <laikun@linux.alibaba.com> - 0.8.0-1
 - fix(verity): drop libfuse3 dynamic link dependency
 - fix(ci): restore generated FlatBuffers files and drop debian:trixie from DEB test matrix
