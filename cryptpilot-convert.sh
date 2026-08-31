@@ -225,6 +225,13 @@ proc::print_help_and_exit() {
     echo "      --uki-append-cmdline <cmdline>                      Append custom command line parameters when generating a UKI image. By default, only essential"
     echo "                                                          parameters are included. This option allows you to extend the kernel command line. The default"
     echo "                                                          value is 'console=tty0 console=ttyS0,115200n8'."
+    echo "      --uki-stub-version <distro|version>                Source of the systemd UEFI stub (linuxx64.efi.stub) used to assemble the UKI."
+    echo "                                                          Only meaningful with --uki. 'distro' (default) installs systemd-boot-unsigned"
+    echo "                                                          from the distro repo (version floats with the distro). Any other value is a"
+    echo "                                                          version prefix resolved against the public Arch Linux Archive to the highest"
+    echo "                                                          matching package, e.g. '261' -> latest 261.x, '261.2-1' -> that exact package"
+    echo "                                                          (fully pinned, so the PCR measurement reference stays stable). A pinned stub"
+    echo "                                                          is downloaded, used, and removed so the converted image is unchanged."
     echo "  -h, --help                                              Show this help message and exit."
     exit "$1"
 }
@@ -1044,24 +1051,157 @@ EOF
 
 }
 
+# --- efi stub provisioning (systemd-stub / linuxx64.efi.stub) -------------------
+#
+# dracut --uefi assembles a UKI by linking kernel+initrd+cmdline with the
+# systemd UEFI stub at /usr/lib/systemd/boot/efi/linuxx64.efi.stub. Different
+# systemd-stub versions measure into PCR4/PCR8/PCR12 differently, so pinning
+# the stub makes the measurement reference values stable.
+#
+# --uki-stub-version controls the source:
+#   distro                install systemd-boot-unsigned from the distro's own
+#                         repo (version floats with the distro; the legacy
+#                         behavior). This is the default when --uki is given
+#                         without --uki-stub-version.
+#   <version-prefix>      download a pinned stub from the public Arch Linux
+#                         Archive. The prefix is resolved against the archive
+#                         directory listing to the highest matching package:
+#                           "261"     -> latest 261.x  (e.g. 261.2-1)
+#                           "261.2"   -> 261.2-1
+#                           "261.2-1" -> 261.2-1 (exact, fully pinned)
+#                         A prefix must be followed by a segment boundary
+#                         ("." or "-"), so "25" does NOT silently resolve to
+#                         259.x -- it errors and lists what is available.
+readonly STUB_SPECIAL_DISTRO="distro"
+readonly STUB_REL_PATH="usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+readonly ARCH_STUB_ARCHIVE_URL="https://archive.archlinux.org/packages/s/systemd/"
+readonly ARCH_STUB_MEMBER="usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+
+# Print the base systemd package filenames available in the Arch Linux Archive,
+# newest-last. Excludes subpackages (systemd-libs, -sysvcompat, ...) because
+# those start with a letter after "systemd-", and excludes .sig files.
+_arch_stub_list_pkgs() {
+    curl -sS --max-time 60 "${ARCH_STUB_ARCHIVE_URL}" \
+        | grep -oE "systemd-[0-9][^\"<>[:space:]]*-x86_64\.pkg\.tar\.zst" \
+        | grep -v '\.sig$' \
+        | sort -uV
+}
+
+# Resolve a version prefix to the exact Arch package filename matching it, or
+# fail with a suggestion list of available versions. The match requires the
+# prefix to be followed by a segment boundary so short prefixes like "25" do
+# not jump across major versions (e.g. to 259.x).
+resolve_arch_stub_pkg() {
+    local prefix="$1"
+    local pkgs best=""
+    local rest nxt
+
+    pkgs="$(_arch_stub_list_pkgs)"
+    if [ -z "$pkgs" ]; then
+        echo "ERROR: could not fetch the systemd package list from the Arch Linux Archive (${ARCH_STUB_ARCHIVE_URL})." >&2
+        echo "       Check network connectivity, then retry." >&2
+        return 1
+    fi
+
+    while IFS= read -r p; do
+        [ -z "$p" ] && continue
+        rest="${p#systemd-}"            # e.g. 261.2-1-x86_64.pkg.tar.zst
+        # literal (non-regex) prefix match on the version portion
+        if [ "${rest:0:${#prefix}}" = "$prefix" ]; then
+            nxt="${rest:${#prefix}:1}"
+            if [ "$nxt" = "." ] || [ "$nxt" = "-" ] || [ -z "$nxt" ]; then
+                best="$p"              # keep last; pkgs are already newest-last
+            fi
+        fi
+    done <<<"$pkgs"
+
+    if [ -n "$best" ]; then
+        echo "$best"
+        return 0
+    fi
+
+    # No match: suggest the most recent available major versions.
+    local available
+    available=$(printf '%s\n' "${pkgs}" \
+        | sed -E 's/^systemd-([0-9]+)(\.|-).*/\1/' \
+        | sort -un | tail -n 8 | awk '{printf "%s.x ", $1}' | sed 's/ $//')
+    echo "ERROR: efi stub version '${prefix}' did not match any package in the Arch Linux Archive." >&2
+    echo "       Available systemd versions: ${available:-none}" >&2
+    echo "       Pass a major version (e.g. --uki-stub-version 261) or an exact pkgver-pkgrel (e.g. 261.2-1)." >&2
+    return 1
+}
+
 step:update_initrd() {
     local efi_part=$1
     local boot_file_path=$2
     local uki=$3
     local uki_append_cmdline=$4
+    local uki_stub_version=$5
 
     update_initrd_inner() {
         local rootfs_mount_point=$1
         local uki=$2
         local uki_append_cmdline=$3
+        local uki_stub_version=$4
 
         # Copy files to the chroot environment
         cp "${workdir}/metadata.toml" "${rootfs_mount_point}/tmp/"
         mkdir -p "${rootfs_mount_point}/tmp/cryptpilot/"
         cp -a "${config_dir}/." "${rootfs_mount_point}/tmp/cryptpilot/"
+
+        # When a pinned stub version is requested (anything other than the
+        # "distro" sentinel), download it from the public Arch Linux Archive
+        # and place it at the canonical path dracut --uefi expects. The stub
+        # is removed (and any pre-existing one restored) after the UKI is
+        # built below, so the converted image's rootfs is left byte-for-byte
+        # unchanged. The distro path instead installs the package inside the
+        # chroot and leaves it in place.
+        local stub_placed=false
+        local stub_backup=""
+        local stub_path="${rootfs_mount_point}/${STUB_REL_PATH}"
+        if [ "${uki:-false}" = true ] && [ "${uki_stub_version}" != "${STUB_SPECIAL_DISTRO}" ]; then
+            # Verify the host tools needed to download/extract/log a pinned stub
+            # (a .pkg.tar.zst). Step 0 tries to install them, but check here so a
+            # missing tool is reported clearly instead of a confusing extract error.
+            local _missing _t
+            _missing=""
+            for _t in curl zstd tar sha256sum; do
+                command -v "$_t" >/dev/null 2>&1 || _missing="${_missing} ${_t}"
+            done
+            if [ -n "$_missing" ]; then
+                proc::fatal "host tools required for --uki-stub-version are missing:${_missing} (install zstd, tar, curl, coreutils)"
+            fi
+            local pkg tmp_pkg
+            if ! pkg=$(resolve_arch_stub_pkg "${uki_stub_version}"); then
+                proc::fatal "could not resolve efi stub version '${uki_stub_version}'"
+            fi
+            mkdir -p "$(dirname "${stub_path}")"
+            if [ -e "${stub_path}" ]; then
+                stub_backup="${stub_path}.cryptpilot.orig"
+                mv "${stub_path}" "${stub_backup}"
+            fi
+            log::info "Downloading pinned efi stub from Arch Linux Archive: ${pkg}"
+            tmp_pkg=$(mktemp)
+            if ! curl -sS --max-time 120 -o "${tmp_pkg}" "${ARCH_STUB_ARCHIVE_URL}${pkg}"; then
+                rm -f "${tmp_pkg}"
+                [ -n "${stub_backup}" ] && mv "${stub_backup}" "${stub_path}"
+                proc::fatal "failed to download efi stub ${pkg} from the Arch Linux Archive"
+            fi
+            if ! zstd -d -c "${tmp_pkg}" 2>/dev/null | tar -xOf - "${ARCH_STUB_MEMBER}" > "${stub_path}" 2>/dev/null || [ ! -s "${stub_path}" ]; then
+                rm -f "${tmp_pkg}" "${stub_path}"
+                [ -n "${stub_backup}" ] && mv "${stub_backup}" "${stub_path}"
+                proc::fatal "failed to extract efi stub ${ARCH_STUB_MEMBER} from ${pkg}"
+            fi
+            rm -f "${tmp_pkg}"
+            local stub_sha
+            stub_sha=$(sha256sum "${stub_path}" | cut -d' ' -f1)
+            log::info "resolved efi stub: ${pkg} (from prefix '${uki_stub_version}'), sha256=${stub_sha}"
+            stub_placed=true
+        fi
+
         # update initrd
         log::info "Updating initrd"
-        chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; uki_append_cmdline='${uki_append_cmdline}' ; $(
+        chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; uki_append_cmdline='${uki_append_cmdline}' ; uki_stub_version='${uki_stub_version}' ; $(
             cat <<'EOF'
 set -e
 set -u
@@ -1099,18 +1239,31 @@ if [[ -f /tmp/cryptpilot/global.toml ]]; then
 fi
 
 if [ "${uki:-false}" = true ]; then
-    # dracut --uefi needs the systemd UEFI stub (linuxx64.efi.stub) to assemble
-    # a UKI. On Alinux 3 this ships in the enabled systemd-udev package; on
-    # Alinux 4 it lives in systemd-boot-unsigned, which is only in the disabled
-    # *-devel repo. Install it on demand so UKI works across distros; this is
-    # a no-op when the stub is already present.
-    if [ ! -e /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]; then
-        echo "EFI stub linuxx64.efi.stub not found; installing systemd-boot-unsigned"
-        # mirrors.cloud.aliyuncs.com is only reachable from inside Alibaba
-        # Cloud; switch to the public mirror so the install works in CI and
-        # other non-Aliyun environments too.
-        sed -i 's|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g' /etc/yum.repos.d/*.repo 2>/dev/null || true
-        yum --enablerepo='*devel*' install -y systemd-boot-unsigned || yum install -y systemd-boot-unsigned
+    # dracut --uefi needs the systemd UEFI stub (linuxx64.efi.stub) at
+    # /usr/lib/systemd/boot/efi/ to assemble a UKI. Two sourcing modes,
+    # selected by uki_stub_version (the literal "distro" sentinel must match
+    # the host-side STUB_SPECIAL_DISTRO):
+    #   "distro"     -> install systemd-boot-unsigned from the distro repo on
+    #                   demand (legacy behavior; version floats). On Alinux 3
+    #                   the stub ships with systemd-udev; on Alinux 4 it is
+    #                   in the disabled *-devel repo.
+    #   <prefix>     -> a pinned stub was already downloaded from the Arch
+    #                   Linux Archive and placed at the canonical path by the
+    #                   host before entering the chroot; just verify it.
+    if [ "${uki_stub_version:-distro}" = "distro" ]; then
+        if [ ! -e /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]; then
+            echo "EFI stub linuxx64.efi.stub not found; installing systemd-boot-unsigned"
+            # mirrors.cloud.aliyuncs.com is only reachable from inside Alibaba
+            # Cloud; switch to the public mirror so the install works in CI and
+            # other non-Aliyun environments too.
+            sed -i 's|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g' /etc/yum.repos.d/*.repo 2>/dev/null || true
+            yum --enablerepo='*devel*' install -y systemd-boot-unsigned || yum install -y systemd-boot-unsigned
+        fi
+    else
+        if [ ! -e /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]; then
+            echo "ERROR: pinned efi stub (uki_stub_version='${uki_stub_version}') was not placed at /usr/lib/systemd/boot/efi/linuxx64.efi.stub" >&2
+            exit 1
+        fi
     fi
 
     # Remove all existing EFI entries
@@ -1150,13 +1303,23 @@ fi
 EOF
         )"
 
+        # Remove the pinned stub (and restore any pre-existing one) so the
+        # converted image's rootfs is byte-for-byte unchanged. Only the Arch
+        # path places a stub here; the distro path leaves its package install
+        # in place.
+        if [ "${stub_placed}" = true ]; then
+            rm -f "${stub_path}"
+            if [ -n "${stub_backup}" ] && [ -e "${stub_backup}" ]; then
+                mv "${stub_backup}" "${stub_path}"
+            fi
+        fi
     }
 
     # Remove read-only flag from rootfs.img
     tune2fs -O ^read-only "${rootfs_file_path}"
 
     # Note that the rootfs.img will not be used any more so mount it without '-o ro' flag will not change the hash of rootfs.
-    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline"
+    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline" "$uki_stub_version"
 }
 
 step::shrink_and_extract_rootfs_part() {
@@ -1342,6 +1505,7 @@ main() {
     local wipe_freed_space=false
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
+    local uki_stub_version="distro"
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -1393,6 +1557,10 @@ main() {
             uki_append_cmdline="$2"
             shift 2
             ;;
+        --uki-stub-version)
+            uki_stub_version="$2"
+            shift 2
+            ;;
         -h | --help)
             proc::print_help_and_exit 0
             ;;
@@ -1401,6 +1569,19 @@ main() {
             ;;
         esac
     done
+
+    # Validate --uki-stub-version: either the "distro" sentinel or a numeric
+    # Arch version prefix (digits, dots, hyphens). The char-class check also
+    # prevents single-quote injection since the value is interpolated into the
+    # chroot bash -c command string.
+    if [ "${uki}" = true ] && [ "${uki_stub_version}" != "distro" ]; then
+        if ! [[ "${uki_stub_version}" =~ ^[0-9][0-9.-]*$ ]]; then
+            proc::fatal "Invalid --uki-stub-version '${uki_stub_version}': use 'distro' or a version prefix like '261' / '261.2-1'"
+        fi
+    elif [ "${uki}" = false ] && [ "${uki_stub_version}" != "distro" ]; then
+        log::warn "--uki-stub-version is ignored without --uki"
+        uki_stub_version="distro"
+    fi
 
     if [ -n "${device:-}" ]; then
         if [ -n "${input_file:-}" ] || [ -n "${output_file:-}" ]; then
@@ -1478,12 +1659,20 @@ main() {
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
         fi
+        # A pinned stub from the Arch Linux Archive is a .pkg.tar.zst, so the
+        # Arch path needs curl (download), zstd + tar (extract), sha256sum (log).
+        if [[ "$uki" == "true" && "$uki_stub_version" != "distro" ]]; then
+            tool_packages+=(curl zstd tar)
+        fi
         apt-get update
         apt-get install -y "${tool_packages[@]}"
     else
         local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof)
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+        fi
+        if [[ "$uki" == "true" && "$uki_stub_version" != "distro" ]]; then
+            tool_packages+=(curl zstd tar)
         fi
         yum install -y "${tool_packages[@]}"
     fi
@@ -1633,12 +1822,12 @@ main() {
     #
     log::step "[ 9 ] Update initrd"
     if [ "$boot_part_exist" = "true" ]; then
-        step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
+        step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
     else
         if [ "$uki" = true ]; then
-            step:update_initrd "${efi_part}" "" "${uki}" "${uki_append_cmdline}"
+            step:update_initrd "${efi_part}" "" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
         else
-            step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
+            step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
         fi
     fi
 

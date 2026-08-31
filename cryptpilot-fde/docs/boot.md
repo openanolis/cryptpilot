@@ -126,6 +126,11 @@ flowchart LR
 
 UKI generation uses dracut's `--uefi` parameter. The default kernel command line is `console=tty0 console=ttyS0,115200n8`, and custom parameters can be appended via `--uki-append-cmdline`. `cryptpilot-fde-host` parses segments in the UKI image directly when calculating reference values.
 
+**EFI Stub Source (`--uki-stub-version`)**: dracut assembles the UKI by linking the kernel, initrd, and cmdline with the systemd UEFI stub (`linuxx64.efi.stub`). Different systemd-stub versions measure into PCR4/PCR8/PCR12 differently, so pinning the stub keeps the measurement reference values stable across builds.
+
+- `--uki-stub-version distro` (default): installs `systemd-boot-unsigned` from the distro's own repo. The version floats with the distro, so PCR reference values are only stable as long as the distro package does not change.
+- `--uki-stub-version <version>`: downloads a pinned, unsigned stub from the public [Arch Linux Archive](https://archive.archlinux.org/packages/s/systemd/). The value is a version prefix resolved to the highest matching package — `261` selects the latest `261.x`, `261.2-1` selects that exact package (fully pinned). The stub is downloaded, used to build the UKI, then removed, so the converted image is left unchanged. The resolved exact version and stub SHA-256 are logged, which lets you fix an exact value after verifying once.
+
 ### 3.3 Mode Comparison
 
 | Feature | GRUB Mode | UKI Mode |

@@ -270,6 +270,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 
 - `--rootfs-no-encryption`：rootfs 仅度量不加密
 - `--uki`：生成 UKI 统一内核镜像
+- `--uki-stub-version <distro|version>`：组装 UKI 所用的 systemd UEFI stub 来源。`distro`（默认）从发行版仓库安装；传版本前缀如 `261` 或 `261.2-1` 则从 Arch Linux Archive 钉死一个 stub，使 PCR 参考值保持稳定。
 
 ### 计算参考值
 

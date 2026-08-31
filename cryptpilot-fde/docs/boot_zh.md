@@ -126,6 +126,11 @@ flowchart LR
 
 UKI生成使用dracut的`--uefi`参数，默认内核命令行为`console=tty0 console=ttyS0,115200n8`，可通过`--uki-append-cmdline`追加自定义参数。`cryptpilot-fde-host`在计算参考值时直接解析UKI镜像中的各段进行度量。
 
+**EFI Stub 来源（`--uki-stub-version`）**：dracut 通过将内核、initrd、命令行与 systemd 的 UEFI stub（`linuxx64.efi.stub`）链接来组装 UKI。不同版本的 systemd-stub 向 PCR4/PCR8/PCR12 的度量行为不同，因此钉死 stub 版本可使度量参考值在多次构建间保持稳定。
+
+- `--uki-stub-version distro`（默认）：从发行版自身仓库安装 `systemd-boot-unsigned`。版本随发行版浮动，因此 PCR 参考值仅在发行版包不变时才稳定。
+- `--uki-stub-version <version>`：从公开的 [Arch Linux Archive](https://archive.archlinux.org/packages/s/systemd/) 下载一个钉死的 unsigned stub。取值为版本前缀，解析为最高匹配的包——`261` 选最新 `261.x`，`261.2-1` 选该精确包（完全钉死）。stub 下载后用于构建 UKI，随后删除，故转换后的镜像保持不变。解析到的精确版本与 stub 的 SHA-256 会被记录到日志，便于你验证一次后把精确值固化下来。
+
 ### 3.3 模式对比
 
 | 特性 | GRUB模式 | UKI模式 |

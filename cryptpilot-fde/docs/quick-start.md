@@ -270,6 +270,7 @@ cryptpilot-convert --in ./aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2 \
 
 - `--rootfs-no-encryption`: rootfs measure-only without encryption
 - `--uki`: Generate UKI unified kernel image
+- `--uki-stub-version <distro|version>`: Source of the systemd UEFI stub used to assemble the UKI. `distro` (default) installs it from the distro repo; a version prefix like `261` or `261.2-1` pins a stub from the Arch Linux Archive so PCR reference values stay stable.
 
 ### Calculate Reference Values
 
