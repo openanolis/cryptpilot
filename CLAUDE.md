@@ -18,9 +18,26 @@ When creating or amending commits:
 
 - **Author and committer** must always be taken from the local git config (`git config user.name` / `git config user.email`). Never use Claude's own identity.
 - **Never** add `Co-Authored-By:` trailers of any kind.
+- **Always** add a `Signed-off-by:` trailer with the author's own identity, taken from the local git config (`Signed-off-by: Your Name <you@example.com>`). Use `git commit -s` (which appends it from the configured identity) or add it by hand at the end of the commit message. This Developer Certificate of Origin trailer is required on every commit.
+- **Always** add an `Assisted-by:` trailer to every commit message that Claude authored or co-authored. The trailer is the *only* accepted form of AI attribution. Format:
+
+  ```
+  Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2] ...
+  ```
+
+  Where `AGENT_NAME` is the AI tool name (e.g. `Claude`), `MODEL_VERSION` is the specific model version used (e.g. `claude-opus-4-8`), and the optional bracketed `[TOOL]` entries are specialized analysis tools employed in producing the change (e.g. `coccinelle`, `sparse`, `smatch`, `clang-tidy`). Basic development tools (`git`, `gcc`, `make`, editors) must **not** be listed. Place the trailer as the last line(s) of the commit message body, separated by a blank line from the rest of the message. Example:
+
+  ```
+  Assisted-by: Claude:claude-opus-4-8 clang-tidy
+  ```
+
+  Only one `Assisted-by:` trailer per commit. If no specialized tool was used, omit the bracketed list entirely (`Assisted-by: Claude:claude-opus-4-8`).
 - **Never** include any Claude session URLs, session IDs, or links to claude.ai in commit messages or PR descriptions. Commit messages should only describe the code changes.
-- **Never** include `🤖 Generated with [Claude Code](https://claude.com/claude-code)` or similar AI assistant references in PR descriptions or commit messages.
+- **Never** include "🤖 Generated with [Claude Code](https://claude.com/claude-code)" or similar AI attribution footers in PR descriptions or commit messages.
 - **Always** use `--no-gpg-sign` to avoid GPG signing.
+- **Never commit plan or spec files** (e.g. `docs/*-plan.md`, `docs/*-design.md`, `docs/*-spec.md`, or anything under `docs/superpowers/`). These should be gitignored (already covered by `.gitignore`) and kept local only.
+- **Never commit any file that is already gitignored** — if a file matches `.gitignore`, it is intentionally local-only.
+- **Never manually edit version information in `cryptpilot.spec`** — do not touch the `Version:` or `Release:` fields, and do not add version-stamped `%changelog` entries by hand. Version/release bumps across the whole repo (`Cargo.toml`, `Cargo.lock`, `APPLICATION/*/buildspec.yml`, debian build files, and the RPM spec `Version` + `%changelog`) are produced at a specific release stage by `make bump-version-{major,minor,patch}`. That target regenerates the spec changelog from commit subjects since the last tag, so a hand-written entry would both carry a wrong release number and duplicate the auto-collected commits. Edit the spec only for packaging logic (e.g. `BuildRequires`/`Requires`, `%build` flags); leave versioning to `make bump-version-*`.
 
 ## Pre-Commit Checks
 
