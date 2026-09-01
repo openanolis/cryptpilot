@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.9.0
+Version: 0.9.1
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -333,6 +333,10 @@ fi
 
 
 %changelog
+* Tue Sep 01 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.1-1
+- docs(claude.md): formalize git commit requirements
+- feat(cryptpilot-convert): pin systemd UEFI stub via --uki-stub-version
+
 * Fri Aug 21 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.0-1
 - fix(fde): enable UKI build and QEMU boot test on Alinux 4
 - feat(fde): add Alibaba Cloud Linux 4 support

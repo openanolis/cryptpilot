@@ -1,3 +1,10 @@
+cryptpilot (0.9.1) unstable; urgency=medium
+
+  * docs(claude.md): formalize git commit requirements
+  * feat(cryptpilot-convert): pin systemd UEFI stub via --uki-stub-version
+
+ -- Kun Lai <laikun@linux.alibaba.com>  Tue, 01 Sep 2026 15:37:11 +0800
+
 cryptpilot (0.9.0) unstable; urgency=medium
 
   * fix(fde): enable UKI build and QEMU boot test on Alinux 4
