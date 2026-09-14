@@ -153,6 +153,12 @@ This service executes before `initrd-root-device.target` and is the key stage fo
 
 The construction of the rootfs device chain varies depending on encryption configuration. If rootfs encryption is configured, the service first obtains the passphrase through a key provider and opens the LUKS2 encrypted volume, then establishes dm-verity on the decrypted device. If encryption is not configured, dm-verity is established directly on the rootfs logical volume.
 
+**Layering Order of dm-verity and dm-crypt**
+
+- CryptPilot adopts a "decrypt-then-verify" order: dm-crypt sits on the lower layer (close to the disk, performing decryption) and dm-verity sits on the upper layer (close to the filesystem, verifying plaintext), with the hash tree built over plaintext. This choice is based on two considerations: first, the root_hash is independent of the encryption key, so rotating keys or re-encrypting does not require rebuilding the hash tree, which lowers operational cost; second, a single reference value can attest multiple instances that use different keys, simplifying reference-value management in multi-tenant remote attestation scenarios.
+
+- By comparison, an alternative order places dm-verity below dm-crypt and builds the hash tree over ciphertext. This order follows the Encrypt-then-MAC cryptographic principle: it can verify disk integrity without unlocking the volume and avoids decrypting potentially tampered ciphertext, yielding a more rigorous security composition. The trade-off is that key rotation changes the entire on-disk ciphertext and forces a full rebuild of the hash tree, and the root_hash depends on the encryption key, requiring a separate reference value for each instance that uses an independent key, which is inconvenient for unified multi-tenant attestation. Weighing the practical requirements of the confidential computing scenario, CryptPilot chose the former.
+
 #### 4.1.1 Delta Volume Initialization and Expansion
 
 The service first checks whether the disk where the LVM physical volume resides has unallocated space, and if so, extends the partition table and expands the LVM physical volume. This mechanism enables the system to automatically adapt to disk expansion scenarios in cloud environments.
