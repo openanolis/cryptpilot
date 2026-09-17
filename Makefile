@@ -212,7 +212,7 @@ install-convert-test-depend:
 
 .PHONY: run-convert-test-case
 run-convert-test-case: install-convert-test-depend
-	bash tests/test-convert.sh --rpm $(CRYPTPILOT_FDE_RPM) --bootloader $(BOOTLOADER) --rootfs-$(ROOTFS_ENC) --delta-location $(DELTA_LOCATION) $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),)
+	bash tests/test-convert.sh --rpm $(CRYPTPILOT_FDE_RPM) --bootloader $(BOOTLOADER) --rootfs-$(ROOTFS_ENC) --delta-location $(DELTA_LOCATION) $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),) $(if $(QEMU_RAM),--ram $(QEMU_RAM),)
 
 .PHONE: shellcheck
 shellcheck:

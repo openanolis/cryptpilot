@@ -8,6 +8,8 @@
 #   --rootfs-enc    (flag) rootfs encryption enabled
 #   --rootfs-noenc  (flag) rootfs encryption disabled
 #   --delta-location ram | disk | disk-persist
+#   --ram <size>           Pin QEMU guest RAM (e.g. 4G, 4096M). Defaults to
+#                           80% of host MemTotal. Also set via QEMU_RAM_SIZE.
 #
 # Usage:
 #   ./tests/test-convert.sh --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist>
@@ -562,7 +564,14 @@ test_qemu_boot() {
 
     local boot_log="${WORKDIR}/${test_name}-boot.log"
 
-    log::info "Starting QEMU container with UEFI boot mode"
+    # Pin guest RAM when --ram / QEMU_RAM_SIZE is given; otherwise fall back to
+    # 80% of host MemTotal (read from /proc/meminfo of this privileged runtime
+    # container, which reflects the CI runner's physical memory). Pinning a
+    # low value (e.g. 4G) is what surfaces the UKI "SizeOfImage hole" class of
+    # regressions, since UEFI LoadImage() must allocate SizeOfImage bytes of
+    # contiguous memory up front.
+    local ram_size="${QEMU_RAM_SIZE:-$(awk '/MemTotal/{printf "%d", $2 * 0.8 / 1024}' /proc/meminfo)}"
+    log::info "Starting QEMU container with UEFI boot mode (RAM_SIZE=${ram_size})"
 
     # Start QEMU container in background
     local container_name="qemu-test-${test_name}-$$"
@@ -582,7 +591,7 @@ test_qemu_boot() {
         -e BOOT="" \
         -e "KVM=N" \
         -e "CPU_CORES=$(nproc)" \
-        -e "RAM_SIZE=$(awk '/MemTotal/{printf "%d", $2 * 0.8 / 1024}' /proc/meminfo)" \
+        -e "RAM_SIZE=${ram_size}" \
         --entrypoint /bin/bash \
         --name "${container_name}" \
         ghcr.io/qemus/qemu:7.29 \
@@ -751,6 +760,8 @@ Required:
 
 Options:
     --input <path>  Use specified qcow2 image instead of downloading
+    --ram <size>    Pin QEMU guest RAM (e.g. 4G, 4096M). Defaults to 80% of
+                    host MemTotal when not given. Overridable via QEMU_RAM_SIZE.
     --help          Show this help message
 
 Examples:
@@ -790,6 +801,10 @@ main() {
                 ;;
             --input)
                 custom_input="$2"
+                shift 2
+                ;;
+            --ram)
+                QEMU_RAM_SIZE="$2"
                 shift 2
                 ;;
             --help|-h)
