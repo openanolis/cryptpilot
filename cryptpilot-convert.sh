@@ -1313,6 +1313,11 @@ uki_reassemble() {
         return 1
     fi
 
+    # Release the scratch dir and any half-written relayout on every exit path
+    # (including set -e aborts from the cp/mv/objcopy below), so a failure
+    # never leaks /tmp/cryptpilot-uki-XXXXXX across runs.
+    trap '[ -n "$dumpdir" ] && rm -rf "$dumpdir" "${uki}.relayout"' RETURN
+
     align=$(pe_header_field "$stub" SectionAlignment)
     image_base=$(pe_header_field "$stub" ImageBase)
     if [ -z "$align" ] || [ -z "$image_base" ]; then
@@ -1406,7 +1411,10 @@ uki_reassemble() {
     esac
 
     build_stub="${dumpdir}/stub.efi"
-    cp "$stub" "$build_stub"
+    if ! cp "$stub" "$build_stub"; then
+        echo "ERROR: failed to copy the efi stub $stub to $build_stub" >&2
+        return 1
+    fi
     for s in $replaced; do
         # Separate pass: removing and adding the same section name in one
         # objcopy run is ambiguous.
@@ -1422,7 +1430,10 @@ uki_reassemble() {
         echo "ERROR: failed to reassemble the UKI from the efi stub" >&2
         return 1
     fi
-    mv "${uki}.relayout" "$uki"
+    if ! mv "${uki}.relayout" "$uki"; then
+        echo "ERROR: failed to move the relayouted UKI ${uki}.relayout into place" >&2
+        return 1
+    fi
     rm -rf "$dumpdir"
 
     size_of_image=$(pe_header_field "$uki" SizeOfImage)
