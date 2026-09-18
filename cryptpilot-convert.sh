@@ -1238,6 +1238,205 @@ if [[ -f /tmp/cryptpilot/global.toml ]]; then
     dracut_common_args+=(--include /tmp/cryptpilot/global.toml /etc/cryptpilot/global.toml)
 fi
 
+# --- UKI section layout ------------------------------------------------------
+#
+# dracut 059 and older hardcode absolute section VMAs when they assemble a UKI
+# (.osrel=0x20000, .cmdline=0x30000, .linux=0x2000000, .initrd=0x3000000).
+# Those values assume the stub's ImageBase is 0. systemd >= v254 builds
+# linuxx64.efi.stub with lld, whose ImageBase is large (e.g. 0x4ff70000), and
+# objcopy writes RVA = VMA - ImageBase. The subtraction underflows and wraps
+# modulo 2^32: 0x2000000 - 0x4ff70000 == 0xb2090000. The stub's own sections
+# stay below RVA 0x1d000 while .linux/.initrd land ~2.8 GiB up, so SizeOfImage
+# grows to ~2.93 GiB for ~0.12 GiB of real data. Firmware maps that whole range
+# page by page (slow boot, memory pressure), and stricter firmware refuses the
+# image with "Load error". Disk usage and the PCR4/PCR11 values are unaffected,
+# which is what makes the bug easy to miss.
+#
+# --uki-stub-version pins a recent stub from the Arch archive, so on an image
+# with an old dracut this combination is hit every time. Neither upstream way
+# out works here: upgrading dracut or installing ukify means installing
+# packages into the rootfs, and the conversion has to leave the rootfs
+# byte-for-byte unchanged (that is why even the pinned stub is downloaded, used
+# and removed again). So reassemble the UKI here: derive the first free VMA from
+# the stub's own section table and re-add the payload sections at aligned
+# absolute VMAs (>= ImageBase). This mirrors the dynamic offset algorithm that
+# upstream dracut-ng only gained in 060; dracut 059 and older hardcode the
+# offsets and produce the hole. See dracut#2431 and systemd#28419.
+#
+# As a bonus the layout then depends only on the stub, not on the dracut
+# version inside the image, which is the layout stability --uki-stub-version is
+# after for its PCR reference values.
+#
+# Known limitations of this implementation:
+#   - Sections are matched by name, which assumes every name is unique. dracut
+#     on x86_64 never emits the repeatable .dtbauto/.efifw sections, so this
+#     holds today.
+#   - A stub-owned .sbat is treated as replaced by dracut based on its size
+#     alone.
+#   - x86_64 only (linuxx64 stub, BOOTX64.EFI), like the rest of this script.
+
+# Print one field of the PE optional header, hex, as objdump -p spells it.
+pe_header_field() {
+    objdump -p "$1" 2>/dev/null | awk -v key="$2" '$1 == key { print $2; exit }'
+}
+
+# Print "<name> <size-hex> <vma-hex>" for every section, in section table order.
+pe_sections() {
+    objdump -h "$1" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ && NF == 7 { print $2, $3, $4 }'
+}
+
+# Size of one section, hex, empty if the section is absent.
+pe_section_size() {
+    pe_sections "$1" | awk -v name="$2" '$1 == name { print $2; exit }'
+}
+
+# Round $1 up to the next multiple of $2, the way dracut does it (an already
+# aligned value still gets one full alignment of slack).
+pe_align_up() {
+    echo $(($1 + $2 - $1 % $2))
+}
+
+# Rebuild $2 (a dracut-generated UKI) on top of a pristine copy of the stub $1,
+# placing the payload sections right after the stub's own ones.
+uki_reassemble() {
+    local stub=$1
+    local uki=$2
+    local align image_base offs=0 end
+    local name size vma s
+    local stub_sections uki_sections payload="" replaced=""
+    local dumpdir build_stub dump_args=() add_args=()
+    local objcopy_help
+    local size_of_image file_size
+
+    if ! command -v objdump > /dev/null 2>&1; then
+        echo "ERROR: objdump is needed to lay out the UKI, install binutils" >&2
+        return 1
+    fi
+
+    align=$(pe_header_field "$stub" SectionAlignment)
+    image_base=$(pe_header_field "$stub" ImageBase)
+    if [ -z "$align" ] || [ -z "$image_base" ]; then
+        echo "ERROR: cannot read the PE header of the efi stub $stub" >&2
+        return 1
+    fi
+    align=$((16#$align))
+    image_base=$((16#$image_base))
+    if [ "$align" -le 0 ]; then
+        echo "ERROR: bogus SectionAlignment in the efi stub $stub" >&2
+        return 1
+    fi
+
+    # First free VMA behind the stub's own sections. objdump reports absolute
+    # VMAs, so every offset derived from it stays >= ImageBase and objcopy's
+    # RVA = VMA - ImageBase can no longer underflow.
+    while read -r name size vma; do
+        end=$((16#$size + 16#$vma))
+        if [ "$end" -gt "$offs" ]; then
+            offs=$end
+        fi
+    done < <(pe_sections "$stub")
+    if [ "$offs" -lt "$image_base" ]; then
+        offs=$image_base
+    fi
+    offs=$(pe_align_up "$offs" "$align")
+
+    # Sections to carry over from the generated UKI, in a fixed order so the
+    # result only depends on the stub. A section the stub already owns is only
+    # carried over if dracut replaced it (newer dracut merges .sbat that way).
+    stub_sections=" $(pe_sections "$stub" | awk '{ print $1 }' | tr '\n' ' ')"
+    uki_sections=" $(pe_sections "$uki" | awk '{ print $1 }' | tr '\n' ' ')"
+    for s in .osrel .cmdline .uname .splash .dtb .sbat .linux .initrd; do
+        case "$uki_sections" in
+            *" $s "*) ;;
+            *) continue ;;
+        esac
+        case "$stub_sections" in
+            *" $s "*)
+                if [ "$(pe_section_size "$uki" "$s")" = "$(pe_section_size "$stub" "$s")" ]; then
+                    continue
+                fi
+                replaced="${replaced} ${s}"
+                ;;
+        esac
+        payload="${payload} ${s}"
+    done
+    # Anything else dracut added goes last, so nothing is silently dropped.
+    for s in $uki_sections; do
+        case "$stub_sections" in
+            *" $s "*) continue ;;
+        esac
+        case " ${payload} " in
+            *" $s "*) continue ;;
+        esac
+        echo "WARNING: unexpected section $s in the generated UKI, appending it last" >&2
+        payload="${payload} ${s}"
+    done
+    if [ -z "$payload" ]; then
+        echo "ERROR: the generated UKI carries no payload section on top of $stub" >&2
+        return 1
+    fi
+
+    dumpdir=$(mktemp -d /tmp/cryptpilot-uki-XXXXXX)
+    for s in $payload; do
+        dump_args+=(--dump-section "${s}=${dumpdir}/${s}")
+    done
+    # In place, so objcopy's scratch file stays in /tmp next to the UKI.
+    if ! objcopy "${dump_args[@]}" "$uki"; then
+        rm -rf "$dumpdir"
+        echo "ERROR: failed to dump the payload sections of the generated UKI" >&2
+        return 1
+    fi
+
+    for s in $payload; do
+        size=$(stat -Lc%s "${dumpdir}/${s}")
+        if [ "$size" -le 0 ]; then
+            rm -rf "$dumpdir"
+            echo "ERROR: section $s of the generated UKI is empty" >&2
+            return 1
+        fi
+        add_args+=(--add-section "${s}=${dumpdir}/${s}" --change-section-vma "${s}=$(printf '0x%x' "$offs")")
+        offs=$(pe_align_up $((offs + size)) "$align")
+    done
+    # Keep the output ImageBase identical to the stub's, otherwise the RVAs
+    # would be computed against a different base again. Only PE-aware binutils
+    # know this option.
+    objcopy_help=$(objcopy --help 2>/dev/null || true)
+    case "$objcopy_help" in
+        *--image-base*) add_args+=(--image-base="$(printf '0x%x' "$image_base")") ;;
+    esac
+
+    build_stub="${dumpdir}/stub.efi"
+    cp "$stub" "$build_stub"
+    for s in $replaced; do
+        # Separate pass: removing and adding the same section name in one
+        # objcopy run is ambiguous.
+        if ! objcopy --remove-section "$s" "$build_stub"; then
+            rm -rf "$dumpdir"
+            echo "ERROR: failed to drop section $s from the efi stub copy" >&2
+            return 1
+        fi
+    done
+
+    if ! objcopy "${add_args[@]}" "$build_stub" "${uki}.relayout"; then
+        rm -rf "$dumpdir" "${uki}.relayout"
+        echo "ERROR: failed to reassemble the UKI from the efi stub" >&2
+        return 1
+    fi
+    mv "${uki}.relayout" "$uki"
+    rm -rf "$dumpdir"
+
+    size_of_image=$(pe_header_field "$uki" SizeOfImage)
+    size_of_image=$((16#${size_of_image:-0}))
+    file_size=$(stat -Lc%s "$uki")
+    echo "UKI sections:${payload}, SizeOfImage=${size_of_image} bytes, file size=${file_size} bytes"
+    # A sane UKI maps just a bit more than it stores. A big gap means the RVAs
+    # wrapped again, and such an image boots slowly or not at all.
+    if [ "$size_of_image" -gt $((file_size + 64 * 1024 * 1024)) ]; then
+        echo "ERROR: the UKI still has a $(((size_of_image - file_size) / 1024 / 1024)) MiB hole (SizeOfImage=${size_of_image}, file size=${file_size})" >&2
+        return 1
+    fi
+}
+
 if [ "${uki:-false}" = true ]; then
     # dracut --uefi needs the systemd UEFI stub (linuxx64.efi.stub) at
     # /usr/lib/systemd/boot/efi/ to assemble a UKI. Two sourcing modes,
@@ -1282,6 +1481,12 @@ if [ "${uki:-false}" = true ]; then
     TMP_UKI_FILE="/tmp/BOOTX64.EFI"
     FINAL_UKI_FILE="/boot/efi/EFI/BOOT/BOOTX64.EFI"
     dracut "${dracut_args[@]}" "$TMP_UKI_FILE"
+
+    # dracut may have scattered the payload sections far above the stub, see the
+    # comment at uki_reassemble. Rebuild the layout from the stub itself before
+    # touching anything else, so the following passes work on a compact image.
+    echo "Fixing UKI section layout"
+    uki_reassemble /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$TMP_UKI_FILE"
 
     echo "Patching cmdline in UKI"
     # The generated cmdline will have a leading space, remove it

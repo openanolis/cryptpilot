@@ -131,6 +131,8 @@ UKI生成使用dracut的`--uefi`参数，默认内核命令行为`console=tty0 c
 - `--uki-stub-version distro`（默认）：从发行版自身仓库安装 `systemd-boot-unsigned`。版本随发行版浮动，因此 PCR 参考值仅在发行版包不变时才稳定。
 - `--uki-stub-version <version>`：从公开的 [Arch Linux Archive](https://archive.archlinux.org/packages/s/systemd/) 下载一个钉死的 unsigned stub。取值为版本前缀，解析为最高匹配的包——`261` 选最新 `261.x`，`261.2-1` 选该精确包（完全钉死）。stub 下载后用于构建 UKI，随后删除，故转换后的镜像保持不变。解析到的精确版本与 stub 的 SHA-256 会被记录到日志，便于你验证一次后把精确值固化下来。
 
+**节区布局**：dracut 组装出 UKI 后，转换脚本会重新组装一遍，把 `.osrel`/`.cmdline`/`.linux`/`.initrd` 按对齐后的绝对 VMA 紧挨在 stub 自身节区之后。059 及更早版本的 dracut 硬编码 VMA，且假设 stub 的 `ImageBase` 为 0（上游 dracut-ng 自 060 起改为动态计算）；而 systemd v254 及以后的 stub 的 `ImageBase` 很大，这些 VMA 会回卷，把 `.linux`/`.initrd` 推到约 2.8 GiB 处：真实数据约 0.12 GiB，`SizeOfImage` 却涨到约 2.93 GiB，导致启动变慢，严格的固件还会直接报 `Load error`（见 dracut#2431 与 systemd#28419）。重新组装无需改动 rootfs 即可绕开该问题，并使布局只取决于钉死的 stub，而不再取决于镜像内的 dracut 版本。最终的 `SizeOfImage` 与文件大小会记录到日志，若仍存在空洞则转换直接失败。
+
 ### 3.3 模式对比
 
 | 特性 | GRUB模式 | UKI模式 |
