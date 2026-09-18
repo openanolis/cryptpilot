@@ -1438,6 +1438,14 @@ uki_reassemble() {
 }
 
 if [ "${uki:-false}" = true ]; then
+    # objcopy/objdump are needed to patch the cmdline and to fix the section
+    # layout below. Fail before dracut spends minutes building the UKI.
+    for tool in objcopy objdump; do
+        if ! command -v "$tool" > /dev/null 2>&1; then
+            echo "ERROR: $tool is needed to build the UKI, install binutils" >&2
+            exit 1
+        fi
+    done
     # dracut --uefi needs the systemd UEFI stub (linuxx64.efi.stub) at
     # /usr/lib/systemd/boot/efi/ to assemble a UKI. Two sourcing modes,
     # selected by uki_stub_version (the literal "distro" sentinel must match
