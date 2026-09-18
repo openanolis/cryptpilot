@@ -1358,6 +1358,11 @@ uki_reassemble() {
         case "$stub_sections" in
             *" $s "*)
                 if [ "$(pe_section_size "$uki" "$s")" = "$(pe_section_size "$stub" "$s")" ]; then
+                    # SBAT is a revocation list; flag it so operators can audit
+                    # which version is kept when both sides carry the same size.
+                    if [ "$s" = ".sbat" ]; then
+                        echo "NOTE: stub and dracut both ship .sbat with the same size; keeping the stub's, dropping dracut's" >&2
+                    fi
                     continue
                 fi
                 replaced="${replaced} ${s}"
