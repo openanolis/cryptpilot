@@ -1305,7 +1305,6 @@ uki_reassemble() {
     local name size vma s
     local stub_sections uki_sections payload="" replaced=""
     local dumpdir build_stub dump_args=() add_args=()
-    local objcopy_help
     local size_of_image file_size
 
     if ! command -v objdump > /dev/null 2>&1; then
@@ -1407,13 +1406,12 @@ uki_reassemble() {
         add_args+=(--add-section "${s}=${dumpdir}/${s}" --change-section-vma "${s}=$(printf '0x%x' "$offs")")
         offs=$(pe_align_up $((offs + size)) "$align")
     done
-    # Keep the output ImageBase identical to the stub's, otherwise the RVAs
-    # would be computed against a different base again. Only PE-aware binutils
-    # know this option.
-    objcopy_help=$(objcopy --help 2>/dev/null || true)
-    case "$objcopy_help" in
-        *--image-base*) add_args+=(--image-base="$(printf '0x%x' "$image_base")") ;;
-    esac
+    # The final objcopy copies build_stub (a byte copy of the stub) to the
+    # output, so it inherits the stub's ImageBase from the PE optional header.
+    # Pinning --image-base to the same value is a no-op (verified on binutils
+    # 2.35: outputs are byte-identical with and without it), and on binutils
+    # that lack the flag it cannot be passed at all. Rely on preservation; the
+    # post-reassembly SizeOfImage sanity check below catches any regression.
 
     build_stub="${dumpdir}/stub.efi"
     if ! cp "$stub" "$build_stub"; then
