@@ -8,8 +8,10 @@
 #   --rootfs-enc    (flag) rootfs encryption enabled
 #   --rootfs-noenc  (flag) rootfs encryption disabled
 #   --delta-location ram | disk | disk-persist
-#   --ram <size>           Pin QEMU guest RAM (e.g. 4G, 4096M). Defaults to
-#                           80% of host MemTotal. Also set via QEMU_RAM_SIZE.
+#   --boot-matrix <list>   Space-separated "cpu:ram" tokens (e.g. "2:4G 4:8G").
+#                           Reuses the converted image across the matrix. If
+#                           omitted, a single boot runs with nproc and 80% of
+#                           host MemTotal.
 #
 # Usage:
 #   ./tests/test-convert.sh --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist>
@@ -347,6 +349,9 @@ run_convert() {
 
     if [[ "${use_uki}" == "true" ]]; then
         cmd+=("--uki")
+        if [[ -n "${UKI_STUB_VERSION:-}" ]]; then
+            cmd+=("--uki-stub-version" "${UKI_STUB_VERSION}")
+        fi
     fi
 
     if [[ "${use_encryption}" == "true" ]]; then
@@ -552,8 +557,15 @@ ensure_docker_runtime() {
 test_qemu_boot() {
     local test_name="$1"
     local output_image="$2"
+    local cpu_cores="${3:-$(nproc)}"
+    # Pin guest RAM via the 4th arg (matrix loop) or fall back to 80% of host
+    # MemTotal (read from /proc/meminfo of this privileged runtime container,
+    # which reflects the CI runner's physical memory). A low value (e.g. 4G)
+    # surfaces the UKI "SizeOfImage hole" class of regressions, since UEFI
+    # LoadImage() must allocate SizeOfImage bytes of contiguous memory up front.
+    local ram_size="${4:-$(awk '/MemTotal/{printf "%d", $2 * 0.8 / 1024}' /proc/meminfo)}"
 
-    log::step "Testing QEMU boot for: ${test_name}"
+    log::step "Testing QEMU boot for: ${test_name} (cpu=${cpu_cores}, ram=${ram_size})"
 
     # Alinux 4 ships real Docker (not podman-docker) and the test container
     # has no init system, so dockerd must be started explicitly. No-op on
@@ -562,19 +574,11 @@ test_qemu_boot() {
         return 1
     fi
 
-    local boot_log="${WORKDIR}/${test_name}-boot.log"
-
-    # Pin guest RAM when --ram / QEMU_RAM_SIZE is given; otherwise fall back to
-    # 80% of host MemTotal (read from /proc/meminfo of this privileged runtime
-    # container, which reflects the CI runner's physical memory). Pinning a
-    # low value (e.g. 4G) is what surfaces the UKI "SizeOfImage hole" class of
-    # regressions, since UEFI LoadImage() must allocate SizeOfImage bytes of
-    # contiguous memory up front.
-    local ram_size="${QEMU_RAM_SIZE:-$(awk '/MemTotal/{printf "%d", $2 * 0.8 / 1024}' /proc/meminfo)}"
-    log::info "Starting QEMU container with UEFI boot mode (RAM_SIZE=${ram_size})"
+    local boot_log="${WORKDIR}/${test_name}-cpu${cpu_cores}-ram${ram_size}-boot.log"
+    log::info "Starting QEMU container with UEFI boot mode (CPU_CORES=${cpu_cores}, RAM_SIZE=${ram_size})"
 
     # Start QEMU container in background
-    local container_name="qemu-test-${test_name}-$$"
+    local container_name="qemu-test-${test_name}-cpu${cpu_cores}-ram${ram_size}-$$"
     # When we launched dockerd ourselves (Alinux 4), it runs with no bridge, so
     # containers get no eth0 and the qemus entrypoint aborts asking for
     # VM_NET_DEV. Use the host network namespace so qemus can find an
@@ -590,7 +594,7 @@ test_qemu_boot() {
         -e "IMAGE=${output_image}" \
         -e BOOT="" \
         -e "KVM=N" \
-        -e "CPU_CORES=$(nproc)" \
+        -e "CPU_CORES=${cpu_cores}" \
         -e "RAM_SIZE=${ram_size}" \
         --entrypoint /bin/bash \
         --name "${container_name}" \
@@ -606,7 +610,7 @@ test_qemu_boot() {
     log::info "QEMU container started: ${container_name}"
 
     # Stream logs to file and check for boot status
-    local timeout=360  # 6 minutes timeout
+    local timeout=540  # 9 minutes; TCG under GitHub runner contention can push a 2-min boot well past 6.
     local elapsed=0
     local check_interval=2
     local boot_success=false
@@ -645,6 +649,16 @@ test_qemu_boot() {
             log::error "Kernel panic detected - boot failed!"
             break
         fi
+
+        # Check for UEFI StartImage failure: OVMF loaded the UKI but
+        # StartImage returned "Load Error" (e.g. stub/kernel handover
+        # incompatibility), then dropped to the EFI shell. This fails in
+        # seconds; without this marker the loop would wait the full timeout.
+        if grep -q -i "failed to start Boot.*: Load Error" "${boot_log}" 2>/dev/null || \
+           grep -q -i "UEFI Interactive Shell" "${boot_log}" 2>/dev/null; then
+            log::error "UEFI StartImage failed (Load Error / EFI shell) - boot failed!"
+            break
+        fi
     done
 
     # Stop log capture (kill the docker logs process)
@@ -668,7 +682,54 @@ test_qemu_boot() {
         fi
         log::error "QEMU boot test failed for: ${test_name}"
         return 1
-    fi 
+    fi
+}
+
+# Boot the already-converted image across a vCPU/RAM matrix, reusing the
+# single output.qcow2 (each boot layers a fresh COW on the read-only base),
+# so the expensive convert runs once and only the cheap boot is repeated.
+# Matrix entries are "cpu:ram" tokens (ram is a QEMU size, e.g. 4G or 16384M).
+# Set via the --boot-matrix option. When empty, a single boot runs with the
+# host's nproc and 80% of MemTotal (the original auto behavior).
+test_qemu_boot_matrix() {
+    local test_name="$1"
+    local output_image="$2"
+    local matrix="${BOOT_MATRIX:-}"
+
+    # No matrix given: single boot, auto cpu/ram (original behavior).
+    if [[ -z "$matrix" ]]; then
+        test_qemu_boot "$test_name" "$output_image"
+        return $?
+    fi
+
+    local combo cpu ram
+    for combo in $matrix; do
+        cpu="${combo%%:*}"
+        ram="${combo##*:}"
+        if [[ -z "$cpu" || -z "$ram" || "$combo" != *:* ]]; then
+            log::error "Invalid boot matrix entry '${combo}' (expected cpu:ram, e.g. 2:4G)"
+            return 1
+        fi
+        # NOTE: 16G guest RAM needs a runner with >=16G physical RAM; on a
+        # 16G runner it sits at the OOM edge and may fail flakily.
+        log::step "Boot matrix entry: cpu=${cpu}, ram=${ram}"
+        # Retry once per combo: TCG on contended GitHub runners makes the
+        # occasional boot exceed the timeout even though the image is fine,
+        # and a retry usually clears it.
+        local attempt
+        for attempt in 1 2; do
+            if test_qemu_boot "$test_name" "$output_image" "$cpu" "$ram"; then
+                break
+            fi
+            if [[ "$attempt" -eq 1 ]]; then
+                log::warn "Boot combo cpu=${cpu}, ram=${ram} failed (attempt 1/2), retrying..."
+                continue
+            fi
+            log::error "Boot matrix failed at cpu=${cpu}, ram=${ram} for: ${test_name}"
+            return 1
+        done
+    done
+    return 0
 }
 
 
@@ -728,8 +789,10 @@ run_test_case() {
         return 1
     fi
 
-    # Test QEMU boot
-    if ! test_qemu_boot "${test_name}" "${output_image}"; then
+    # Test QEMU boot across the vCPU/RAM matrix. The converted image is reused
+    # (each boot layers a fresh COW on the read-only base), so the expensive
+    # convert runs once.
+    if ! test_qemu_boot_matrix "${test_name}" "${output_image}"; then
         return 1
     fi
 
@@ -759,10 +822,15 @@ Required:
     --delta-location <value>  Delta partition location: ram | disk | disk-persist
 
 Options:
-    --input <path>  Use specified qcow2 image instead of downloading
-    --ram <size>    Pin QEMU guest RAM (e.g. 4G, 4096M). Defaults to 80% of
-                    host MemTotal when not given. Overridable via QEMU_RAM_SIZE.
-    --help          Show this help message
+    --input <path>   Use specified qcow2 image instead of downloading
+    --boot-matrix <list>  Space-separated "cpu:ram" tokens to boot the converted
+                     image with, e.g. "2:4G 4:8G 8:16G 12:16G 16:16G". The
+                     converted image is reused across the matrix. When omitted,
+                     a single boot runs with the host's nproc and 80% of MemTotal.
+    --uki-stub-version <ver>  Pin the systemd UEFI stub version (e.g. 258) used
+                     to assemble the UKI. Only meaningful with --bootloader uki.
+                     When omitted, the distro stub is used.
+    --help           Show this help message
 
 Examples:
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location ram
@@ -803,8 +871,12 @@ main() {
                 custom_input="$2"
                 shift 2
                 ;;
-            --ram)
-                QEMU_RAM_SIZE="$2"
+            --boot-matrix)
+                BOOT_MATRIX="$2"
+                shift 2
+                ;;
+            --uki-stub-version)
+                UKI_STUB_VERSION="$2"
                 shift 2
                 ;;
             --help|-h)
@@ -831,6 +903,11 @@ main() {
     if [[ "${bootloader}" != "uki" && "${bootloader}" != "grub" ]]; then
         show_help
         fatal "Invalid or missing --bootloader: must be 'uki' or 'grub'"
+    fi
+
+    # --uki-stub-version only matters for UKI builds.
+    if [[ -n "${UKI_STUB_VERSION:-}" && "${bootloader}" != "uki" ]]; then
+        fatal "--uki-stub-version is only meaningful with --bootloader uki"
     fi
 
     # Validate --rootfs-enc / --rootfs-noenc
