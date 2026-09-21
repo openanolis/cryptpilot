@@ -1296,6 +1296,93 @@ pe_align_up() {
     echo $(($1 + $2 - $1 % $2))
 }
 
+# Patch a Linux kernel bzImage's PE/COFF OptionalHeader.ImageBase to 0, in
+# place. systemd's UKI stub (linuxx64.efi.stub) >= 258 and < 260 computes each
+# inner kernel section's load offset as (section.VirtualAddress - ImageBase)
+# and rejects the image when that underflows, printing
+# "Section would write outside of memory" (systemd src/boot/linux.c, issue
+# #40342). Kernels v5.7..v6.6 are built with ImageBase = CONFIG_PHYSICAL_START
+# (default 0x1000000) while their section RVAs (~0x4000) are below it, so a
+# pinned 258/259 stub cannot boot them (e.g. alinux3 5.10); systemd fixed it in
+# >= 260 (PR #40429) and mainline kernel reverted to ImageBase=0 in v6.7.
+#
+# Setting ImageBase to 0 makes the buggy stub's math yield the correct RVA. It
+# is safe per the PE spec: ImageBase is the *preferred* load address, not used
+# by the position-independent kernel at runtime (the stub loads it into its own
+# base-0 buffer regardless). Caveat: changes the kernel hash -> re-sign and
+# re-measure. No-op (returns 0) if the file is not a valid PE kernel or
+# ImageBase is already 0; returns 1 only if it looks like a PE but cannot be
+# patched (truncated headers, unknown optional-header magic, write/verify
+# failure).
+patch_kernel_image_base_zero() {
+    local file=$1
+    [ -n "${file:-}" ] || { echo 'ERROR: patch_kernel_image_base_zero: no file given' >&2; return 1; }
+    [ -f "$file" ] || { echo "ERROR: kernel file not found: $file" >&2; return 1; }
+    command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 required to patch kernel ImageBase; cannot patch ${file##*/}" >&2; return 1; }
+
+    python3 - "$file" <<'PYEOF'
+import sys, struct, os
+path = sys.argv[1]
+name = os.path.basename(path)
+
+def note(m): print('NOTE: %s: %s' % (name, m))
+def err(m):  print('ERROR: %s: %s' % (name, m), file=sys.stderr)
+
+try:
+    size = os.path.getsize(path)
+    if size < 0x40:
+        note('too small to be a PE kernel; skip ImageBase patch')
+        sys.exit(0)
+    with open(path, 'r+b') as f:
+        head = f.read(min(size, 4096))
+        if head[0:2] != b'MZ':
+            note('no MZ DOS magic; skip ImageBase patch')
+            sys.exit(0)
+        if len(head) < 0x40:
+            err('truncated DOS header; cannot patch ImageBase')
+            sys.exit(1)
+        e_lfanew = struct.unpack_from('<I', head, 0x3c)[0]
+        if e_lfanew + 24 > len(head) or head[e_lfanew:e_lfanew+4] != b'PE\x00\x00':
+            err('bad PE signature; cannot patch ImageBase')
+            sys.exit(1)
+        opt_off = e_lfanew + 4 + 20
+        if opt_off + 28 > len(head):
+            err('truncated PE optional header; cannot patch ImageBase')
+            sys.exit(1)
+        magic = struct.unpack_from('<H', head, opt_off)[0]
+        if magic == 0x20b:
+            ib_off, fmt, w = opt_off + 24, '<Q', 8
+        elif magic == 0x10b:
+            ib_off, fmt, w = opt_off + 28, '<I', 4
+        else:
+            err('unknown PE optional-header magic 0x%x; cannot patch ImageBase' % magic)
+            sys.exit(1)
+        if ib_off + w > len(head):
+            err('truncated PE headers; cannot patch ImageBase')
+            sys.exit(1)
+        cur = struct.unpack_from(fmt, head, ib_off)[0]
+        if cur == 0:
+            note('ImageBase already 0; no patch needed')
+            sys.exit(0)
+        f.seek(ib_off)
+        f.write(struct.pack(fmt, 0))
+        f.flush()
+        os.fsync(f.fileno())
+        f.seek(ib_off)
+        chk = struct.unpack_from(fmt, f.read(w), 0)[0]
+        if chk != 0:
+            err('ImageBase patch verify failed (still 0x%x)' % chk)
+            sys.exit(1)
+        print('PATCHED %s: PE ImageBase 0x%x -> 0x0 (file offset 0x%x, %d bytes)' % (name, cur, ib_off, w))
+        sys.exit(0)
+except SystemExit:
+    raise
+except Exception as e:
+    err('ImageBase patch failed: %s' % e)
+    sys.exit(1)
+PYEOF
+}
+
 # Rebuild $2 (a dracut-generated UKI) on top of a pristine copy of the stub $1,
 # placing the payload sections right after the stub's own ones.
 uki_reassemble() {
@@ -1509,6 +1596,26 @@ if [ "${uki:-false}" = true ]; then
     # touching anything else, so the following passes work on a compact image.
     echo "Fixing UKI section layout"
     uki_reassemble /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$TMP_UKI_FILE"
+
+    # Workaround for systemd stub 258/259 + kernels whose PE ImageBase is
+    # non-zero (v5.7..v6.6, e.g. alinux3 5.10): the stub rejects them with
+    # "Section would write outside of memory" (systemd #40342, fixed in >= 260
+    # by PR #40429). Patch ONLY the kernel embedded in the UKI's .linux section
+    # to ImageBase=0 (objcopy dump/update-section, mirroring the cmdline patch
+    # below); /boot/vmlinuz is never touched. No-op if ImageBase is already 0
+    # (>= v6.7 kernels / alinux4). Only for pinned stubs in the buggy range.
+    if [ "${uki:-false}" = true ] && [ "${uki_stub_version:-distro}" != "distro" ]; then
+        _stub_major=""
+        case "${uki_stub_version}" in
+            [0-9]*) _stub_major=${uki_stub_version%%[!0-9]*} ;;
+        esac
+        if [ -n "${_stub_major}" ] && [ "${_stub_major}" -lt 260 ]; then
+            objcopy --dump-section .linux="/tmp/.linux.bin" "$TMP_UKI_FILE"
+            patch_kernel_image_base_zero /tmp/.linux.bin || \
+                echo "WARNING: kernel ImageBase patch failed (boot may fail with 'Load Error' on stub < 260)" >&2
+            objcopy --update-section .linux="/tmp/.linux.bin" "$TMP_UKI_FILE"
+        fi
+    fi
 
     echo "Patching cmdline in UKI"
     # The generated cmdline will have a leading space, remove it
