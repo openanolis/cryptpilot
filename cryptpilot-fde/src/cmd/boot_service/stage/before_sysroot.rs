@@ -614,3 +614,113 @@ async fn resize_ext4_filesystem(device: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IMAGE_SIZE: u64 = 64 * 1024 * 1024;
+    const SENTINEL: &[u8] = b"persistent rootfs data\n";
+
+    async fn debugfs(image: &Path, command: &str) -> Result<Vec<u8>> {
+        Command::new("debugfs")
+            .args(["-w", "-R", command])
+            .arg(image)
+            .run()
+            .await
+    }
+
+    async fn ext4_image() -> Result<(tempfile::TempDir, PathBuf)> {
+        let dir = tempfile::tempdir()?;
+        let image = dir.path().join("ext4.img");
+        File::create(&image).await?.set_len(IMAGE_SIZE).await?;
+        Command::new("mkfs.ext4")
+            .args(["-q", "-F", "-b", "4096"])
+            .arg(&image)
+            .run()
+            .await?;
+        let data = dir.path().join("data");
+        tokio::fs::write(&data, SENTINEL).await?;
+        debugfs(&image, &format!("write {} sentinel", data.display())).await?;
+        Ok((dir, image))
+    }
+
+    async fn assert_sentinel(image: &Path) -> Result<()> {
+        assert_eq!(debugfs(image, "cat /sentinel").await?, SENTINEL);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_resize_clean_ext4_checked_before_last_mount() -> Result<()> {
+        let (_dir, image) = ext4_image().await?;
+        // Both timestamps are in the past; a clean state alone does not satisfy
+        // resize2fs's requirement to check the filesystem after its last mount.
+        debugfs(&image, "set_super_value lastcheck @1000000000").await?;
+        debugfs(&image, "set_super_value mtime @1000000060").await?;
+        Command::new("tune2fs")
+            .args(["-O", "read-only"])
+            .arg(&image)
+            .run()
+            .await?;
+
+        resize_ext4_filesystem(&image).await?;
+        assert_sentinel(&image).await?;
+        // Rechecking a filesystem that already fills its device must also work.
+        resize_ext4_filesystem(&image).await?;
+        assert_sentinel(&image).await
+    }
+
+    #[tokio::test]
+    async fn test_resize_ext4_after_repair_and_device_growth() -> Result<()> {
+        let (_dir, image) = ext4_image().await?;
+        // A wrong free-block count is safely repaired by preen (exit status 1).
+        debugfs(&image, "set_super_value free_blocks_count 0").await?;
+        tokio::fs::OpenOptions::new()
+            .write(true)
+            .open(&image)
+            .await?
+            .set_len(IMAGE_SIZE * 2)
+            .await?;
+
+        resize_ext4_filesystem(&image).await?;
+        assert_sentinel(&image).await?;
+        let stats = debugfs(&image, "stats").await?;
+        let stats = String::from_utf8(stats)?;
+        let count = stats
+            .lines()
+            .find_map(|line| line.strip_prefix("Block count:"))
+            .context("Missing ext4 block count")?
+            .trim()
+            .parse::<u64>()?;
+        assert_eq!(count * 4096, IMAGE_SIZE * 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_resize_ext4_stops_on_uncorrected_errors() -> Result<()> {
+        let (dir, image) = ext4_image().await?;
+        debugfs(
+            &image,
+            &format!("write {} duplicate", dir.path().join("data").display()),
+        )
+        .await?;
+        let blocks = debugfs(&image, "blocks /sentinel").await?;
+        let block = String::from_utf8(blocks)?
+            .split_whitespace()
+            .next()
+            .context("Missing sentinel data block")?
+            .parse::<u64>()?;
+        // Duplicate data blocks require intervention; preen must not let the
+        // offline resize proceed with this inconsistent filesystem.
+        debugfs(
+            &image,
+            &format!("set_inode_field /duplicate block[0] {block}"),
+        )
+        .await?;
+
+        let error = resize_ext4_filesystem(&image).await.unwrap_err();
+        let error = format!("{error:#}");
+        assert!(error.contains("Failed to check ext4 filesystem"), "{error}");
+        assert!(error.contains("exit code: 4"), "{error}");
+        assert_sentinel(&image).await
+    }
+}
