@@ -167,6 +167,8 @@ The service first checks whether the disk where the LVM physical volume resides 
 
 Delta volume initialization is also completed at this stage. The service checks whether the delta logical volume exists, creating it if it does not and occupying all remaining space in the volume group. If the delta volume already exists, it is expanded to the remaining space in the volume group.
 
+Before resizing an ext4 filesystem, the service clears its read-only feature and runs `e2fsck -f -p` on the unmounted writable device. Only exit statuses 0 (clean) and 1 (errors corrected) permit resizing; other statuses stop boot. This forced check also runs when the filesystem is clean or its size has not changed, and can increase boot time for large filesystems.
+
 **Delta Volume Decryption Flow**:
 
 ```text

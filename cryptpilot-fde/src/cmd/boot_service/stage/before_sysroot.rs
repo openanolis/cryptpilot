@@ -587,6 +587,21 @@ async fn resize_ext4_filesystem(device: &Path) -> Result<()> {
             device.display()
         ))?;
 
+    // Offline resize requires a check after the last mount, even on a clean
+    // filesystem. This must happen here, before the initrd mounts the device.
+    Command::new("e2fsck")
+        .args(["-f", "-p"])
+        .arg(device)
+        .run_with_status_checker(|code, _, _| match code {
+            0 | 1 => Ok(()), // Clean, or errors corrected without requiring a reboot.
+            _ => bail!("Filesystem check failed with exit code {code}"),
+        })
+        .await
+        .context(format!(
+            "Failed to check ext4 filesystem on {} before resizing",
+            device.display()
+        ))?;
+
     Command::new("resize2fs")
         .arg(device)
         .run()
@@ -598,3 +613,4 @@ async fn resize_ext4_filesystem(device: &Path) -> Result<()> {
     tracing::info!("ext4 filesystem resized successfully");
     Ok(())
 }
+
