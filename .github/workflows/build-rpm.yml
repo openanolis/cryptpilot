@@ -332,6 +332,134 @@ jobs:
           docker rm -f test-container || true
           rm -rf ${{ github.workspace }}/test-images
 
+  # Regression coverage for issues #140 / #141 on disk-persist + stable-key
+  # (the combinations the 24-job test-convert matrix does NOT exercise, since
+  # it uses the otp key provider which recreates the delta every boot).
+  #   fsck-141: disk-persist + integrity=true  -> first-boot dm-snapshot
+  #             creation must succeed (COW header fully initialized through
+  #             the authenticated mapping).
+  #   fsck-140: disk-persist + integrity=false -> boot, then RE-boot the same
+  #             persistent overlay; both boots must reach login (offline
+  #             resize2fs must not refuse a clean fs with s_lastcheck<mtime).
+  # UKI only (both bugs fire in the dracut FDE service, bootloader-agnostic).
+  # +4 jobs: 2 distros x 2 scenarios.
+  test-convert-persist:
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - name: alinux3
+            test_image_tag: "alinux3-20251030"
+            runtime_image: "alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest"
+          - name: alinux4
+            test_image_tag: "alinux4-20260710"
+            runtime_image: "alibaba-cloud-linux-4-registry.cn-hangzhou.cr.aliyuncs.com/alinux4/alinux4:latest"
+        scenario: [fsck-140, fsck-141]
+        include:
+          - scenario: fsck-140
+            delta_key: stable
+            integrity: "false"
+            second_boot: "true"
+          - scenario: fsck-141
+            delta_key: stable
+            integrity: "true"
+            second_boot: ""
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      TEST_IMAGE_TAG: ${{ matrix.distro.test_image_tag }}
+      RUNTIME_IMAGE: ${{ matrix.distro.runtime_image }}
+    steps:
+      - name: Load NBD kernel module
+        run: |
+          echo "Loading nbd module on host..."
+          sudo modprobe nbd max_part=16
+          lsmod | grep nbd
+
+      - name: Pull test image from ghcr.io
+        run: |
+          TEST_IMAGE="ghcr.io/${{ github.repository_owner }}/cryptpilot-fde-test-image:${{ env.TEST_IMAGE_TAG }}"
+          docker pull "$TEST_IMAGE"
+          echo "TEST_IMAGE=$TEST_IMAGE" >> $GITHUB_ENV
+
+      - name: Extract qcow2 image from container
+        run: |
+          mkdir -p ${{ github.workspace }}/test-images
+          docker create --name temp-extract-persist ${{ env.TEST_IMAGE }} /bin/true
+          docker cp temp-extract-persist:/image.qcow2 ${{ github.workspace }}/test-images/test-image.qcow2
+          docker rm temp-extract-persist
+          ls -lh ${{ github.workspace }}/test-images/test-image.qcow2
+          docker rmi "$TEST_IMAGE" || true
+
+      - name: Check available disk and memory
+        run: df -h && echo "---" && free -h
+
+      - name: Start test container
+        run: |
+          docker run -d \
+            --name test-container-persist \
+            --privileged \
+            --ipc=host \
+            -v /dev:/dev \
+            -v /run/udev/control:/run/udev/control \
+            -v ${{ github.workspace }}:/workspace \
+            ${{ env.RUNTIME_IMAGE }} \
+            sleep infinity
+
+      - name: Setup container environment
+        run: |
+          docker exec test-container-persist bash -c "
+            set -e
+            sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+            yum update -y
+            yum install -y git make zstd
+          "
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: build-output-x86_64
+          path: ./rpm-packages/
+          merge-multiple: false
+
+      - name: Install RPM packages
+        id: install-rpm
+        run: |
+          HOST_RPM_PATH=$(ls ./rpm-packages/RPMS/*/cryptpilot-fde-host-[0-9]*.rpm | head -1)
+          HOST_RPM_PATH_IN_CONTAINER="/workspace/${HOST_RPM_PATH#./}"
+          docker exec test-container-persist bash -c "
+            yum install -y ${HOST_RPM_PATH_IN_CONTAINER}
+            cryptpilot-fde-host --version
+          "
+          GUEST_RPM_PATH=$(ls ./rpm-packages/RPMS/*/cryptpilot-fde-guest-[0-9]*.rpm | head -1)
+          GUEST_RPM_PATH_IN_CONTAINER="/workspace/${GUEST_RPM_PATH#./}"
+          echo "cryptpilot_fde_rpm=${GUEST_RPM_PATH}" >> $GITHUB_OUTPUT
+          echo "cryptpilot_fde_rpm_container=${GUEST_RPM_PATH_IN_CONTAINER}" >> $GITHUB_OUTPUT
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          path: repo
+
+      - name: Run convert persist regression test
+        run: |
+          docker exec -w /workspace/repo test-container-persist bash -c "
+            make run-convert-test-case BOOTLOADER=uki ROOTFS_ENC=enc DELTA_LOCATION=disk-persist DELTA_KEY=${{ matrix.delta_key }} INTEGRITY=${{ matrix.integrity }} SECOND_BOOT=${{ matrix.second_boot }} INPUT_IMAGE=/workspace/test-images/test-image.qcow2 CRYPTPILOT_FDE_RPM=${{ steps.install-rpm.outputs.cryptpilot_fde_rpm_container }}
+          "
+
+      - name: Print convert diagnostic log
+        if: always()
+        run: |
+          echo "=== /tmp/.cryptpilot-convert.log (from test-container-persist) ==="
+          docker exec test-container-persist cat /tmp/.cryptpilot-convert.log 2>/dev/null || echo "(log file not available)"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f test-container-persist || true
+          rm -rf ${{ github.workspace }}/test-images
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
     needs:
