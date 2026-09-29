@@ -159,6 +159,41 @@ disk::nbd_available() {
     [[ $(blockdev --getsize64 "$1") == 0 ]]
 }
 
+# Disconnect an NBD device and wait for the image lock to actually be
+# released, so a subsequent qemu-img convert does not race on the OFD write
+# lock ("Failed to get shared write lock").
+#
+# qemu-nbd --disconnect returns before the nbd daemon finishes exiting and
+# releasing the write lock it holds on the backing image. blockdev
+# --getsize64 is NOT a reliable signal here: the device reports size 0 while
+# the daemon still holds the file lock, so polling it exits immediately and
+# the race is back. Instead, poll lsof on the image file: once no process
+# holds it open, the daemon has exited and the lock is gone. Bounded by
+# interval + max attempts so we never block forever.
+disk::nbd_disconnect_and_wait() {
+    local device="$1"
+    local image="${2:-}"
+    local max_attempts="${3:-30}"
+    local interval="${4:-1}"
+    local i
+
+    qemu-nbd --disconnect "${device}" >/dev/null 2>&1 || true
+
+    # No image to probe (e.g. operate-on-device path); fall back to a bounded
+    # wait on the device itself.
+    [[ -n "${image}" ]] || return 0
+
+    for ((i = 0; i < max_attempts; i++)); do
+        if ! lsof -t "${image}" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep "${interval}"
+    done
+
+    log::warn "Image ${image} still in use after ${max_attempts} attempts; proceeding anyway"
+    return 0
+}
+
 disk::get_available_nbd() {
     { lsmod | grep nbd >/dev/null; } || modprobe nbd max_part=8
     # If run in container, use following instead
@@ -2180,8 +2215,7 @@ main() {
         # 11. Generating new image file
         #
         log::step "[ 11 ] Generating new image file"
-        qemu-nbd --disconnect "${device}"
-        sleep 2 # wait for the qemu-nbd daemon to release the file lock
+        disk::nbd_disconnect_and_wait "${device}" "${work_file}"
 
         # check suffix of the output file
         local output_file_suffix=${output_file##*.}
