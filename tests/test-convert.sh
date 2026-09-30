@@ -43,6 +43,27 @@ SOURCE_IMAGE=""
 # Path to cryptpilot-fde-guest RPM package (required)
 CRYPTPILOT_FDE_RPM=""
 
+# Delta key provider for the test config: "otp" (default, recreates the delta
+# every boot — preserves the original CI behavior) or "stable" (exec provider
+# with the same passphrase as rootfs, so the delta persists across reboots;
+# required to exercise disk-persist second-boot regressions like issue #140).
+DELTA_KEY="otp"
+
+# Whether the delta uses dm-integrity (true/false). Default false preserves the
+# original behavior; true exercises the integrity AEAD path (issue #141).
+INTEGRITY="false"
+
+# When "true" and delta_location=disk-persist, run a SECOND boot of the same
+# persistent overlay after the first boot reaches the login prompt. This
+# catches regressions that only surface on the second boot (issue #140: the
+# first boot mounts the rootfs read-write, updating s_mtime past s_lastcheck;
+# the next boot's offline resize2fs then refuses with "Please run e2fsck -f").
+SECOND_BOOT="false"
+
+# When "true", skip the cryptpilot-enhance step (handy for fast local repro;
+# the FDE boot-service bugs under test are independent of image hardening).
+SKIP_ENHANCE="false"
+
 # Script directory (where this script is located)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -262,14 +283,26 @@ download_test_image() {
     fatal "Failed to download test image after $max_retries attempts"
 }
 
-# Create test configuration directory with OTP provider
+# Create test configuration directory. delta_key controls the delta key
+# provider ("otp" recreates the delta every boot; "stable" uses an exec
+# provider with the same passphrase as rootfs so the delta persists across
+# reboots — required for disk-persist second-boot regression tests).
 create_test_config() {
     local config_dir="$1"
     local use_encryption="$2"
     local delta_location="$3"
+    local delta_key="${4:-otp}"
+    local integrity="${5:-false}"
     mkdir -p "${config_dir}"
 
-    # Create fde.toml with OTP provider (simplest, no external dependencies)
+    # Delta key provider block.
+    local delta_encrypt_block
+    if [[ "${delta_key}" == "stable" ]]; then
+        delta_encrypt_block=$(printf '[delta.encrypt.exec]\ncommand = "echo"\nargs = ["-n", "%s"]' "${TEST_PASSPHRASE}")
+    else
+        delta_encrypt_block='[delta.encrypt.otp]'
+    fi
+
     if [[ "${use_encryption}" == "true" ]]; then
         cat > "${config_dir}/fde.toml" <<EOF
 # Test configuration for cryptpilot-convert integration tests
@@ -281,9 +314,9 @@ command = "echo"
 args = ["-n", "${TEST_PASSPHRASE}"]
 
 [delta]
-integrity = false
+integrity = ${integrity}
 
-[delta.encrypt.otp]
+${delta_encrypt_block}
 EOF
     else
         cat > "${config_dir}/fde.toml" <<EOF
@@ -292,13 +325,13 @@ EOF
 delta_location = "${delta_location}"
 
 [delta]
-integrity = false
+integrity = ${integrity}
 
-[delta.encrypt.otp]
+${delta_encrypt_block}
 EOF
     fi
 
-    log::info "Created test config at: ${config_dir}/fde.toml"
+    log::info "Created test config at: ${config_dir}/fde.toml (delta_key=${delta_key}, integrity=${integrity})"
 }
 
 # ============================================================================
@@ -685,6 +718,112 @@ test_qemu_boot() {
     fi
 }
 
+# Boot an already-converted image once with a direct qemu invocation (TCG,
+# UEFI) inside the qemus container. Bypasses the qemus entrypoint so the SAME
+# image (and its persistent disk-persist delta) can be booted twice — needed
+# for issue #140, whose second-boot failure requires the first boot's writes
+# to persist in the same qcow2 overlay.
+#
+# Uses if=virtio + OVMF_CODE_4M.fd / a writable copy of OVMF_VARS_4M.fd.
+# Returns 0 if the login prompt appears, 1 on emergency/panic/timeout.
+# Writes the serial log to ${WORKDIR}/${test_name}-direct-boot.log.
+test_qemu_boot_direct() {
+    local test_name="$1"
+    local image="$2"
+    local cpu_cores="${3:-4}"
+    local ram_size="${4:-4G}"
+
+    local boot_log="${WORKDIR}/${test_name}-direct-boot.log"
+    local image_bn; image_bn=$(basename "${image}")
+    local container_name="qemu-direct-${test_name}-$$"
+
+    log::step "Direct QEMU boot for: ${test_name} (cpu=${cpu_cores}, ram=${ram_size}, image=${image_bn})"
+
+    docker rm -f "${container_name}" 2>/dev/null || true
+    docker run -d --rm --privileged \
+        -v "$(dirname "${image}"):/diskdir:rw" \
+        --name "${container_name}" --entrypoint /bin/bash \
+        "ghcr.io/qemus/qemu:7.29" -c '
+set -e
+cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/vars.fd
+exec qemu-system-x86_64 \
+  -accel tcg -cpu max -smp '"${cpu_cores}"' -m '"${ram_size}"' \
+  -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+  -drive if=pflash,format=raw,file=/tmp/vars.fd \
+  -drive file=/diskdir/'"${image_bn}"',format=qcow2,if=virtio \
+  -nographic -serial mon:stdio -no-reboot
+' > /dev/null 2>&1
+
+    docker logs -f "${container_name}" > "${boot_log}" 2>&1 &
+    local log_pid=$!
+
+    local timeout=540 elapsed=0 boot_success=false
+    while [[ $elapsed -lt $timeout ]]; do
+        sleep 5; elapsed=$((elapsed+5))
+        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+            log::success "Login prompt detected - boot successful!"
+            boot_success=true
+            break
+        fi
+        if grep -qi "Emergency Mode\|emergency shell\|Kernel panic\|Failed to setup volumes required by FDE\|Failed to create dm-snapshot\|INTEGRITY AEAD ERROR\|Please run 'e2fsck\|Failed to resize ext4\|Failed to start Cryptpilot FDE" "${boot_log}" 2>/dev/null; then
+            log::error "Boot failure detected - boot failed!"
+            break
+        fi
+        docker ps -q --filter "name=${container_name}" | grep -q . || { log::error "QEMU container exited unexpectedly"; break; }
+    done
+
+    kill "${log_pid}" 2>/dev/null || true
+    wait "${log_pid}" 2>/dev/null || true
+    docker rm -f "${container_name}" >/dev/null 2>&1 || true
+
+    log::info "Full direct boot log:"
+    cat "${boot_log}" || true
+
+    if [[ "${boot_success}" == "true" ]]; then
+        log::success "Direct QEMU boot test passed for: ${test_name}"
+        return 0
+    fi
+    log::error "Direct QEMU boot test failed for: ${test_name}"
+    return 1
+}
+
+# Issue #140 regression: a disk-persist + stable-key + integrity=false image
+# must boot, then RE-boot the same persistent overlay and still boot. On
+# unfixed code the first boot updates s_mtime past s_lastcheck; the second
+# boot's offline resize2fs rejects it ("Please run e2fsck -f") -> emergency.
+# A persistent qcow2 overlay (relative backing filename, so qemu resolves it
+# inside the container) carries the first boot's writes into the second boot.
+test_qemu_boot_persist_second() {
+    local test_name="$1"
+    local output_image="$2"
+    local cpu_cores="${3:-4}"
+    local ram_size="${4:-4G}"
+
+    local overlay="${WORKDIR}/${test_name}-persist-overlay.qcow2"
+    local overlay_bn; overlay_bn=$(basename "${overlay}")
+    rm -f "${overlay}"
+    # Relative backing filename so the path resolves inside the container
+    # (host workdir <-> container /diskdir share the same directory).
+    ( cd "$(dirname "${overlay}")" \
+        && qemu-img create -f qcow2 -F qcow2 -b "$(basename "${output_image}")" "${overlay_bn}" >/dev/null )
+
+    log::step "Persist two-boot test for: ${test_name}"
+    log::info "Boot #1 (expect success; fs mounted RW updates s_mtime via the persistent delta)"
+    if ! test_qemu_boot_direct "${test_name}-b1" "${overlay}" "${cpu_cores}" "${ram_size}"; then
+        log::error "Persist boot #1 failed for: ${test_name}"
+        return 1
+    fi
+
+    log::info "Boot #2 (same overlay; expect success on fixed code, resize2fs rejection on unfixed)"
+    if ! test_qemu_boot_direct "${test_name}-b2" "${overlay}" "${cpu_cores}" "${ram_size}"; then
+        log::error "Persist boot #2 failed for: ${test_name} (this is the issue #140 regression on unfixed code)"
+        return 1
+    fi
+
+    log::success "Persist two-boot test passed for: ${test_name}"
+    return 0
+}
+
 # Boot the already-converted image across a vCPU/RAM matrix, reusing the
 # single output.qcow2 (each boot layers a fresh COW on the read-only base),
 # so the expensive convert runs once and only the cheap boot is repeated.
@@ -742,6 +881,10 @@ run_test_case() {
     local use_uki="$2"
     local use_encryption="$3"
     local delta_location="$4"
+    local delta_key="${5:-${DELTA_KEY}}"
+    local integrity="${6:-${INTEGRITY}}"
+    local second_boot="${7:-${SECOND_BOOT}}"
+    local skip_enhance="${8:-${SKIP_ENHANCE}}"
 
     log::step "=========================================="
     log::step "Running test case: ${test_name}"
@@ -766,11 +909,17 @@ run_test_case() {
     fi
 
     # Create test configuration
-    create_test_config "${config_dir}" "${use_encryption}" "${delta_location}"
+    create_test_config "${config_dir}" "${use_encryption}" "${delta_location}" "${delta_key}" "${integrity}"
 
-    # Run enhancement (hardens the image before conversion)
-    if ! run_enhance "${test_name}" "${input_image}"; then
-        return 1
+    # Run enhancement (hardens the image before conversion). Skippable for
+    # fast local repro since the FDE boot-service bugs under test do not
+    # depend on image hardening.
+    if [[ "${skip_enhance}" != "true" ]]; then
+        if ! run_enhance "${test_name}" "${input_image}"; then
+            return 1
+        fi
+    else
+        log::info "Skipping cryptpilot-enhance (--skip-enhance)"
     fi
 
     # Run conversion
@@ -789,11 +938,18 @@ run_test_case() {
         return 1
     fi
 
-    # Test QEMU boot across the vCPU/RAM matrix. The converted image is reused
-    # (each boot layers a fresh COW on the read-only base), so the expensive
-    # convert runs once.
-    if ! test_qemu_boot_matrix "${test_name}" "${output_image}"; then
-        return 1
+    # Test QEMU boot. For the disk-persist + second-boot regression (issue
+    # #140), boot the same persistent overlay twice instead of the single-boot
+    # matrix; otherwise use the vCPU/RAM matrix (each boot layers a fresh COW
+    # on the read-only base, so the expensive convert runs once).
+    if [[ "${second_boot}" == "true" && "${delta_location}" == "disk-persist" ]]; then
+        if ! test_qemu_boot_persist_second "${test_name}" "${output_image}"; then
+            return 1
+        fi
+    else
+        if ! test_qemu_boot_matrix "${test_name}" "${output_image}"; then
+            return 1
+        fi
     fi
 
     # Clean up remaining test-specific files
@@ -830,11 +986,25 @@ Options:
     --uki-stub-version <ver>  Pin the systemd UEFI stub version (e.g. 258) used
                      to assemble the UKI. Only meaningful with --bootloader uki.
                      When omitted, the distro stub is used.
+    --delta-key <otp|stable>  Delta key provider. "otp" (default) recreates the
+                     delta every boot; "stable" uses an exec provider with the
+                     same passphrase as rootfs so the delta persists across
+                     reboots (required for real disk-persist / --second-boot).
+    --integrity <true|false>  Enable dm-integrity on the delta (default false).
+                     true exercises the integrity AEAD path (issue #141).
+    --second-boot  With --delta-location disk-persist: after the first boot
+                     reaches login, boot the SAME persistent overlay again.
+                     Catches second-boot regressions like issue #140.
+    --skip-enhance  Skip the cryptpilot-enhance step (fast local repro).
     --help           Show this help message
 
 Examples:
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location ram
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader grub --rootfs-noenc --delta-location disk --input /path/to/image.qcow2
+    # Issue #141 regression (disk-persist + integrity=true, first-boot failure):
+    $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location disk-persist --delta-key stable --integrity true
+    # Issue #140 regression (disk-persist, stable key, second-boot resize failure):
+    $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location disk-persist --delta-key stable --second-boot
 EOF
 }
 
@@ -879,6 +1049,22 @@ main() {
                 UKI_STUB_VERSION="$2"
                 shift 2
                 ;;
+            --delta-key)
+                DELTA_KEY="$2"
+                shift 2
+                ;;
+            --integrity)
+                INTEGRITY="$2"
+                shift 2
+                ;;
+            --second-boot)
+                SECOND_BOOT="true"
+                shift
+                ;;
+            --skip-enhance)
+                SKIP_ENHANCE="true"
+                shift
+                ;;
             --help|-h)
                 show_help
                 exit 0
@@ -922,6 +1108,28 @@ main() {
         fatal "Invalid or missing --delta-location: must be 'ram', 'disk', or 'disk-persist'"
     fi
 
+    # Validate --delta-key
+    if [[ "${DELTA_KEY}" != "otp" && "${DELTA_KEY}" != "stable" ]]; then
+        fatal "Invalid --delta-key: must be 'otp' or 'stable'"
+    fi
+
+    # Validate --integrity
+    if [[ "${INTEGRITY}" != "true" && "${INTEGRITY}" != "false" ]]; then
+        fatal "Invalid --integrity: must be 'true' or 'false'"
+    fi
+
+    # --second-boot only makes sense for disk-persist (the delta must persist
+    # across boots; ram/disk recreate it every boot).
+    if [[ "${SECOND_BOOT}" == "true" && "${delta_location}" != "disk-persist" ]]; then
+        fatal "--second-boot requires --delta-location disk-persist"
+    fi
+
+    # stable key is strongly recommended with disk-persist, otherwise the delta
+    # is recreated every boot and persistence/second-boot semantics are lost.
+    if [[ "${delta_location}" == "disk-persist" && "${DELTA_KEY}" == "otp" ]]; then
+        log::warn "disk-persist with otp key recreates the delta every boot (no persistence); use --delta-key stable for real persistence"
+    fi
+
     # Validate custom input if provided
     if [[ -n "${custom_input}" ]]; then
         if [[ ! -f "${custom_input}" ]]; then
@@ -936,6 +1144,10 @@ main() {
     [[ "${bootloader}" == "uki" ]] && use_uki="true"
     [[ "${rootfs_enc}" == "enc" ]] && use_encryption="true"
     local test_name="${bootloader}-${rootfs_enc}-${delta_location}"
+    # Append a suffix for non-default options so logs/artifacts are distinct.
+    [[ "${DELTA_KEY}" == "stable" ]] && test_name="${test_name}-stable"
+    [[ "${INTEGRITY}" == "true" ]] && test_name="${test_name}-integ"
+    [[ "${SECOND_BOOT}" == "true" ]] && test_name="${test_name}-2boot"
 
     # Pre-flight checks
     log::step "Running pre-flight checks..."
@@ -965,7 +1177,7 @@ main() {
     local failed_tests=()
     local passed_tests=()
 
-    if run_test_case "${test_name}" "${use_uki}" "${use_encryption}" "${delta_location}"; then
+    if run_test_case "${test_name}" "${use_uki}" "${use_encryption}" "${delta_location}" "${DELTA_KEY}" "${INTEGRITY}" "${SECOND_BOOT}" "${SKIP_ENHANCE}"; then
         passed_tests+=("${test_name}")
     else
         failed_tests+=("${test_name}")
