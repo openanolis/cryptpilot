@@ -104,11 +104,20 @@ Requires: coreutils
 Requires: util-linux
 Requires: veritysetup
 Requires: lvm2
-# qemu-img and libguestfs (virt-customize) used by cryptpilot-convert on the host.
-# On Alinux 3 / RHEL 8 the tools live in "libguestfs-tools-c"; on Alinux 4 they
-# are merged into "libguestfs". Use a boolean dependency so either satisfies.
+# qemu-img and libguestfs (virt-customize) used by cryptpilot-convert and
+# cryptpilot-enhance on the host.
+# virt-customize ships in "libguestfs-tools-c" on Alinux 3 / RHEL 8. On
+# Alinux 4 libguestfs-tools-c does not exist and no package provides
+# virt-customize, but the plain "libguestfs" package does; use a boolean
+# dependency so the RPM stays installable on both distros.
+# However, dnf resolves the boolean on Alinux 3 to the dependency-cheaper
+# "libguestfs" meta package, which does NOT contain virt-customize, so
+# cryptpilot-enhance would silently skip hardening. Pull the real tools in
+# via a weak dependency: installed by default where available (Alinux 3),
+# silently skipped where not (Alinux 4).
 Requires: qemu-img
 Requires: (libguestfs-tools-c or libguestfs)
+Recommends: libguestfs-tools-c
 # growpart for partition manipulation
 Requires: cloud-utils-growpart
 # Filesystem tools (recommended, not required)

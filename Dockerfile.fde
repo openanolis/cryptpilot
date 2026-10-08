@@ -44,6 +44,34 @@ RUN . "$HOME/.cargo/env" && \
     rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1' --without crypt --without verity
 
 
+# e2fsprogs-builder - build a newer e2fsprogs (1.47.0) than alinux3 ships
+# (1.46.0). e2fsck >= 1.47 is required to check/resize alinux4 guest images:
+# their ext4 uses the casefold feature (FEATURE_C12) which 1.46.0 rejects
+# with "Get a newer version of e2fsck!". alinux4's packaged e2fsprogs cannot
+# simply be installed here (it needs glibc >= 2.33 while alinux3 has 2.28),
+# so build from source against the container's own glibc.
+FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest AS e2fsprogs-builder
+
+# Replace mirrors for faster yum install
+RUN sed -i -E 's|https?://mirrors.cloud.aliyuncs.com/|https://mirrors.aliyun.com/|g' /etc/yum.repos.d/*.repo
+# Increase yum download speed
+RUN sed -i 's/^max_parallel_downloads=.*/max_parallel_downloads=20/' /etc/yum.conf ; if ! grep -q '^max_parallel_downloads=' /etc/yum.conf; then sed -i '/^\[main\]$/a max_parallel_downloads=20' /etc/yum.conf; fi ;
+
+RUN yum install -y gcc make gettext tar && \
+    yum clean all
+
+ARG E2FSPROGS_VERSION=1.47.0
+ARG E2FSPROGS_SHA256=0b4fe723d779b0927fb83c9ae709bc7b40f66d7df36433bef143e41c54257084
+RUN curl -fsSL -o /tmp/e2fsprogs.tar.gz \
+        "https://kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v${E2FSPROGS_VERSION}/e2fsprogs-${E2FSPROGS_VERSION}.tar.gz" && \
+    echo "${E2FSPROGS_SHA256}  /tmp/e2fsprogs.tar.gz" | sha256sum -c - && \
+    tar xf /tmp/e2fsprogs.tar.gz -C /tmp && \
+    cd "/tmp/e2fsprogs-${E2FSPROGS_VERSION}" && \
+    ./configure --libdir=/usr/lib64 && \
+    make -j"$(nproc)" && \
+    make install DESTDIR=/staging
+
+
 # Release stage for cryptpilot-fde
 FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:latest AS release-fde
 
@@ -60,8 +88,34 @@ COPY --from=builder /root/rpmbuild/RPMS/x86_64/cryptpilot-fde-guest-*.rpm /root/
 
 # Install FDE package and its dependencies
 # yum install will automatically resolve and install all dependencies from spec
+# (incl. the libguestfs-tools-c weak dependency that provides virt-customize)
 RUN yum install -y /tmp/cryptpilot-fde-host-*.rpm && \
     yum clean all && \
     rm -rf /var/cache/yum /tmp/*.rpm
+
+# Replace the distro e2fsprogs 1.46.0 binaries with the 1.47.0 build (see
+# e2fsprogs-builder above). The e2fsprogs tools are statically linked against
+# their internal libs, so no shared libraries need to be copied. Only an
+# allowlist is copied: e2fsprogs' make install also stages an unmaintained
+# 2003-era "blkid" plus "fsck"/"findfs", which must not shadow the
+# util-linux versions the image already has.
+COPY --from=e2fsprogs-builder \
+     /staging/sbin/e2fsck \
+     /staging/sbin/fsck.ext2 \
+     /staging/sbin/fsck.ext3 \
+     /staging/sbin/fsck.ext4 \
+     /staging/sbin/resize2fs \
+     /staging/sbin/tune2fs \
+     /staging/sbin/mke2fs \
+     /staging/sbin/mkfs.ext2 \
+     /staging/sbin/mkfs.ext3 \
+     /staging/sbin/mkfs.ext4 \
+     /staging/sbin/dumpe2fs \
+     /usr/sbin/
+COPY --from=e2fsprogs-builder /staging/etc/mke2fs.conf /etc/mke2fs.conf
+
+# No libvirtd runs inside the container; drive virt-customize's qemu directly
+# instead of through the libvirt backend.
+ENV LIBGUESTFS_BACKEND=direct
 
 CMD ["cryptpilot-fde-host"]
