@@ -27,8 +27,6 @@ docs/superpowers/
 
 # Claude session artifacts
 .claude/*
-# ...but project-shared skills are tracked (mirrors inclavare-containers/TNG)
-!.claude/skills/
 
 # Generated test files
 testfiles/
