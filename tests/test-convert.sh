@@ -765,7 +765,12 @@ exec qemu-system-x86_64 \
             boot_success=true
             break
         fi
-        if grep -qi "Emergency Mode\|emergency shell\|Kernel panic\|Failed to setup volumes required by FDE\|Failed to create dm-snapshot\|INTEGRITY AEAD ERROR\|Please run 'e2fsck\|Failed to resize ext4\|Failed to start Cryptpilot FDE" "${boot_log}" 2>/dev/null; then
+        # NOTE: bare "INTEGRITY AEAD ERROR" is not a boot-failure marker:
+        # blkid probing the end of a freshly created delta reads sectors
+        # whose integrity tags were never initialized, and those errors are
+        # noise. The fatal markers are the dmsetup failure, emergency mode,
+        # or the FDE service failing.
+        if grep -qi "Emergency Mode\|emergency shell\|Kernel panic\|Failed to setup volumes required by FDE\|Failed to create dm-snapshot device\|reload ioctl .* failed\|Please run 'e2fsck\|Failed to resize ext4\|Failed to start Cryptpilot FDE" "${boot_log}" 2>/dev/null; then
             log::error "Boot failure detected - boot failed!"
             break
         fi
