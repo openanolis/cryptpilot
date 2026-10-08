@@ -818,13 +818,18 @@ test_qemu_boot_persist_second() {
     local cpu_cores="${3:-4}"
     local ram_size="${4:-4G}"
 
-    local overlay="${WORKDIR}/${test_name}-persist-overlay.qcow2"
-    local overlay_bn; overlay_bn=$(basename "${overlay}")
+    # The overlay must live in the SAME directory as the output image: the
+    # backing file is referenced by its bare name so qemu resolves it inside
+    # the boot container (host workdir <-> container /diskdir), and the boot
+    # container only mounts that one directory.
+    local image_dir; image_dir="$(dirname "${output_image}")"
+    local overlay="${image_dir}/${test_name}-persist-overlay.qcow2"
     rm -f "${overlay}"
-    # Relative backing filename so the path resolves inside the container
-    # (host workdir <-> container /diskdir share the same directory).
-    ( cd "$(dirname "${overlay}")" \
-        && qemu-img create -f qcow2 -F qcow2 -b "$(basename "${output_image}")" "${overlay_bn}" >/dev/null )
+    if ! ( cd "${image_dir}" \
+        && qemu-img create -f qcow2 -F qcow2 -b "$(basename "${output_image}")" "$(basename "${overlay}")" >/dev/null ); then
+        log::error "Failed to create persistent overlay in ${image_dir} for: ${test_name}"
+        return 1
+    fi
 
     log::step "Persist two-boot test for: ${test_name}"
     log::info "Boot #1 (expect success; fs mounted RW updates s_mtime via the persistent delta)"
