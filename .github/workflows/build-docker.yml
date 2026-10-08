@@ -14,6 +14,26 @@ on:
 
 jobs:
   build-and-push:
+    name: Build cryptpilot-${{ matrix.suffix }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suffix: fde
+            dockerfile: Dockerfile.fde
+            target: release-fde
+            description: Full-disk encryption tooling for system volumes
+            test: cryptpilot-fde-host --version
+          - suffix: crypt
+            dockerfile: Dockerfile.crypt
+            target: release-crypt
+            description: Data volume encryption tooling
+            test: cryptpilot-crypt --version
+          - suffix: verity
+            dockerfile: Dockerfile.verity
+            target: release-verity
+            description: Integrity measurement tool for directory trees
+            test: cryptpilot-verity --version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,15 +46,14 @@ jobs:
           driver: docker-container
           driver-opts: image=moby/buildkit:master,network=host
 
-      - name: Docker meta (fde)
-        id: meta-fde
+      - name: Docker meta
+        id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ghcr.io/${{ github.repository_owner }}/cryptpilot-fde
+          images: ghcr.io/${{ github.repository_owner }}/cryptpilot-${{ matrix.suffix }}
           labels: |
-            org.opencontainers.image.title=cryptpilot-fde
-            org.opencontainers.image.description=Full-disk encryption tooling for system volumes
+            org.opencontainers.image.title=cryptpilot-${{ matrix.suffix }}
+            org.opencontainers.image.description=${{ matrix.description }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -43,99 +62,25 @@ jobs:
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Docker meta (crypt)
-        id: meta-crypt
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ghcr.io/${{ github.repository_owner }}/cryptpilot-crypt
-          labels: |
-            org.opencontainers.image.title=cryptpilot-crypt
-            org.opencontainers.image.description=Data volume encryption tooling
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Docker meta (verity)
-        id: meta-verity
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ghcr.io/${{ github.repository_owner }}/cryptpilot-verity
-          labels: |
-            org.opencontainers.image.title=cryptpilot-verity
-            org.opencontainers.image.description=Integrity measurement tool for directory trees
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      # Build all three images sequentially to maximize cache reuse
-      # Builder stage is shared and cached across all three builds
-      - name: Build cryptpilot-fde
+      # Each parallel job builds one image. The Dockerfiles pass --without
+      # flags to rpmbuild so each job compiles only the crate(s) its image
+      # packages; the three jobs do not duplicate each other's cargo work.
+      - name: Build cryptpilot-${{ matrix.suffix }}
         uses: docker/build-push-action@v6.9.0
         with:
           context: .
-          file: Dockerfile.fde
-          target: release-fde
-          tags: |
-            cryptpilot-fde:test
-            ${{ steps.meta-fde.outputs.tags }}
-          labels: ${{ steps.meta-fde.outputs.labels }}
-          outputs: type=docker,dest=${{ runner.temp }}/cryptpilot-fde.tar
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          tags: cryptpilot-${{ matrix.suffix }}:test
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=docker,dest=${{ runner.temp }}/cryptpilot-${{ matrix.suffix }}.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build cryptpilot-crypt
-        uses: docker/build-push-action@v6.9.0
-        with:
-          context: .
-          file: Dockerfile.crypt
-          target: release-crypt
-          tags: |
-            cryptpilot-crypt:test
-            ${{ steps.meta-crypt.outputs.tags }}
-          labels: ${{ steps.meta-crypt.outputs.labels }}
-          outputs: type=docker,dest=${{ runner.temp }}/cryptpilot-crypt.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build cryptpilot-verity
-        uses: docker/build-push-action@v6.9.0
-        with:
-          context: .
-          file: Dockerfile.verity
-          target: release-verity
-          tags: |
-            cryptpilot-verity:test
-            ${{ steps.meta-verity.outputs.tags }}
-          labels: ${{ steps.meta-verity.outputs.labels }}
-          outputs: type=docker,dest=${{ runner.temp }}/cryptpilot-verity.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Test all images
-      - name: Load and test cryptpilot-fde
+      - name: Load and test image
         run: |
-          docker load --input ${{ runner.temp }}/cryptpilot-fde.tar
-          docker run --rm cryptpilot-fde:test cryptpilot-fde-host --version
-
-      - name: Load and test cryptpilot-crypt
-        run: |
-          docker load --input ${{ runner.temp }}/cryptpilot-crypt.tar
-          docker run --rm cryptpilot-crypt:test cryptpilot-crypt --version
-
-      - name: Load and test cryptpilot-verity
-        run: |
-          docker load --input ${{ runner.temp }}/cryptpilot-verity.tar
-          docker run --rm cryptpilot-verity:test cryptpilot-verity --version
+          docker load --input ${{ runner.temp }}/cryptpilot-${{ matrix.suffix }}.tar
+          docker run --rm cryptpilot-${{ matrix.suffix }}:test ${{ matrix.test }}
 
       # Push images (only on tag or master/main branch)
       - name: Login to GHCR Container Registry
@@ -145,35 +90,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push cryptpilot-fde
+      - name: Push image
         env:
-          IMAGE_TAGS: ${{ steps.meta-fde.outputs.tags }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -e
           set -x
           for tag in ${IMAGE_TAGS}; do
-              docker tag cryptpilot-fde:test ${tag}
-              docker push ${tag}
-          done
-
-      - name: Push cryptpilot-crypt
-        env:
-          IMAGE_TAGS: ${{ steps.meta-crypt.outputs.tags }}
-        run: |
-          set -e
-          set -x
-          for tag in ${IMAGE_TAGS}; do
-              docker tag cryptpilot-crypt:test ${tag}
-              docker push ${tag}
-          done
-
-      - name: Push cryptpilot-verity
-        env:
-          IMAGE_TAGS: ${{ steps.meta-verity.outputs.tags }}
-        run: |
-          set -e
-          set -x
-          for tag in ${IMAGE_TAGS}; do
-              docker tag cryptpilot-verity:test ${tag}
+              docker tag cryptpilot-${{ matrix.suffix }}:test ${tag}
               docker push ${tag}
           done
