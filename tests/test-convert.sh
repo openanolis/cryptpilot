@@ -739,8 +739,22 @@ test_qemu_boot_direct() {
 
     log::step "Direct QEMU boot for: ${test_name} (cpu=${cpu_cores}, ram=${ram_size}, image=${image_bn})"
 
+    # Alinux 4 ships real Docker (not podman-docker) and the test container
+    # has no init system, so dockerd must be started explicitly. No-op on
+    # Alinux 3 where docker is the daemonless podman emulation. A self-started
+    # dockerd has no bridge, so the QEMU container needs the host network
+    # namespace for guest user-mode networking (NTP time sync).
+    if ! ensure_docker_runtime; then
+        return 1
+    fi
+    local docker_net_args=()
+    if [[ "${DOCKERD_STARTED:-0}" == "1" ]]; then
+        docker_net_args+=(--network=host)
+    fi
+
     docker rm -f "${container_name}" 2>/dev/null || true
     docker run -d --rm --privileged \
+        "${docker_net_args[@]}" \
         -v "$(dirname "${image}"):/diskdir:rw" \
         --name "${container_name}" --entrypoint /bin/bash \
         "ghcr.io/qemus/qemu:7.29" -c '
