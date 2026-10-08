@@ -24,6 +24,15 @@ use cryptpilot::{
 
 const CRYPTPILOT_LVM_SYSTEM_DIR: &str = "/usr/lib/cryptpilot/lvm/";
 
+/// dm-snapshot chunk size in 512-byte sectors, shared by the snapshot table
+/// and the COW header initialization: the persistent snapshot driver reads
+/// and writes whole chunks, so any region the guest initializes on the COW
+/// device must cover a full chunk or the read fails (with dm-integrity,
+/// sectors never written through the mapping have no valid tag).
+const SNAPSHOT_CHUNK_SIZE_SECTORS: u64 = 16;
+
+const SNAPSHOT_CHUNK_SIZE_BYTES: usize = SNAPSHOT_CHUNK_SIZE_SECTORS as usize * 512;
+
 pub async fn setup_volumes_required_by_fde() -> Result<()> {
     let fde_config = crate::config::get_fde_config_source()
         .await
@@ -165,6 +174,7 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
                         dm_verity_output_device,
                         Path::new(DELTA_DEVICE),
                         matches!(delta_location, DeltaLocation::DiskPersist),
+                        recreate,
                     )
                     .await?;
 
@@ -191,8 +201,13 @@ pub async fn setup_volumes_required_by_fde() -> Result<()> {
                     tracing::info!("Creating zram device for COW storage");
                     let cow_device = create_zram_cow_device().await?;
                     // Build dm-snapshot device chain
-                    setup_dm_snapshot_device_chain(dm_verity_output_device, &cow_device, false)
-                        .await?;
+                    setup_dm_snapshot_device_chain(
+                        dm_verity_output_device,
+                        &cow_device,
+                        false,
+                        false,
+                    )
+                    .await?;
                     // Resize rootfs filesystem to fill the expanded device after building snapshot chain
                     resize_ext4_filesystem(Path::new(ROOTFS_DEVICE)).await?;
                 }
@@ -437,8 +452,11 @@ async fn create_zram_cow_device() -> Result<PathBuf> {
     Ok(PathBuf::from(format!("/dev/zram{}", zram_id)))
 }
 
-/// Wipe a device by writing zeros using tokio async I/O.
-/// Writes 4KB megabytes of zeros to the device.
+/// Zero the COW header region through the device mapping.
+///
+/// Must cover a full snapshot chunk: the persistent snapshot driver reads
+/// and writes whole chunks, and with dm-integrity only sectors written
+/// through the mapping carry a valid tag.
 async fn wipe_cow_device_header_async(device_path: &Path) -> Result<(), anyhow::Error> {
     use tokio::fs::OpenOptions;
 
@@ -448,18 +466,53 @@ async fn wipe_cow_device_header_async(device_path: &Path) -> Result<(), anyhow::
         .await
         .context("Failed to open device for wiping")?;
 
-    file.write_all(&[0u8; 4096]).await?;
-
-    // Final sync to ensure everything is written
+    file.write_all(&vec![0u8; SNAPSHOT_CHUNK_SIZE_BYTES])
+        .await?;
     file.sync_all().await?;
-
     Ok(())
+}
+
+/// Wipe the COW header chunk only when the header region reads back blank.
+///
+/// blkid reports "no signatures" both for a genuinely blank device and for
+/// one whose probe reads fail (dm-integrity rejects sectors whose tags were
+/// never written, e.g. the end-of-device probe), so "no signatures" alone
+/// is not proof of blank. The header chunk is: unreadable means we cannot
+/// tell (fail closed), non-zero content is left untouched for the snapshot
+/// to interpret (valid "SnAp" metadata gets reused; anything else makes
+/// dmsetup fail closed), all zeros mean blank and safe to initialize.
+async fn wipe_cow_header_after_read_check(device_path: &Path) -> Result<(), anyhow::Error> {
+    use tokio::fs::OpenOptions;
+    use tokio::io::AsyncReadExt;
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(device_path)
+        .await
+        .context("Failed to open COW device for header check")?;
+
+    let mut header = vec![0u8; SNAPSHOT_CHUNK_SIZE_BYTES];
+    file.read_exact(&mut header).await.context(
+        "COW header chunk is unreadable, cannot tell whether the volume is blank; refusing to wipe",
+    )?;
+    drop(file);
+
+    if header.iter().any(|&b| b != 0) {
+        tracing::info!(
+            "COW header has existing content, keeping it for the snapshot to reuse \
+             (blkid misreported the device as clean)"
+        );
+        return Ok(());
+    }
+
+    wipe_cow_device_header_async(device_path).await
 }
 
 async fn setup_dm_snapshot_device_chain(
     rootfs_device: &Path,
     cow_device: &Path,
     persistent: bool,
+    fresh_delta: bool,
 ) -> Result<()> {
     tracing::info!(
         ?rootfs_device,
@@ -506,6 +559,15 @@ async fn setup_dm_snapshot_device_chain(
         wipe_cow_device_header_async(cow_device)
             .await
             .context("Failed to wipe COW device")?;
+    } else if fresh_delta {
+        // The COW device was created on this boot and is blank by
+        // construction; unwritten sectors fail integrity reads, so probing
+        // here would report "no signatures" for the wrong reason. Initialize
+        // the header chunk directly.
+        tracing::info!("Persistent mode: fresh delta, initializing COW header");
+        wipe_cow_device_header_async(cow_device)
+            .await
+            .context("Failed to wipe COW device")?;
     } else {
         // Persistent mode: probe COW device to determine safe action
         tracing::info!("Persistent mode: probing COW device state");
@@ -513,9 +575,11 @@ async fn setup_dm_snapshot_device_chain(
 
         match probe {
             cryptpilot::fs::blkid::BlkidProbeResult::NoSignatures => {
-                // Clean device, safe to wipe
-                tracing::info!("COW device is clean, wiping");
-                wipe_cow_device_header_async(cow_device)
+                // blkid's "no signatures" also covers probe reads that
+                // failed, so the header chunk itself decides: wiped only
+                // when blank, kept when it holds snapshot metadata.
+                tracing::info!("COW device reports clean, verifying header");
+                wipe_cow_header_after_read_check(cow_device)
                     .await
                     .context("Failed to wipe COW device")?;
             }
@@ -546,11 +610,12 @@ async fn setup_dm_snapshot_device_chain(
         .arg(ROOTFS_NAME)
         .arg("--table")
         .arg(format!(
-            "0 {} snapshot {} {} {} 16", // chunk size is 16 sectors (8KB)
+            "0 {} snapshot {} {} {} {}",
             linear_size,
             ROOTFS_EXTENDED_DEVICE,
             cow_device.to_string_lossy(),
-            if persistent { "PO" } else { "N" }
+            if persistent { "PO" } else { "N" },
+            SNAPSHOT_CHUNK_SIZE_SECTORS
         ))
         .run()
         .await
@@ -646,6 +711,67 @@ mod tests {
 
     async fn assert_sentinel(image: &Path) -> Result<()> {
         assert_eq!(debugfs(image, "cat /sentinel").await?, SENTINEL);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_wipe_cow_header_covers_full_snapshot_chunk() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cow = dir.path().join("cow.img");
+        // Non-zero pattern makes a partial wipe visible.
+        tokio::fs::write(&cow, vec![0xAAu8; SNAPSHOT_CHUNK_SIZE_BYTES * 2]).await?;
+
+        wipe_cow_device_header_async(&cow).await?;
+
+        let data = tokio::fs::read(&cow).await?;
+        assert!(
+            data[..SNAPSHOT_CHUNK_SIZE_BYTES].iter().all(|&b| b == 0),
+            "wipe must zero the whole first chunk the snapshot driver reads"
+        );
+        assert!(data[SNAPSHOT_CHUNK_SIZE_BYTES..].iter().all(|&b| b == 0xAA));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_guarded_wipe_requires_readable_header_chunk() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cow = dir.path().join("short.img");
+        // Shorter than one chunk: reading the header region fails, so the
+        // wipe must refuse rather than treat the failure as a blank device.
+        tokio::fs::write(&cow, vec![0xAAu8; SNAPSHOT_CHUNK_SIZE_BYTES / 2]).await?;
+
+        let result = wipe_cow_header_after_read_check(&cow).await;
+
+        assert!(result.is_err(), "unreadable header must abort the wipe");
+        let data = tokio::fs::read(&cow).await?;
+        assert!(
+            data.iter().all(|&b| b == 0xAA),
+            "refused wipe must leave the device untouched"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_guarded_wipe_preserves_nonzero_header() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cow = dir.path().join("snapcow.img");
+        // dm-snapshot persistent metadata starts with the "SnAp" magic.
+        // blkid misreports such a device as clean when its probe reads fail
+        // under dm-integrity, so the wipe must verify the header content
+        // itself and keep anything non-zero for the snapshot to interpret.
+        let mut header = vec![0u8; SNAPSHOT_CHUNK_SIZE_BYTES];
+        header[0..4].copy_from_slice(b"SnAp");
+        header[8..12].copy_from_slice(&1u32.to_le_bytes());
+        header[12..16].copy_from_slice(&(SNAPSHOT_CHUNK_SIZE_SECTORS as u32).to_le_bytes());
+        tokio::fs::write(&cow, &header).await?;
+
+        wipe_cow_header_after_read_check(&cow).await?;
+
+        let data = tokio::fs::read(&cow).await?;
+        assert_eq!(
+            data, header,
+            "non-zero header holds dm-snapshot metadata; wiping it would destroy the previous boot's delta"
+        );
         Ok(())
     }
 
