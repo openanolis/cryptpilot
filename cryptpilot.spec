@@ -10,6 +10,16 @@ License: Apache-2.0
 URL: https://www.alibaba.com
 Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}-vendored-source.tar.gz
 
+# Subpackage build switches: build a subset of the Rust binaries from the
+# same spec so per-image container builds only compile the crate they
+# package, e.g.
+#   rpmbuild -ba cryptpilot.spec --without crypt --without verity
+# builds only the cryptpilot-fde-host / cryptpilot-fde-guest RPMs.
+# Default (no flags) builds everything, unchanged.
+%bcond_without fde
+%bcond_without crypt
+%bcond_without verity
+
 # Shared BuildRequires for all packages
 %{!?with_rustup:%global use_system_rust 1}
 %if 0%{?use_system_rust}
@@ -30,10 +40,16 @@ BuildRequires: clang
 BuildRequires: device-mapper-devel
 
 # Runtime dependencies for cryptpilot (main package)
+%if %{with fde}
 Requires: cryptpilot-fde-host = %{version}-%{release}
 Requires: cryptpilot-fde-guest = %{version}-%{release}
+%endif
+%if %{with crypt}
 Requires: cryptpilot-crypt = %{version}-%{release}
+%endif
+%if %{with verity}
 Requires: cryptpilot-verity = %{version}-%{release}
+%endif
 
 %description
 Cryptpilot is a full-disk encryption utility for protecting data at rest in confidential computing environments.
@@ -41,6 +57,7 @@ It provides LUKS2-based encryption for rootfs and data volumes, integrates with 
 and supports multiple key providers including TPM2, KBS (Key Broker Service), KMS, OIDC, OTP, and custom exec plugins.
 Includes tools for disk image conversion (cryptpilot-convert) and enhancement (cryptpilot-enhance).
 
+%if %{with verity}
 %package -n cryptpilot-verity
 Summary: Integrity measurement tool for directory trees
 Group: Applications/System
@@ -70,7 +87,9 @@ integrity checks at read time. Unlike kernel fs-verity which works per-file, cry
 protects the entire directory tree structure including path-to-file mappings, making it suitable
 for confidential computing scenarios where the underlying storage is untrusted (e.g., virtio-fs,
 object storage, or host-side disks).
+%endif
 
+%if %{with fde}
 %package -n cryptpilot-fde-host
 Summary: Full-disk encryption host-side tooling (conversion, configuration, reference values)
 Group: Applications/System
@@ -112,7 +131,9 @@ Cryptpilot-fde-host provides host-side tools for full-disk encryption management
 including disk image conversion (cryptpilot-convert), image hardening (cryptpilot-enhance),
 boot artifact reference value computation (show-reference-value), and configuration
 validation (config check/dump).
+%endif
 
+%if %{with fde}
 %package -n cryptpilot-fde-guest
 Summary: Full-disk encryption guest-side boot service (initrd decryption)
 Group: Applications/System
@@ -145,7 +166,9 @@ Cryptpilot-fde-guest provides the boot-service binary that runs during initrd
 to set up encrypted volumes (dm-crypt, dm-verity, LVM, overlayfs) before the
 root filesystem is mounted. This package is designed for inclusion in guest
 disk images and has minimal dependencies.
+%endif
 
+%if %{with crypt}
 %package -n cryptpilot-crypt
 Summary: Data volume encryption tooling
 Group: Applications/System
@@ -176,12 +199,14 @@ Obsoletes: cryptpilot < %{version}-%{release}
 
 %description -n cryptpilot-crypt
 Cryptpilot-crypt provides data volume encryption and automatic volume management for confidential computing environments.
+%endif
 
 %prep
 %setup -q -n %{name}-%{version}
 
 
 %build
+%if %{with fde}
 # Build cryptpilot-fde-host
 pushd src/cryptpilot-fde/
 cargo install --path . --bin cryptpilot-fde-host --root %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-host/ --locked --offline
@@ -191,22 +216,29 @@ popd
 pushd src/cryptpilot-fde/
 cargo install --path . --bin cryptpilot-fde-guest --root %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-guest/ --locked --offline
 popd
+%endif
 
+%if %{with crypt}
 # Build cryptpilot-crypt
 pushd src/cryptpilot-crypt/
 cargo install --path . --bin cryptpilot-crypt --root %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/ --locked --offline
 popd
+%endif
 
+%if %{with verity}
 # Build cryptpilot-verity
 pushd src/cryptpilot-verity/
 cargo install --path . --bin cryptpilot-verity --root %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/ --locked --offline
 popd
+%endif
 
 
 %install
-# Install cryptpilot-fde-host binaries
 pushd src/
 install -d -p %{buildroot}%{_prefix}/bin
+
+%if %{with fde}
+# Install cryptpilot-fde-host binaries
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-host/bin/cryptpilot-fde-host %{buildroot}%{_prefix}/bin/cryptpilot-fde-host
 # Install FDE enhancement scripts (host only)
 install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
@@ -214,12 +246,6 @@ install -p -m 755 cryptpilot-enhance.sh %{buildroot}%{_prefix}/bin/cryptpilot-en
 
 # Install cryptpilot-fde-guest binary
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-guest/bin/cryptpilot-fde-guest %{buildroot}%{_prefix}/bin/cryptpilot-fde-guest
-
-# Install cryptpilot-crypt
-install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/bin/cryptpilot-crypt %{buildroot}%{_prefix}/bin/cryptpilot-crypt
-
-# Install cryptpilot-verity
-install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/bin/cryptpilot-verity %{buildroot}%{_prefix}/bin/cryptpilot-verity
 
 # Install dracut module (guest package - used during initrd)
 rm -rf %{buildroot}%{dracut_dst}
@@ -232,24 +258,39 @@ install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroo
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service %{buildroot}%{dracut_dst}
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/lvm.conf %{buildroot}%{dracut_dst}
 
-# Install systemd services (guest)
-install -d -p %{buildroot}%{_prefix}/lib/systemd/system
-install -p -m 644 dist/systemd/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/system/cryptpilot.service
-
 # Install config templates (host package is where users configure)
 install -d -p %{buildroot}/etc/cryptpilot
 install -p -m 600 dist/etc/global.toml.template %{buildroot}/etc/cryptpilot/global.toml.template
 install -p -m 600 dist/etc/fde.toml.template %{buildroot}/etc/cryptpilot/fde.toml.template
+
+# Install udev rules
+install -d -p %{buildroot}/usr/lib/udev/rules.d
+install -p -m 644 dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules %{buildroot}/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+%endif
+
+%if %{with crypt}
+# Install cryptpilot-crypt
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/bin/cryptpilot-crypt %{buildroot}%{_prefix}/bin/cryptpilot-crypt
+
+# Volume configuration templates
 install -d -p %{buildroot}/etc/cryptpilot/volumes
 install -p -m 600 dist/etc/volumes/otp.toml.template %{buildroot}/etc/cryptpilot/volumes/otp.toml.template
 install -p -m 600 dist/etc/volumes/kbs.toml.template %{buildroot}/etc/cryptpilot/volumes/kbs.toml.template
 install -p -m 600 dist/etc/volumes/kms.toml.template %{buildroot}/etc/cryptpilot/volumes/kms.toml.template
 install -p -m 600 dist/etc/volumes/oidc.toml.template %{buildroot}/etc/cryptpilot/volumes/oidc.toml.template
 install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
+%endif
 
-# Install udev rules
-install -d -p %{buildroot}/usr/lib/udev/rules.d
-install -p -m 644 dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules %{buildroot}/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+%if %{with verity}
+# Install cryptpilot-verity
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/bin/cryptpilot-verity %{buildroot}%{_prefix}/bin/cryptpilot-verity
+%endif
+
+%if %{with fde} || %{with crypt}
+# Install systemd service (claimed by both cryptpilot-fde-guest and cryptpilot-crypt)
+install -d -p %{buildroot}%{_prefix}/lib/systemd/system
+install -p -m 644 dist/systemd/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/system/cryptpilot.service
+%endif
 popd
 
 
@@ -260,10 +301,13 @@ rm -rf %{buildroot}
 %files
 %license src/LICENSE
 
+%if %{with verity}
 %files -n cryptpilot-verity
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot-verity
+%endif
 
+%if %{with fde}
 %files -n cryptpilot-fde-host
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot-fde-host
@@ -273,7 +317,9 @@ rm -rf %{buildroot}
 %dir /etc/cryptpilot
 /etc/cryptpilot/global.toml.template
 /etc/cryptpilot/fde.toml.template
+%endif
 
+%if %{with fde}
 %post -n cryptpilot-fde-guest
 # Reload udev rules to apply new device filtering rules
 if command -v udevadm >/dev/null 2>&1; then
@@ -296,7 +342,9 @@ fi
 %{_prefix}/lib/systemd/system/cryptpilot.service
 # Udev rules for device hiding
 /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+%endif
 
+%if %{with crypt}
 %files -n cryptpilot-crypt
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot-crypt
@@ -330,6 +378,7 @@ if [ $1 == 0 ]; then #uninstall
   systemctl daemon-reload
   systemctl reset-failed
 fi
+%endif
 
 
 %changelog

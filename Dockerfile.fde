@@ -34,10 +34,14 @@ RUN . "$HOME/.cargo/env" && \
     make create-tarball && \
     # Copy tarball to RPM build sources
     cp /tmp/cryptpilot-$(grep '^version' Cargo.toml | awk -F' = ' '{print $2}' | tr -d '"')-vendored-source.tar.gz ~/rpmbuild/SOURCES/ && \
-    # Install build dependencies from spec file (like yum-builddep)
-    yum-builddep -y --skip-unavailable ./cryptpilot.spec && \
+    # Install build dependencies from spec file (like yum-builddep).
+    # Only the fde subpackages are packaged by this image, so disable the
+    # crypt/verity builds (and their BuildRequires) in the same spec.
+    # (bcond disables need the underscore-prefixed _without_X macros.)
+    yum-builddep -y --skip-unavailable ./cryptpilot.spec \
+        --define '_without_crypt 1' --define '_without_verity 1' && \
     # Build RPM packages
-    rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1'
+    rpmbuild -ba ./cryptpilot.spec --define 'with_rustup 1' --without crypt --without verity
 
 
 # Release stage for cryptpilot-fde
