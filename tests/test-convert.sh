@@ -114,9 +114,9 @@ check_root() {
 # Check required tools
 check_tools() {
     # virt-customize is optional: it drives cryptpilot-enhance, which skips
-    # gracefully when the binary is absent (e.g. on Alinux 4, where libguestfs
-    # no longer ships it). All other tools are mandatory for the convert/boot
-    # flow itself.
+    # gracefully when the binary is absent or unusable (e.g. on Alinux 4,
+    # where supermin cannot detect the distro's package manager). All other
+    # tools are mandatory for the convert/boot flow itself.
     local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4")
     local missing=()
 
@@ -361,6 +361,89 @@ run_enhance() {
     fi
 
     log::success "cryptpilot-enhance completed for test: ${test_name}"
+    return 0
+}
+
+# Inject a oneshot systemd unit that reports delta-content survival to the
+# serial console. On first boot it writes a random sentinel to /var/lib (which
+# lives on the dm-snapshot COW, i.e. the persistent delta), syncs, and echoes
+# "CRYPTPILOT_SENTINEL_WRITTEN <uuid>"; on every later boot it echoes
+# "CRYPTPILOT_SENTINEL_OK <uuid>" when the sentinel survived. The sync makes
+# the write reach the qcow2 overlay through dm-crypt/dm-integrity, so the
+# marker survives even a forced VM kill (the power-loss case).
+#
+# Uses qemu-nbd + mount rather than libguestfs: Alinux 3 ships virt-customize
+# in libguestfs-tools-c, but Alinux 4's merged libguestfs package does not,
+# and the pre-converted rootfs partition is plain ext4 anyway.
+inject_sentinel_unit() {
+    local image="$1"
+
+    local unit_file
+    unit_file=$(mktemp /tmp/cryptpilot-sentinel-unit.XXXXXX)
+    cat > "${unit_file}" <<'EOF'
+[Unit]
+Description=Verify persistent delta data survival for the cryptpilot convert test
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'if [ -s /var/lib/cryptpilot-sentinel ]; then echo "CRYPTPILOT_SENTINEL_OK $(cat /var/lib/cryptpilot-sentinel)" > /dev/console; else u=$(cat /proc/sys/kernel/random/uuid); echo "$u" > /var/lib/cryptpilot-sentinel; sync; echo "CRYPTPILOT_SENTINEL_WRITTEN $u" > /dev/console; fi'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    local nbd_device
+    nbd_device=$(get_available_nbd)
+    log::info "Injecting sentinel unit into: ${image} via ${nbd_device}"
+    if ! qemu-nbd --connect="${nbd_device}" "${image}"; then
+        rm -f "${unit_file}"
+        log::error "Failed to connect image to NBD: ${image}"
+        return 1
+    fi
+
+    local mount_dir
+    mount_dir=$(mktemp -d /tmp/cryptpilot-sentinel-mnt.XXXXXX)
+    local inject_rc=0
+    if ! ( set -e
+        sleep 2
+        partprobe "${nbd_device}" 2>/dev/null || true
+        sleep 1
+        # The pre-converted image has a plain ext4 rootfs partition. Probe
+        # with blkid rather than lsblk: lsblk's FSTYPE column comes from the
+        # udev database, which does not exist in the CI test container (no
+        # systemd), while blkid probes the device directly.
+        root_part=""
+        for part in "${nbd_device}"p*; do
+            [[ -b "${part}" ]] || continue
+            if [[ "$(blkid -o value -s TYPE "${part}" 2>/dev/null)" == "ext4" ]]; then
+                root_part="${part}"
+                break
+            fi
+        done
+        if [[ -z "${root_part}" ]]; then
+            echo "no ext4 root partition found on ${nbd_device}" >&2
+            exit 1
+        fi
+        mount "${root_part}" "${mount_dir}"
+        cp "${unit_file}" "${mount_dir}/etc/systemd/system/cryptpilot-sentinel.service"
+        ln -sf /etc/systemd/system/cryptpilot-sentinel.service \
+            "${mount_dir}/etc/systemd/system/multi-user.target.wants/cryptpilot-sentinel.service"
+        umount "${mount_dir}"
+    ); then
+        inject_rc=1
+        umount "${mount_dir}" 2>/dev/null || true
+    fi
+    rmdir "${mount_dir}" 2>/dev/null || true
+    rm -f "${unit_file}"
+    if ! qemu-nbd --disconnect "${nbd_device}" >/dev/null 2>&1; then
+        inject_rc=1
+    fi
+
+    if [[ ${inject_rc} -ne 0 ]]; then
+        log::error "Failed to inject sentinel unit into: ${image}"
+        return 1
+    fi
+    log::success "Sentinel unit injected into: ${image}"
     return 0
 }
 
@@ -726,12 +809,17 @@ test_qemu_boot() {
 #
 # Uses if=virtio + OVMF_CODE_4M.fd / a writable copy of OVMF_VARS_4M.fd.
 # Returns 0 if the login prompt appears, 1 on emergency/panic/timeout.
+# An optional 5th argument is a fixed-string pattern that must ALSO appear
+# in the boot log before the boot counts as successful (used by the persist
+# test to require the sentinel marker, which lands on the console moments
+# after the login prompt).
 # Writes the serial log to ${WORKDIR}/${test_name}-direct-boot.log.
 test_qemu_boot_direct() {
     local test_name="$1"
     local image="$2"
     local cpu_cores="${3:-4}"
     local ram_size="${4:-4G}"
+    local require_pattern="${5:-}"
 
     local boot_log="${WORKDIR}/${test_name}-direct-boot.log"
     local image_bn; image_bn=$(basename "${image}")
@@ -775,9 +863,13 @@ exec qemu-system-x86_64 \
     while [[ $elapsed -lt $timeout ]]; do
         sleep 5; elapsed=$((elapsed+5))
         if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
-            log::success "Login prompt detected - boot successful!"
-            boot_success=true
-            break
+            if [[ -z "${require_pattern}" ]] || grep -q -F "${require_pattern}" "${boot_log}" 2>/dev/null; then
+                log::success "Login prompt detected - boot successful!"
+                boot_success=true
+                break
+            fi
+            # Login is up but the required marker has not appeared yet; keep
+            # waiting until it does or the timeout expires.
         fi
         # NOTE: bare "INTEGRITY AEAD ERROR" is not a boot-failure marker:
         # blkid probing the end of a freshly created delta reads sectors
@@ -802,6 +894,9 @@ exec qemu-system-x86_64 \
         log::success "Direct QEMU boot test passed for: ${test_name}"
         return 0
     fi
+    if [[ -n "${require_pattern}" ]] && grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+        log::error "Login prompt appeared but the required marker never did: ${require_pattern}"
+    fi
     log::error "Direct QEMU boot test failed for: ${test_name}"
     return 1
 }
@@ -809,9 +904,17 @@ exec qemu-system-x86_64 \
 # Issue #140 regression: a disk-persist + stable-key + integrity=false image
 # must boot, then RE-boot the same persistent overlay and still boot. On
 # unfixed code the first boot updates s_mtime past s_lastcheck; the second
-# boot's offline resize2fs rejects it ("Please run e2fsck -f") -> emergency.
+# boot's offline resize2fs rejects it ("Please run 'e2fsck'") -> emergency.
 # A persistent qcow2 overlay (relative backing filename, so qemu resolves it
 # inside the container) carries the first boot's writes into the second boot.
+#
+# The boots also verify delta CONTENT survival via the sentinel unit
+# (inject_sentinel_unit): the first boot's sentinel must still be present
+# with the same UUID after a forced VM kill (the power-loss case), and a
+# third boot after simulate_interrupted_delta_init() must recover to a
+# working snapshot from the half-initialized state (issue #141's
+# interrupted-initialization case: LUKS volume initialized and marked,
+# snapshot header never committed).
 test_qemu_boot_persist_second() {
     local test_name="$1"
     local output_image="$2"
@@ -831,20 +934,101 @@ test_qemu_boot_persist_second() {
         return 1
     fi
 
-    log::step "Persist two-boot test for: ${test_name}"
-    log::info "Boot #1 (expect success; fs mounted RW updates s_mtime via the persistent delta)"
-    if ! test_qemu_boot_direct "${test_name}-b1" "${overlay}" "${cpu_cores}" "${ram_size}"; then
+    log::step "Persist boot test for: ${test_name}"
+    log::info "Boot #1 (expect login + sentinel written through the persistent delta)"
+    if ! test_qemu_boot_direct "${test_name}-b1" "${overlay}" "${cpu_cores}" "${ram_size}" "CRYPTPILOT_SENTINEL_WRITTEN"; then
         log::error "Persist boot #1 failed for: ${test_name}"
         return 1
     fi
+    local b1_log="${WORKDIR}/${test_name}-b1-direct-boot.log"
+    local sentinel_uuid
+    sentinel_uuid=$(grep -aoE 'CRYPTPILOT_SENTINEL_WRITTEN [0-9a-f-]{36}' "${b1_log}" 2>/dev/null | head -1 | awk '{print $2}')
+    if [[ -z "${sentinel_uuid}" ]]; then
+        log::error "Boot #1 reached login but wrote no sentinel; was the sentinel unit injected?"
+        return 1
+    fi
+    log::info "Sentinel written: ${sentinel_uuid}"
 
-    log::info "Boot #2 (same overlay; expect success on fixed code, resize2fs rejection on unfixed)"
-    if ! test_qemu_boot_direct "${test_name}-b2" "${overlay}" "${cpu_cores}" "${ram_size}"; then
-        log::error "Persist boot #2 failed for: ${test_name} (this is the issue #140 regression on unfixed code)"
+    log::info "Boot #2 (same overlay after a forced kill; expect login + identical sentinel = data survived)"
+    if ! test_qemu_boot_direct "${test_name}-b2" "${overlay}" "${cpu_cores}" "${ram_size}" "CRYPTPILOT_SENTINEL_OK ${sentinel_uuid}"; then
+        log::error "Persist boot #2 failed for: ${test_name} (boot failure, or sentinel lost across the forced kill)"
         return 1
     fi
 
-    log::success "Persist two-boot test passed for: ${test_name}"
+    log::info "Simulating an interrupted delta initialization (blank COW header, LUKS still initialized)"
+    if ! simulate_interrupted_delta_init "${overlay}"; then
+        log::error "Failed to simulate the interrupted delta initialization for: ${test_name}"
+        return 1
+    fi
+    # The blank COW header means the recovery path reinitializes the delta, so
+    # the previous sentinel is gone by design; this boot only requires login.
+    log::info "Boot #3 (recovery; expect login from the reinitialized snapshot)"
+    if ! test_qemu_boot_direct "${test_name}-b3" "${overlay}" "${cpu_cores}" "${ram_size}"; then
+        log::error "Persist boot #3 failed for: ${test_name} (interrupted-initialization recovery is broken)"
+        return 1
+    fi
+
+    log::success "Persist boot test passed for: ${test_name}"
+    return 0
+}
+
+# Simulate a boot that crashed between marking the delta LUKS volume as
+# initialized and committing the dm-snapshot COW header: the COW header chunk
+# is blanked (16 sectors = 8 KiB, one snapshot chunk) while the LUKS volume
+# keeps its initialized marker. The next boot must recognize the readable
+# blank header and reinitialize the snapshot instead of failing or wiping a
+# volume it cannot interpret.
+#
+# Runs from the test container: connects the overlay via qemu-nbd, opens the
+# delta LUKS volume read-write (dm-integrity journal replay is a write, a
+# read-only open cannot apply it), zeroes the header chunk through the
+# mapping, and closes everything again.
+simulate_interrupted_delta_init() {
+    local overlay="$1"
+
+    modprobe dm-integrity 2>/dev/null || true
+    if ! command -v cryptsetup >/dev/null 2>&1; then
+        log::error "cryptsetup is required to simulate the interrupted delta initialization"
+        return 1
+    fi
+
+    local nbd_device
+    nbd_device=$(get_available_nbd)
+    log::info "Simulating interrupted delta init on ${overlay} via ${nbd_device}"
+
+    if ! qemu-nbd --connect="${nbd_device}" "${overlay}"; then
+        log::error "Failed to connect overlay to NBD"
+        return 1
+    fi
+
+    local cleanup_rc=0
+    if ! ( set -e
+        sleep 2
+        partprobe "${nbd_device}" 2>/dev/null || true
+        sleep 1
+        vgchange -ay cryptpilot >/dev/null 2>&1
+        echo -n "${TEST_PASSPHRASE}" | cryptsetup open /dev/cryptpilot/delta cryptpilot_int
+        # One dm-snapshot chunk: 16 sectors of 512 bytes (the chunk size used
+        # by the snapshot table in the guest boot service).
+        dd if=/dev/zero of=/dev/mapper/cryptpilot_int bs=512 count=16 conv=fsync status=none
+        cryptsetup close cryptpilot_int
+        vgchange -an cryptpilot >/dev/null 2>&1
+    ); then
+        cleanup_rc=1
+        # Best-effort cleanup of whatever step failed midway.
+        cryptsetup close cryptpilot_int >/dev/null 2>&1 || true
+        vgchange -an cryptpilot >/dev/null 2>&1 || true
+    fi
+
+    if ! qemu-nbd --disconnect "${nbd_device}" >/dev/null 2>&1; then
+        cleanup_rc=1
+    fi
+
+    if [[ ${cleanup_rc} -ne 0 ]]; then
+        log::error "Failed to blank the COW header chunk on the delta volume"
+        return 1
+    fi
+    log::success "COW header chunk blanked (interrupted initialization simulated)"
     return 0
 }
 
@@ -944,6 +1128,14 @@ run_test_case() {
         fi
     else
         log::info "Skipping cryptpilot-enhance (--skip-enhance)"
+    fi
+
+    # The second-boot persistence test asserts delta content survival via a
+    # sentinel, so the guest needs the reporting unit before conversion.
+    if [[ "${second_boot}" == "true" ]]; then
+        if ! inject_sentinel_unit "${input_image}"; then
+            return 1
+        fi
     fi
 
     # Run conversion

@@ -335,15 +335,18 @@ jobs:
   # Regression coverage for issues #140 / #141 on disk-persist + stable-key
   # (the combinations the 24-job test-convert matrix does NOT exercise, since
   # it uses the otp key provider which recreates the delta every boot).
-  # Both scenarios boot, then RE-boot the same persistent overlay; both
-  # boots must reach login.
-  #   fsck-141: disk-persist + integrity=true  -> first-boot dm-snapshot
-  #             creation must succeed (COW header chunk fully initialized
-  #             through the authenticated mapping), and the second boot must
-  #             keep and reuse the persisted COW metadata.
+  # Every scenario runs three boots of the same persistent overlay:
+  #   1. first boot reaches login and writes the sentinel through the
+  #      persistent delta;
+  #   2. after a forced VM kill (power loss), the same overlay boots and the
+  #      sentinel survives with an identical UUID (delta content persists);
+  #   3. after the COW header chunk is blanked (interrupted delta
+  #      initialization), the boot must recover to a working snapshot.
+  #   fsck-141: disk-persist + integrity=true  -> also requires the first
+  #             boot's dm-snapshot creation to succeed (COW header chunk
+  #             fully initialized through the authenticated mapping).
   #   fsck-140: disk-persist + integrity=false -> offline resize2fs must not
-  #             refuse a clean fs with s_lastcheck < s_mtime on the second
-  #             boot (e2fsck runs first).
+  #             refuse a clean fs with s_lastcheck < s_mtime (e2fsck first).
   # UKI only (both bugs fire in the dracut FDE service, bootloader-agnostic).
   # +4 jobs: 2 distros x 2 scenarios.
   test-convert-persist:
