@@ -408,14 +408,23 @@ EOF
         sleep 2
         partprobe "${nbd_device}" 2>/dev/null || true
         sleep 1
-        # The pre-converted image has a plain ext4 rootfs partition; the ESP
-        # and BIOS-boot partitions are not ext4 and are skipped by this match.
-        root_part=$(lsblk -rno NAME,FSTYPE "${nbd_device}" | awk '$2=="ext4"{print $1; exit}')
+        # The pre-converted image has a plain ext4 rootfs partition. Probe
+        # with blkid rather than lsblk: lsblk's FSTYPE column comes from the
+        # udev database, which does not exist in the CI test container (no
+        # systemd), while blkid probes the device directly.
+        root_part=""
+        for part in "${nbd_device}"p*; do
+            [[ -b "${part}" ]] || continue
+            if [[ "$(blkid -o value -s TYPE "${part}" 2>/dev/null)" == "ext4" ]]; then
+                root_part="${part}"
+                break
+            fi
+        done
         if [[ -z "${root_part}" ]]; then
             echo "no ext4 root partition found on ${nbd_device}" >&2
             exit 1
         fi
-        mount "/dev/${root_part}" "${mount_dir}"
+        mount "${root_part}" "${mount_dir}"
         cp "${unit_file}" "${mount_dir}/etc/systemd/system/cryptpilot-sentinel.service"
         ln -sf /etc/systemd/system/cryptpilot-sentinel.service \
             "${mount_dir}/etc/systemd/system/multi-user.target.wants/cryptpilot-sentinel.service"
