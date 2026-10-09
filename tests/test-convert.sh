@@ -114,9 +114,9 @@ check_root() {
 # Check required tools
 check_tools() {
     # virt-customize is optional: it drives cryptpilot-enhance, which skips
-    # gracefully when the binary is absent (e.g. on Alinux 4, where libguestfs
-    # no longer ships it). All other tools are mandatory for the convert/boot
-    # flow itself.
+    # gracefully when the binary is absent or unusable (e.g. on Alinux 4,
+    # where supermin cannot detect the distro's package manager). All other
+    # tools are mandatory for the convert/boot flow itself.
     local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4")
     local missing=()
 
