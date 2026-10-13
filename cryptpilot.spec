@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.9.2
+Version: 0.9.3
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -391,6 +391,22 @@ fi
 
 
 %changelog
+* Tue Oct 13 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.3-1
+- fix(enhance): skip hardening when supermin cannot detect the package manager
+- test(convert): probe the root partition with blkid, not lsblk
+- test(convert): verify delta data survival and interrupted init recovery
+- fix(docker): make the fde image able to convert alinux4 guests
+- ci(convert): create the persist overlay next to the output image
+- ci(convert): start dockerd for the direct QEMU boot on alinux4
+- ci(convert): boot the disk-persist integrity scenario twice
+- fix(fde): initialize a full snapshot chunk when wiping the COW header
+- ci(docker): build the three images in parallel matrix jobs
+- Drop agent skills and config maintained centrally
+- ci(convert): add disk-persist regression coverage for #140 and #141
+- fix(convert): wait for nbd image lock release before qemu-img convert
+- test(fde): cover filesystem checks before resizing
+- fix(fde): check ext4 filesystems before offline resize
+
 * Mon Sep 21 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.2-1
 - docs(skill): add release-version skill adapted from inclavare-containers/tng
 - ci(convert): boot the converted image across a vCPU/RAM matrix (2:4G/4:8G/4:16G) with --uki-stub-version 258 coverage
