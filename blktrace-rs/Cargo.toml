@@ -27,5 +27,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { version = "1.43.1", default-features = false, features = ["rt"], optional = true }
 
+[dev-dependencies]
+tokio = { version = "1.43.1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "time"] }
+
 [build-dependencies]
 bindgen = { workspace = true }

@@ -38,6 +38,8 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("blktrace-rs only supports Linux");
 
+#[cfg(feature = "async")]
+mod async_api;
 mod debugfs;
 mod error;
 mod event;

@@ -39,14 +39,16 @@ impl Drop for LoopDevice {
 }
 
 /// Attaches a sparse backing file to a loop device; None when loop
-/// devices are unavailable (containers without loop support). Each
+/// devices are unavailable (containers without loop support). `tag` keeps
+/// the backing file unique when several tests share one process. Each
 /// failure path below cleans up whatever it created before returning;
 /// once the guard exists, Drop owns the teardown.
 // Same lint exemption as the Drop impl above; the exit status is checked
 // by hand here.
 #[allow(clippy::disallowed_methods)]
-fn setup_loop_device() -> Option<LoopDevice> {
-    let backing = std::env::temp_dir().join(format!("blktrace-rs-test-{}", std::process::id()));
+fn setup_loop_device(tag: &str) -> Option<LoopDevice> {
+    let backing =
+        std::env::temp_dir().join(format!("blktrace-rs-test-{tag}-{}", std::process::id()));
     let file = std::fs::File::create(&backing).ok()?;
     if file.set_len(64 * 1024 * 1024).is_err() {
         std::fs::remove_file(&backing).ok();
@@ -87,7 +89,7 @@ fn captures_reads_from_a_loop_device() {
         eprintln!("skipping: not root");
         return;
     }
-    let Some(loop_dev) = setup_loop_device() else {
+    let Some(loop_dev) = setup_loop_device("sync") else {
         eprintln!("skipping: no loop device available");
         return;
     };
@@ -117,4 +119,53 @@ fn captures_reads_from_a_loop_device() {
         "expected read events, got {:?}",
         report.events
     );
+}
+
+#[cfg(feature = "async")]
+mod async_variant {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn captures_reads_from_a_loop_device_async() {
+        if !is_root() {
+            eprintln!("skipping: not root");
+            return;
+        }
+        // The async test shares the process with the sync one; the tag
+        // keeps their backing files apart.
+        let Some(loop_dev) = setup_loop_device("async") else {
+            eprintln!("skipping: no loop device available");
+            return;
+        };
+
+        let session = BlkTrace::monitor_async(&loop_dev.device)
+            .await
+            .expect("monitor starts");
+        BlkTrace::drop_page_cache().expect("root can drop the page cache");
+
+        {
+            let mut reader = OpenOptions::new()
+                .read(true)
+                .open(&loop_dev.device)
+                .expect("open loop device");
+            reader.seek(SeekFrom::Start(0)).unwrap();
+            reader.read_exact(&mut [0; 125]).unwrap();
+            reader.seek(SeekFrom::Start(4096)).unwrap();
+            reader.read_exact(&mut [0; 1025]).unwrap();
+        }
+
+        let report = session
+            .shutdown_async()
+            .await
+            .expect("shutdown collects the report");
+
+        assert_eq!(report.dropped, 0);
+        assert!(!report.events.is_empty());
+        let count_read = report.events.iter().filter(|event| event.is_read()).count();
+        assert!(
+            count_read > 0,
+            "expected read events, got {:?}",
+            report.events
+        );
+    }
 }
