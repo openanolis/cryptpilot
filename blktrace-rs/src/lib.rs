@@ -33,7 +33,9 @@
 //! async callers never stall their executor.
 
 #![warn(missing_docs)]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+// On docs.rs builds this shows feature-gated items (the async API) with
+// cfg badges instead of hiding them.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("blktrace-rs only supports Linux");
