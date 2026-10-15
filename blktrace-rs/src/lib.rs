@@ -39,8 +39,10 @@
 compile_error!("blktrace-rs only supports Linux");
 
 mod error;
+mod event;
 mod uapi;
 
 pub use uapi::*;
 
 pub use error::BlktraceError;
+pub use event::BlkTraceEvent;
