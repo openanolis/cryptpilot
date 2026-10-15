@@ -1,13 +1,14 @@
+#[cfg(feature = "provider-kbs")]
 use std::{env, path::PathBuf};
 
 #[cfg(feature = "provider-kbs")]
 use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
 fn main() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-
     #[cfg(feature = "provider-kbs")]
     {
+        let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
         let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(false);
 
         fn strip_inner_attribute(path: &std::path::Path) {

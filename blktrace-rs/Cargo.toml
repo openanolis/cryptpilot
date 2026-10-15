@@ -17,18 +17,18 @@ name = "blktrace_rs"
 default = []
 async = ["dep:tokio"]
 
-# tokio is declared locally (not via workspace) so the published crate pulls in
-# only the "rt" feature instead of the app's full feature set.
+# tokio and nix are declared locally (not via workspace) so the published crate
+# pulls in only the features it needs instead of the app's full feature set.
 [dependencies]
 mnt = { workspace = true }
-nix = { workspace = true, features = ["ioctl", "mount"] }
+nix = { version = "0.29.0", default-features = false, features = ["ioctl", "mount"] }
 num_cpus = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { version = "1.43.1", default-features = false, features = ["rt"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.43.1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "time"] }
+tokio = { version = "1.43.1", default-features = false, features = ["rt", "rt-multi-thread", "macros"] }
 
 [build-dependencies]
 bindgen = { workspace = true }

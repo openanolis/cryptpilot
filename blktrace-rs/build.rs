@@ -3,6 +3,11 @@ use std::{env, path::PathBuf};
 use bindgen::RustTarget;
 
 fn main() {
+    // Let lib.rs's compile_error! deliver the clean "Linux only" message
+    // instead of a bindgen header failure on other targets.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
+        return;
+    }
     let Ok(target_version) = RustTarget::stable(85, 0) else {
         panic!("Invalid Rust target version, at least version 1.85 required")
     };

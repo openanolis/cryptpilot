@@ -1002,7 +1002,6 @@ dependencies = [
  "strum",
  "tempfile",
  "tokio",
- "tokio-util",
  "toml 0.8.19",
  "toml_edit 0.22.24",
  "tracing",
