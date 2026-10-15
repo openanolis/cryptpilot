@@ -1,0 +1,31 @@
+[package]
+name = "blktrace-rs"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/openanolis/cryptpilot"
+description = "Capture and parse Linux block-layer I/O traces via kernel ioctls, without the blktrace CLI tools"
+keywords = ["blktrace", "block-io", "tracing", "linux"]
+categories = ["os::linux-apis"]
+
+[lib]
+name = "blktrace_rs"
+
+[features]
+default = []
+async = ["dep:tokio"]
+
+# tokio is declared locally (not via workspace) so the published crate pulls in
+# only the "rt" feature instead of the app's full feature set.
+[dependencies]
+mnt = { workspace = true }
+nix = { workspace = true, features = ["ioctl", "mount"] }
+num_cpus = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { version = "1.43.1", default-features = false, features = ["rt"], optional = true }
+
+[build-dependencies]
+bindgen = { workspace = true }
