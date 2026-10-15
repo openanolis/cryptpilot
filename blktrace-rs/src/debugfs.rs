@@ -12,8 +12,6 @@ const DEBUGFS: &str = "/sys/kernel/debug";
 /// Errors from scanning /proc/self/mountinfo are tolerated: a stale or
 /// unreadable mount list falls through to a mount attempt, which fails
 /// loudly if debugfs really is unavailable.
-// The session code that calls this is not wired up yet.
-#[allow(dead_code)]
 pub(crate) fn ensure_debugfs() -> Result<(), BlktraceError> {
     let debugfs = Path::new(DEBUGFS);
     if !debugfs.exists() {

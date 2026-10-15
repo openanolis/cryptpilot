@@ -50,8 +50,6 @@ impl BlkTraceEvent {
 /// [`std::io::ErrorKind::UnexpectedEof`]; callers retry while their trace
 /// session is still live, because the kernel appends records to the relay
 /// channel as they happen.
-// The relay-channel reader that calls this is not wired up yet.
-#[allow(dead_code)]
 pub(crate) fn read_event(reader: &mut impl Read) -> Result<BlkTraceEvent, BlktraceError> {
     // blk_io_trace is plain old data, so the on-disk form is the in-memory
     // form; read the bytes straight into it.

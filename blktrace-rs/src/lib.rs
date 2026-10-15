@@ -41,10 +41,11 @@ compile_error!("blktrace-rs only supports Linux");
 mod debugfs;
 mod error;
 mod event;
+mod session;
 mod uapi;
 
 pub use uapi::*;
 
-pub use debugfs::drop_page_cache;
 pub use error::BlktraceError;
 pub use event::BlkTraceEvent;
+pub use session::{BlkTrace, BlkTraceReport, BlkTraceSession};
