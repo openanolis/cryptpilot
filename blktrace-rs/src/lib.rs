@@ -38,11 +38,13 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("blktrace-rs only supports Linux");
 
+mod debugfs;
 mod error;
 mod event;
 mod uapi;
 
 pub use uapi::*;
 
+pub use debugfs::drop_page_cache;
 pub use error::BlktraceError;
 pub use event::BlkTraceEvent;
