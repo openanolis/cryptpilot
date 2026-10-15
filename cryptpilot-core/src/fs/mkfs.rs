@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
+use blktrace_rs::BlkTrace;
 use block_devs::BlckExt as _;
 use nix::unistd::SysconfVar;
 use ordermap::OrderSet;
@@ -15,8 +16,6 @@ use crate::{
     fs::{blkid::BlkidProbeResult, block::dummy::DummyDevice, cmd::CheckCommandOutput as _},
     types::{IntegrityType, MakeFsType},
 };
-
-use super::block::blktrace::BlkTrace;
 
 #[async_trait]
 pub trait MakeFs {
@@ -81,7 +80,12 @@ impl MakeFs for IntegrityNoWipeMakeFs {
 
         // Enable the blktrace
         tracing::info!("Starting to record device operations");
-        let tracer = BlkTrace::monitor(&dummy_device_path).await?;
+        let tracer = BlkTrace::monitor_async(&dummy_device_path).await?;
+        // Reads served from the page cache never reach the block layer,
+        // so drop it before the mkfs work below is traced.
+        tokio::task::spawn_blocking(BlkTrace::drop_page_cache)
+            .await
+            .context("Failed to write to /proc/sys/vm/drop_caches")??;
         tracing::trace!(
             device = ?dummy_device_path,  "start blktrace on device"
         );
@@ -98,7 +102,7 @@ impl MakeFs for IntegrityNoWipeMakeFs {
                 .await?;
         }
 
-        let (events, _dropped) = tracer.shutdown().await?;
+        let events = tracer.shutdown_async().await?.events;
         let page_size =
             nix::unistd::sysconf(SysconfVar::PAGE_SIZE)?.context("Failed to get page size")? as u64;
 

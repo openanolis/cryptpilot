@@ -12,6 +12,7 @@ async-trait = {workspace = true}
 async-walkdir = {workspace = true}
 authenticode = {workspace = true}
 base64 = {workspace = true}
+blktrace-rs = { path = "../blktrace-rs", features = ["async"] }
 block-devs = {workspace = true}
 clap = {workspace = true}
 comfy-table = {workspace = true}
@@ -30,9 +31,7 @@ lazy_static = {workspace = true}
 libc = {workspace = true}
 libcryptsetup-rs = {workspace = true}
 loopdev-3 = {workspace = true}
-mnt = {workspace = true}
 nix = {workspace = true}
-num_cpus = {workspace = true}
 object = {workspace = true}
 ordermap = {workspace = true}
 protobuf = {workspace = true, optional = true}
@@ -60,7 +59,6 @@ which = {workspace = true}
 zeroize = {workspace = true}
 
 [build-dependencies]
-bindgen = {workspace = true}
 ttrpc-codegen = {workspace = true, optional = true}
 
 [dev-dependencies]
