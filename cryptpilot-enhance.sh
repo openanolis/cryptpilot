@@ -127,17 +127,18 @@ done
 }
 
 # virt-customize is the tool this script drives. On Alinux 3 / RHEL 8 it ships in
-# the "libguestfs-tools-c" package; on Alinux 4 it arrives via the "guestfs-tools"
-# package pulled in by libguestfs. Image hardening is not essential to FDE
-# convert/boot verification, so when virt-customize is absent OR unusable we
-# skip hardening with a warning rather than fail the whole pipeline.
+# the "libguestfs-tools-c" package; on Alinux 4 it ships in "guestfs-tools",
+# which provides "libguestfs-tools-c" and lands via the RPM's weak dependency.
+# Image hardening is not essential to FDE convert/boot verification, so when
+# virt-customize is absent OR unusable we skip hardening with a warning rather
+# than fail the whole pipeline.
 # Unusable means: supermin, which builds the appliance libguestfs boots, cannot
 # detect the distro's package manager. Alinux 4 sets ID_LIKE=anolis and the
 # supermin build has no anolis driver, so every virt-customize invocation fails
 # instantly with "supermin: could not detect package manager" there.
 if ! command -v virt-customize >/dev/null 2>&1; then
     log::warn "virt-customize is not installed; skipping image hardening for $IMAGE"
-    log::warn "Install libguestfs-tools-c (Alinux 3) or libguestfs-tools (Ubuntu) to enable hardening."
+    log::warn "Install libguestfs-tools-c (Alinux 3/4) or libguestfs-tools (Ubuntu) to enable hardening."
     log::success "Hardening skipped (virt-customize unavailable)."
     exit 0
 fi

@@ -372,8 +372,8 @@ run_enhance() {
 # the write reach the qcow2 overlay through dm-crypt/dm-integrity, so the
 # marker survives even a forced VM kill (the power-loss case).
 #
-# Uses qemu-nbd + mount rather than libguestfs: Alinux 3 ships virt-customize
-# in libguestfs-tools-c, but Alinux 4's merged libguestfs package does not,
+# Uses qemu-nbd + mount rather than libguestfs: on Alinux 4 virt-customize
+# (guestfs-tools) cannot run anyway because supermin has no anolis driver,
 # and the pre-converted rootfs partition is plain ext4 anyway.
 inject_sentinel_unit() {
     local image="$1"
