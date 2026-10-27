@@ -1616,9 +1616,31 @@ if [ "${uki:-false}" = true ]; then
 
     # Generate UKI with dracut
     echo "Generating UKI image"
-    dracut_args=("${dracut_common_args[@]}" --uefi --hostonly-cmdline)
-    cmdline=$(dracut "${dracut_args[@]}" --print-cmdline)
+    # No --hostonly-cmdline on the real build: devtmpfs is a single shared
+    # instance, so the chroot's /dev/disk reflects the build host's udev state,
+    # and dracut would bake build-host device paths into the initrd's wait
+    # hooks and cmdline.d. The cmdline is supplied in full via --kernel-cmdline;
+    # the --print-cmdline probe below enables its own hostonly mode regardless.
+    dracut_args=("${dracut_common_args[@]}" --uefi)
+    # Drop dracut's banner lines (e.g. "running in hostonly mode in a
+    # container!!") so only the computed kernel parameters are captured; they
+    # otherwise end up verbatim in the UKI's .cmdline section.
+    cmdline=$(dracut "${dracut_args[@]}" --print-cmdline 2>/dev/null | grep -v "^dracut: ")
     cmdline=$(echo "${cmdline} ${uki_append_cmdline}" | xargs)
+    # Normalize root= to the filesystem UUID. A /dev path here names the device
+    # as seen on the build host and the guest can never satisfy it; an
+    # unsatisfiable root would leave dracut waiting until the initqueue timeout.
+    root_val=""
+    if [[ ${cmdline} =~ root=([^ ]+) ]]; then
+        root_val="${BASH_REMATCH[1]}"
+    fi
+    if [[ ${root_val} == /dev/* ]]; then
+        root_uuid=$(blkid -o value -s UUID "${root_val}" 2>/dev/null || true)
+        if [[ -n ${root_uuid} ]]; then
+            echo "Normalizing root=${root_val} to UUID=${root_uuid}"
+            cmdline=${cmdline//root=${root_val}/root=UUID=${root_uuid}}
+        fi
+    fi
     dracut_args=("${dracut_args[@]}" --kernel-cmdline "$cmdline")
 
     # Put UKI to /tmp/ instead of /boot directory since objcopy will create a temporary file in the same directory, which may cause no space left error
