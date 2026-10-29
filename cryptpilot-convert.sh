@@ -501,14 +501,36 @@ install_zram_module_if_needed() {
 
         log::info "Detected kernel version: $kernel_version"
 
-        # Install the modules package with minimal dependencies
-        if ! chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
-            ${https_proxy:+https_proxy=$https_proxy} \
-            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
-            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
-            ${all_proxy:+all_proxy=$all_proxy} \
-            ${no_proxy:+no_proxy=$no_proxy} \
-            bash -c "apt-get update && apt-get install -y --no-install-recommends --no-install-suggests linux-modules-extra-$kernel_version"; then
+        # Install the modules package with minimal dependencies. The selected
+        # kernel can be a PPA/custom flavor whose linux-modules-extra is not in
+        # any configured repo (the highest-versioned vmlinuz outranks the
+        # repo-bundled -generic one); retry once with the -generic flavor before
+        # giving up, so mixed-flavor images convert instead of aborting.
+        local candidate_versions=("$kernel_version")
+        local generic_version
+        generic_version=$(chroot "${rootfs_mount_point}" bash -c "dpkg -l | grep -oP 'linux-image-\K[0-9.-]+-generic' | head -n1")
+        if [ -n "$generic_version" ] && [ "$generic_version" != "$kernel_version" ]; then
+            candidate_versions+=("$generic_version")
+        fi
+
+        local installed=false
+        for candidate_version in "${candidate_versions[@]}"; do
+            if chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+                ${https_proxy:+https_proxy=$https_proxy} \
+                ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+                ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+                ${all_proxy:+all_proxy=$all_proxy} \
+                ${no_proxy:+no_proxy=$no_proxy} \
+                bash -c "apt-get update && apt-get install -y --no-install-recommends --no-install-suggests linux-modules-extra-$candidate_version"; then
+                installed=true
+                break
+            fi
+            if [ "${#candidate_versions[@]}" -gt 1 ]; then
+                log::warn "linux-modules-extra for kernel $candidate_version is unavailable, retrying with a repo-bundled flavor"
+            fi
+        done
+
+        if [ "$installed" = false ]; then
             log::error "Could not install zram modules, possibly due to disk space constraints or missing package"
             return 1
         fi
@@ -1062,11 +1084,13 @@ if [ "${uki:-false}" = false ]; then
             echo "Syncing regenerated grub.cfg to ESP: $esp_grub_cfg"
             cp -f "$grub2_cfg" "$esp_grub_cfg"
             esp_grub_dir=$(dirname "$esp_grub_cfg")
-            for moddir in x86_64-efi arm64-efi i386-efi; do
-                if [ -d "$boot_grub_dir/$moddir" ]; then
-                    rm -rf "$esp_grub_dir/$moddir"
-                    cp -a "$boot_grub_dir/$moddir" "$esp_grub_dir/$moddir"
-                fi
+            for modpath in "$boot_grub_dir"/*-efi; do
+                # No nullglob inside the chroot script: an unmatched glob
+                # iterates its literal pattern, filtered out by -d below.
+                [ -d "$modpath" ] || continue
+                moddir=$(basename "$modpath")
+                rm -rf "$esp_grub_dir/$moddir"
+                cp -a "$modpath" "$esp_grub_dir/$moddir"
             done
         done
     fi
