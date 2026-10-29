@@ -131,24 +131,80 @@ impl BootArtifacts for GrubBootArtifacts {
     }
 }
 
-/// Resolve the id of GRUB's default menuentry from a `grub.cfg`.
+/// Resolve the id of the entry GRUB boots by default from a `grub.cfg`.
 ///
 /// Used when the GRUB environment block has no `saved_entry` (e.g. an image that
-/// has never been booted). The default selection on such images is
-/// `set default="0"`, i.e. the first menuentry, so its id is returned. The id is
-/// the quoted token right before the entry's opening brace, e.g.
+/// has never been booted). GRUB then boots the `set default=` entry; generated
+/// configs ship `set default="0"`, i.e. the first top-level entry, but an image
+/// may set any numeric index. Both `menuentry` and `submenu` headers count as
+/// top-level entries; entries nested inside a submenu do not. A non-numeric or
+/// out-of-range default falls back to the first entry. A submenu selected by
+/// default boots its first nested entry, so its id is returned. The id is the
+/// last quoted token of the entry header, e.g.
 /// `menuentry 'Ubuntu' --class os $menuentry_id_option 'gnulinux-simple-<uuid>' {`.
 fn default_menuentry_id(grub_cfg: &str) -> Option<String> {
-    for line in grub_cfg.lines() {
-        let line = line.trim();
-        // Match an actual menuentry definition (not e.g. `menuentry_id_option=...`).
-        if !line.starts_with("menuentry ") || !line.contains('{') {
-            continue;
+    let default_index = grub_cfg
+        .lines()
+        .find_map(|line| parse_set_default_index(line.trim()))
+        .unwrap_or(0);
+
+    let lines: Vec<&str> = grub_cfg.lines().map(str::trim).collect();
+
+    // Depth tracks brace nesting so only top-level entry headers are counted;
+    // entries nested inside a submenu sit at depth >= 1.
+    let mut depth = 0usize;
+    let mut headers: Vec<(usize, bool)> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let is_submenu = line.starts_with("submenu ");
+        if depth == 0 && (is_submenu || line.starts_with("menuentry ")) && line.contains('{') {
+            headers.push((i, is_submenu));
         }
-        let head = line.split('{').next().unwrap_or(line).trim_end();
-        if let Some(end) = head.rfind('\'') {
-            if let Some(start) = head[..end].rfind('\'') {
-                return Some(head[start + 1..end].to_string());
+        depth = (depth + line.matches('{').count()).saturating_sub(line.matches('}').count());
+    }
+
+    let &(header_idx, is_submenu) = headers.get(default_index).or_else(|| headers.first())?;
+    if !is_submenu {
+        return entry_header_id(lines[header_idx]);
+    }
+
+    let mut depth = 0usize;
+    for line in &lines[header_idx..] {
+        if depth == 1 && line.starts_with("menuentry ") && line.contains('{') {
+            if let Some(id) = entry_header_id(line) {
+                return Some(id);
+            }
+        }
+        depth = (depth + line.matches('{').count()).saturating_sub(line.matches('}').count());
+        if depth == 0 {
+            break;
+        }
+    }
+    entry_header_id(lines[header_idx])
+}
+
+/// Parse a `set default="N"` line into its index. Values containing `$` (e.g.
+/// `set default="${next_entry}"` in 00_header's boot-once conditional) cannot be
+/// resolved statically, so they are skipped and a later plain `set default=` wins.
+fn parse_set_default_index(line: &str) -> Option<usize> {
+    let rest = line.strip_prefix("set default=")?;
+    let value = rest.trim().trim_matches(|c| c == '\'' || c == '"');
+    if value.contains('$') {
+        return None;
+    }
+    value.parse::<usize>().ok()
+}
+
+/// Extract the id (last quoted token) from a menuentry or submenu header line.
+/// grub-mkconfig always emits single quotes; double quotes are accepted as a
+/// graceful fallback for hand-written configs.
+fn entry_header_id(header: &str) -> Option<String> {
+    let head = header.split('{').next().unwrap_or(header).trim_end();
+    for quote in ['\'', '"'] {
+        if let Some(end) = head.rfind(quote) {
+            if let Some(start) = head[..end].rfind(quote) {
+                if start < end {
+                    return Some(head[start + 1..end].to_string());
+                }
             }
         }
     }
@@ -408,9 +464,10 @@ pub(super) trait FdeDiskGrubExt: Disk {
     ) -> Result<KernelArtifacts> {
         // GRUB's default selection order is: next_entry > saved_entry > `set default`.
         // Freshly built / never-booted images have an empty GRUB environment block
-        // (no `saved_entry`); GRUB then boots the default entry (`set default="0"`,
-        // i.e. the first menuentry). Fall back to that instead of failing, so that
-        // reference values can be computed for images that have never been booted.
+        // (no `saved_entry`); GRUB then boots the `set default=` entry (the first
+        // top-level one on generated configs). Fall back to that instead of
+        // failing, so that reference values can be computed for images that have
+        // never been booted.
         let saved_entry = match grub_vars.get("saved_entry") {
             Some(entry) => entry.clone(),
             None => {
@@ -706,5 +763,137 @@ pub(super) trait FdeDiskGrubExt: Disk {
             .with_context(|| format!("Failed to read GRUB config file at {:?}", grub_cfg_path))?;
 
         Ok(String::from_utf8(grub_cfg_content)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const U60: &str = "6.60.0-1";
+    const U61: &str = "6.61.0-1";
+
+    fn ubuntu_cfg(default: &str) -> String {
+        format!(
+            r#"if [ "${{next_entry}}" ] ; then
+   set default="${{next_entry}}"
+   set next_entry=
+fi
+set default="{default}"
+menuentry 'Ubuntu' --class ubuntu --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-simple-1111-2222' {{
+    linux /boot/vmlinuz-{U60} root=UUID=1111-2222
+    initrd /boot/initrd.img-{U60}
+}}
+submenu 'Advanced options for Ubuntu' $menuentry_id_option 'gnulinux-advanced-1111-2222' {{
+    menuentry 'Ubuntu, with Linux {U61}' --class gnu-linux $menuentry_id_option 'gnulinux-{U61}-advanced-1111-2222' {{
+        linux /boot/vmlinuz-{U61} root=UUID=1111-2222
+        initrd /boot/initrd.img-{U61}
+    }}
+    menuentry 'Ubuntu, with Linux {U60}' --class gnu-linux $menuentry_id_option 'gnulinux-{U60}-advanced-1111-2222' {{
+        linux /boot/vmlinuz-{U60} root=UUID=1111-2222
+        initrd /boot/initrd.img-{U60}
+    }}
+}}
+"#
+        )
+    }
+
+    #[test]
+    fn test_first_menuentry_selected_by_default() {
+        // The boot-once `set default="${next_entry}"` line must be skipped in
+        // favor of the plain `set default="0"` that follows.
+        let cfg = ubuntu_cfg("0");
+        assert_eq!(
+            default_menuentry_id(&cfg),
+            Some("gnulinux-simple-1111-2222".to_string())
+        );
+    }
+
+    #[test]
+    fn test_set_default_index_selects_second_top_level_entry() {
+        // Entry 1 is the submenu; GRUB boots its first nested entry from there.
+        let cfg = ubuntu_cfg("1");
+        assert_eq!(
+            default_menuentry_id(&cfg),
+            Some(format!("gnulinux-{U61}-advanced-1111-2222"))
+        );
+    }
+
+    #[test]
+    fn test_nested_menuentries_are_not_counted() {
+        // Entries inside the submenu sit at depth 1; default="2" is out of
+        // range, so the first top-level entry wins.
+        let cfg = ubuntu_cfg("2");
+        assert_eq!(
+            default_menuentry_id(&cfg),
+            Some("gnulinux-simple-1111-2222".to_string())
+        );
+    }
+
+    #[test]
+    fn test_out_of_range_default_falls_back_to_first_entry() {
+        let cfg = ubuntu_cfg("99");
+        assert_eq!(
+            default_menuentry_id(&cfg),
+            Some("gnulinux-simple-1111-2222".to_string())
+        );
+    }
+
+    #[test]
+    fn test_non_numeric_default_falls_back_to_first_entry() {
+        let cfg = ubuntu_cfg("saved");
+        assert_eq!(
+            default_menuentry_id(&cfg),
+            Some("gnulinux-simple-1111-2222".to_string())
+        );
+    }
+
+    #[test]
+    fn test_missing_set_default_selects_first_entry() {
+        let cfg = ubuntu_cfg("0").replace("set default=\"0\"\n", "");
+        assert_eq!(
+            default_menuentry_id(&cfg),
+            Some("gnulinux-simple-1111-2222".to_string())
+        );
+    }
+
+    #[test]
+    fn test_submenu_first_without_default_index() {
+        // No usable `set default=` (only the ${next_entry} conditional): the
+        // first top-level entry is the submenu, and GRUB boots its first
+        // nested entry from there.
+        let cfg = ubuntu_cfg("0")
+            .replace("set default=\"0\"\n", "")
+            .replace(
+                "menuentry 'Ubuntu' --class ubuntu --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-simple-1111-2222' {\n",
+                "",
+            );
+        assert_eq!(
+            default_menuentry_id(&cfg),
+            Some(format!("gnulinux-{U61}-advanced-1111-2222"))
+        );
+    }
+
+    #[test]
+    fn test_header_without_brace_is_skipped() {
+        // A header line without '{' is not an entry; the next well-formed
+        // entry is selected instead.
+        let cfg = "menuentry 'Ubuntu' --class os\nmenuentry 'Other' --class os $menuentry_id_option 'gnulinux-other' {\n}\n";
+        assert_eq!(
+            default_menuentry_id(cfg),
+            Some("gnulinux-other".to_string())
+        );
+    }
+
+    #[test]
+    fn test_double_quoted_menuentry_is_handled() {
+        // grub-mkconfig never emits double quotes, but hand-written configs do.
+        let cfg = "set default=\"0\"\nmenuentry \"Custom Kernel\" --id custom {\n    linux /boot/vmlinuz-custom\n}\n";
+        assert_eq!(default_menuentry_id(cfg), Some("Custom Kernel".to_string()));
+    }
+
+    #[test]
+    fn test_empty_grub_cfg() {
+        assert_eq!(default_menuentry_id(""), None);
     }
 }

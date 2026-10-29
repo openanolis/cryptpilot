@@ -98,7 +98,7 @@ flowchart LR
     G --> H[System Startup]
 ```
 
-GRUB mode supports multi-kernel version management, allowing users to select different kernel versions through the menu during boot. `cryptpilot-fde-host` parses saved_entry in grubenv when calculating reference values, reading the corresponding kernel version for measurement.
+GRUB mode supports multi-kernel version management, allowing users to select different kernel versions through the menu during boot. `cryptpilot-fde-host` parses saved_entry in grubenv when calculating reference values, reading the corresponding kernel version for measurement. For an image that has never been booted (empty grubenv, no saved_entry), the entry configured as `set default=` in grub.cfg (the first top-level menuentry on generated configs) is used instead.
 
 ### 3.2 UKI Mode (`--uki`)
 

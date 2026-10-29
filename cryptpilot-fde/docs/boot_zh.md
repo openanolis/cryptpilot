@@ -98,7 +98,7 @@ flowchart LR
     G --> H[系统启动]
 ```
 
-GRUB模式支持多内核版本管理，用户可在启动时通过菜单选择不同内核版本。`cryptpilot-fde-host`在计算参考值时解析grubenv中的saved_entry，读取对应内核版本进行度量。
+GRUB模式支持多内核版本管理，用户可在启动时通过菜单选择不同内核版本。`cryptpilot-fde-host`在计算参考值时解析grubenv中的saved_entry，读取对应内核版本进行度量。对于从未启动过的镜像（grubenv为空、无saved_entry），则回退使用grub.cfg中`set default=`配置的入口（生成配置中即第一条顶层menuentry）。
 
 ### 3.2 UKI模式（`--uki`）
 
