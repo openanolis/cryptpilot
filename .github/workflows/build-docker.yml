@@ -1,16 +1,6 @@
 name: Build Docker Images
 
-on:
-  push:
-    branches:
-      - 'master'
-      - 'main'
-    tags:
-      - 'v*.*.*'
-  pull_request:
-    branches:
-      - 'master'
-      - 'main'
+on: workflow_dispatch
 
 jobs:
   build-and-push:
