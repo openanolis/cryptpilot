@@ -778,12 +778,19 @@ disk::install_deb_on_rootfs() {
 #   $2 - Root filesystem device or image file to mount (e.g., /dev/sda2 or ./root.img)
 #   $3 - EFI partition device path (optional; e.g., /dev/sda1) — only used if efi_part_exist=true
 #   $4 - Boot file/device path (e.g., /dev/sda2 or ./boot.img) — used when boot_part_exist=false
+#   $5 - (Optional) Boot partition override: when set, /boot mounts from this device
+#        instead of boot_part or boot_file_path. Needed when the chroot runs while the
+#        globals point at devices that no longer exist (e.g. output vs source disk).
+#   $6 - (Optional) EFI partition override: when set, /boot/efi mounts from this
+#        device instead of $3.
 #
 setup_chroot_mounts() {
     local rootfs="$1"
     local rootfs_file_or_part="$2"
     local efi_part="$3"
     local boot_file_path="$4"
+    local boot_override_part="${5:-}"
+    local efi_override_part="${6:-}"
 
     log::info "Preparing chroot environment at $rootfs"
 
@@ -812,12 +819,15 @@ setup_chroot_mounts() {
         esac
     done
 
-    # Mount /boot — either from dedicated partition, from a file/image, or skip in UKI mode if no boot partition
+    # Mount /boot: override device first, else dedicated partition, else a
+    # file/image, else nothing (UKI mode without a boot partition)
     local boot_target="$rootfs/boot"
     mkdir -p "$boot_target"
     proc::hook_exit "mountpoint -q '$boot_target' && disk::umount_wait_busy '$boot_target'"
 
-    if [ "$boot_part_exist" = "false" ]; then
+    if [ -n "$boot_override_part" ]; then
+        mount "$boot_override_part" "$boot_target"
+    elif [ "$boot_part_exist" = "false" ]; then
         if [ -n "$boot_file_path" ]; then
             # /boot is part of root or stored as a file (e.g., in embedded systems)
             mount "$boot_file_path" "$boot_target"
@@ -828,11 +838,11 @@ setup_chroot_mounts() {
     fi
 
     # Conditionally mount EFI system partition under /boot/efi
-    if [ "$efi_part_exist" = "true" ] && [ -n "$efi_part" ]; then
+    if [ -n "$efi_override_part" ] || { [ "$efi_part_exist" = "true" ] && [ -n "$efi_part" ]; }; then
         local efi_target="$rootfs/boot/efi"
         mkdir -p "$efi_target"
         proc::hook_exit "mountpoint -q '$efi_target' && disk::umount_wait_busy '$efi_target'"
-        mount "$efi_part" "$efi_target"
+        mount "${efi_override_part:-$efi_part}" "$efi_target"
     fi
 
     # Bind-mount critical network config files from host into chroot (read-only)
@@ -1241,11 +1251,9 @@ resolve_arch_stub_pkg() {
 }
 
 step:update_initrd() {
-    local efi_part=$1
-    local boot_file_path=$2
-    local uki=$3
-    local uki_append_cmdline=$4
-    local uki_stub_version=$5
+    local uki=$1
+    local uki_append_cmdline=$2
+    local uki_stub_version=$3
 
     update_initrd_inner() {
         local rootfs_mount_point=$1
@@ -1780,11 +1788,29 @@ EOF
         fi
     }
 
-    # Remove read-only flag from rootfs.img
-    tune2fs -O ^read-only "${rootfs_file_path}"
+    # The output rootfs was verity-formatted from source-read in step 8, so
+    # dracut must not modify that content anymore: run it against the
+    # source-write snapshot instead, and let only the produced initrd/UKI land
+    # on the output boot/EFI partitions mounted below.
+    local rootfs_mount_point="${workdir}/rootfs"
+    local source_write_rootfs_part="${source_write_device}p${source_rootfs_part_num}"
 
-    # Note that the rootfs.img will not be used any more so mount it without '-o ro' flag will not change the hash of rootfs.
-    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline" "$uki_stub_version"
+    # The shrink marked the filesystem read-only; dracut needs to write /boot and /lib/modules
+    tune2fs -O ^read-only "${source_write_rootfs_part}"
+
+    # Mount /boot from the output partition whenever one exists there: copied
+    # from the source or created in step 5 (boot_part_num is unset only when
+    # the source had none and UKI keeps /boot inside the rootfs).
+    local boot_override_part=""
+    if [ -n "${boot_part_num:-}" ]; then
+        boot_override_part="${output_device}p${boot_part_num}"
+    fi
+
+    setup_chroot_mounts "${rootfs_mount_point}" "${source_write_rootfs_part}" "${output_device}p${efi_part_num}" "${boot_file_path}" "${boot_override_part}" "${output_device}p${efi_part_num}"
+    update_initrd_inner "${rootfs_mount_point}" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
+    cleanup_chroot_mounts "${rootfs_mount_point}"
+
+    sync
 }
 
 step::shrink_rootfs() {
@@ -2023,7 +2049,7 @@ step::setup_rootfs_lv_with_encrypt() {
     rootfs_size=$((fs_block_size * fs_block_count))
     local rootfs_lv_size_in_bytes=$((rootfs_size + 16 * 1024 * 1024)) # filesystem size plus LUKS2 header size
     log::info "Creating rootfs logical volume"
-    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${device}"
+    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${output_device}"
     proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B cryptpilot # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
     # Create a encrypted volume
     log::info "Encrypting rootfs logical volume with LUKS2"
@@ -2047,7 +2073,7 @@ step::setup_rootfs_lv_without_encrypt() {
     fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
     rootfs_size=$((fs_block_size * fs_block_count))
     log::info "Creating rootfs logical volume"
-    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${device}"
+    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${output_device}"
     # Exact filesystem size is fine: lvcreate rounds up to the physical extent boundary (4MB by default), so no LUKS-style slack is needed
     proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_size}B cryptpilot
     # Copy rootfs content to the lvm volume
@@ -2074,11 +2100,11 @@ step::setup_rootfs_hash_lv() {
 
     local rootfs_hash_size_in_byte
     rootfs_hash_size_in_byte=$(stat --printf="%s" "${rootfs_hash_file_path}")
-    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs_hash ]] && disk::dm_remove_all ${device}"
+    proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs_hash ]] && disk::dm_remove_all ${output_device}"
     proc::exec_subshell_flose_fds lvcreate -n rootfs_hash --size "${rootfs_hash_size_in_byte}"B cryptpilot
     dd status=progress "if=${rootfs_hash_file_path}" of=/dev/mapper/cryptpilot-rootfs_hash bs=4M
     rm -f "${rootfs_hash_file_path}"
-    disk::dm_remove_all "${device}"
+    disk::dm_remove_all "${output_device}"
 
     # Recording rootfs hash in metadata file
     log::info "Generate metadata file"
@@ -2116,7 +2142,6 @@ main() {
     local rootfs_orig_part_exist=false
     local source_read_device
     local source_write_device
-    local rootfs_file_path # still read by step:update_initrd, which is being rewired away from the extracted rootfs image
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
     local uki_stub_version="distro"
@@ -2396,41 +2421,45 @@ main() {
     # 9. Update initrd
     #
     log::step "[ 9 ] Update initrd"
-    if [ "$boot_part_exist" = "true" ]; then
-        step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
-    else
-        if [ "$uki" = true ]; then
-            step:update_initrd "${efi_part}" "" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
-        else
-            step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
-        fi
-    fi
+    step:update_initrd "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
 
     #
     # 10. Cleaning up
     #
     log::step "[ 10 ] Cleaning up"
-    disk::dm_remove_all "${device}"
-    blockdev --flushbufs "${device}"
+    disk::dm_remove_all "${output_device}"
+    sync
+    local dev
+    for dev in "${output_device}" "${source_read_device}" "${source_write_device}"; do
+        blockdev --flushbufs "${dev}"
+    done
+    # Disconnect every NBD only after its buffers are flushed, and wait for the
+    # qemu-nbd lock to drop so step 11 can open the build file.
+    disk::nbd_disconnect_and_wait "${output_device}" "${output_file}.build.qcow2"
+    disk::nbd_disconnect_and_wait "${source_read_device}" "${source_read_file}"
+    disk::nbd_disconnect_and_wait "${source_write_device}" "${source_write_file}"
 
     #
     # 11. Generating new image file
     #
     log::step "[ 11 ] Generating new image file"
-    disk::nbd_disconnect_and_wait "${device}" "${source_mod_file}"
 
     # check suffix of the output file
     local output_file_suffix=${output_file##*.}
     if [[ "${output_file_suffix}" == "vhd" ]]; then
-        qemu-img convert -p -O vpc "${source_mod_file}" "${output_file}"
+        qemu-img convert -p -O vpc "${output_file}.build.qcow2" "${output_file}"
+        # The exit hook removes it too; delete now to reclaim the space
+        rm -f "${output_file}.build.qcow2"
     elif [[ ${output_file_suffix} == "qcow2" ]]; then
-        # It is not worth to enable the compression option "-c", since it does increase the compression time.
-        qemu-img convert -p -O qcow2 "${source_mod_file}" "${output_file}"
+        # The build file already is a standalone qcow2, no conversion needed
+        mv "${output_file}.build.qcow2" "${output_file}"
     else
         log::warn "Unknown output file suffix: ${output_file_suffix}"
         log::info "Generating qcow2 file by default"
-        qemu-img convert -p -O qcow2 "${source_mod_file}" "${output_file}"
+        mv "${output_file}.build.qcow2" "${output_file}"
     fi
+
+    [ -f "${output_file}" ] || proc::fatal "Output file was not produced, see errors above"
 
     log::success "--------------------------------"
     log::success "Everything done, the new disk image is ready to use: ${output_file}"
