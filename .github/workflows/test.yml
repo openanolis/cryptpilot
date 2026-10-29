@@ -67,7 +67,9 @@ jobs:
           yum install -y device-mapper kmod systemd systemd-udev lvm2 util-linux veritysetup dosfstools xfsprogs e2fsprogs fuse3 fuse3-libs
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@${{ matrix.rust_version }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust_version }}
 
       - name: Checkout repository
         uses: actions/checkout@v6
