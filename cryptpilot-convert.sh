@@ -1828,41 +1828,187 @@ step::shrink_rootfs() {
     # data source for the later steps.
 }
 
-step::create_boot_part() {
-    local boot_file_path=$1
-    local boot_start_sector=$2
+# Fork the source into two snapshots sharing source-mod as qcow2 backing file:
+# source-read freezes the shrunk source data for the later copy and verity
+# reads, source-write takes the later writes. Then mirror the source partition
+# table onto the output disk, adding a boot partition when the source had none.
+step::prepare_output_and_snapshots() {
 
-    local boot_part_num="${rootfs_orig_part_num}"
-    local boot_size_in_bytes
-    boot_size_in_bytes=$(stat --printf="%s" "$boot_file_path")
-    local boot_size_in_sector=$((boot_size_in_bytes / sector_size))
-    boot_start_sector=$(disk::align_start_sector "${boot_start_sector}")
-    boot_part_end_sector=$((boot_start_sector + boot_size_in_sector - 1))
-    log::info "Creating boot partition ($boot_start_sector ... $boot_part_end_sector sectors)"
-    parted "$device" --script -- mkpart boot ext4 "${boot_start_sector}"s ${boot_part_end_sector}s
-    partprobe "$device"
+    # Save the source rootfs partition number before any output modifications.
+    # source-read/source-write keep the original partition layout; only output changes.
+    source_rootfs_part_num="${rootfs_orig_part_num}"
+
+    # Disconnect source-mod NBD (release lock for snapshot creation)
+    log::info "Disconnecting source-mod to create snapshots"
+    qemu-nbd -d "${source_mod_device}"
+    sleep 3
+
+    # Create two snapshots from the same backing file (source-mod)
+    log::info "Creating source-read (read-only) and source-write (writable) snapshots"
+    qemu-img create -f qcow2 -b "${source_mod_file}" -F qcow2 "${source_read_file}" >/dev/null
+    qemu-img create -f qcow2 -b "${source_mod_file}" -F qcow2 "${source_write_file}" >/dev/null
+    proc::hook_exit "rm -f ${source_read_file} ${source_write_file}"
+
+    # Connect snapshots using disk::nbd_connect (allocates + connects + registers hook atomically)
+    log::info "Connecting source-read snapshot"
+    disk::nbd_connect "${source_read_file}" source_read_device
+    log::info "Connecting source-write snapshot"
+    disk::nbd_connect "${source_write_file}" source_write_device
+    partprobe "${source_read_device}"
+    partprobe "${source_write_device}"
+    partprobe "${output_device}"
     udevadm settle --timeout=10
-    boot_part="${device}p${boot_part_num}"
-    [[ $boot_size_in_bytes == $(blockdev --getsize64 "$boot_part") ]] || log::error "Wrong size, something wrong in the script"
-    log::info "Writing boot filesystem to partition"
-    dd status=progress if="$boot_file_path" of="$boot_part" bs=4M
+
+    # Copy the partition table from source-read to output
+    # (rootfs partition is preserved since we didn't delete it in shrink)
+    log::info "Copying partition table to output file"
+    sfdisk -d "${source_read_device}" > "${workdir}/partition_table.sfdisk"
+    if ! sfdisk "${output_device}" < "${workdir}/partition_table.sfdisk"; then
+        log::error "Failed to copy partition table to output"
+        return 1
+    fi
+    partprobe "${output_device}" 2>/dev/null || true
+    udevadm settle --timeout=10
+
+    # If source had no separate boot partition, we need to create one on output
+    # (boot content was extracted to boot.img during step 2)
+    if [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
+        # Delete the rootfs partition first to free up space for the new boot partition.
+        # The data is safe on source-read; we only modify the output partition table.
+        log::info "Deleting rootfs partition on output to make room for boot partition"
+
+        # Save rootfs partition UUID before parted deletes it.
+        local saved_rootfs_uuid
+        saved_rootfs_uuid=$(blkid -s PART_UUID -o value "${output_device}p${rootfs_orig_part_num}" 2>/dev/null || true)
+
+        parted "${output_device}" --script -- rm "${rootfs_orig_part_num}"
+        partprobe "${output_device}"
+        udevadm settle --timeout=10
+
+        # Create boot partition at the original rootfs start, sized exactly to
+        # the boot.img that step 2 extracted.
+        local boot_start_sector
+        boot_start_sector=$(disk::align_start_sector "${rootfs_orig_start_sector}")
+        local boot_size_in_bytes
+        boot_size_in_bytes=$(stat --printf="%s" "${boot_file_path}")
+        local boot_size_in_sector=$((boot_size_in_bytes / sector_size))
+        local boot_end_sector=$((boot_start_sector + boot_size_in_sector - 1))
+        log::info "Creating boot partition: ${boot_start_sector}s - ${boot_end_sector}s"
+        parted "${output_device}" --script -- mkpart boot ext4 "${boot_start_sector}s" "${boot_end_sector}s"
+
+        # Recreate rootfs partition to fill remaining space (from after boot to end of disk)
+        local rootfs_new_start=$((boot_end_sector + 1))
+        rootfs_new_start=$(disk::align_start_sector "${rootfs_new_start}")
+        log::info "Recreating rootfs partition: ${rootfs_new_start}s to end of disk"
+        parted "${output_device}" --script -- mkpart primary ext4 "${rootfs_new_start}s" '100%'
+
+        # Re-detect partitions
+        partprobe "${output_device}"
+        udevadm settle --timeout=10
+
+        # Re-detect partition numbers on output.
+        # Since we deleted the old rootfs and created boot + new rootfs,
+        # the two highest-numbered partitions are boot and rootfs.
+        local all_parts
+        all_parts=$(parted "${output_device}" --script -- print 2>/dev/null | awk 'NR>7 && /^[[:space:]]*[0-9]+/ {print $1}')
+        local max_part=0
+        local p
+        for p in $all_parts; do
+            [[ $p -gt $max_part ]] && max_part=$p
+        done
+        rootfs_orig_part_num=$max_part
+        boot_part_num=$((max_part - 1))
+
+        if [ -z "$boot_part_num" ] || [ -z "$rootfs_orig_part_num" ]; then
+            proc::fatal "Failed to detect new partition numbers on output device"
+        fi
+
+        # Set boot flag
+        parted "${output_device}" --script -- set "${boot_part_num}" boot on
+
+        # Restore original rootfs partition UUID
+        if [ -n "$saved_rootfs_uuid" ]; then
+            log::info "Restoring rootfs partition UUID: $saved_rootfs_uuid"
+            sgdisk -u "${rootfs_orig_part_num}:${saved_rootfs_uuid}" "${output_device}" >/dev/null 2>&1 || true
+        fi
+
+        # Format the newly created boot partition with ext4
+        log::info "Formatting output boot partition"
+        mkfs.ext4 -F "${output_device}p${boot_part_num}" >/dev/null 2>&1
+        blockdev --flushbufs "${output_device}"
+
+        # Track output boot partition number separately from the original source detection.
+        # boot_part_exist reflects whether the SOURCE had a boot partition.
+    else
+        partprobe "${output_device}"
+        udevadm settle --timeout=10
+    fi
+
+    log::info "source-read device: ${source_read_device}"
+    log::info "source-write device: ${source_write_device}"
+    log::info "output device: ${output_device}"
+    log::info "rootfs partition: source p${source_rootfs_part_num}, output p${rootfs_orig_part_num}"
+    lsblk "${output_device}"
 }
 
-step::create_lvm_part() {
-    local lvm_start_sector=$1
-    local lvm_part_num=$2
+step::copy_partitions() {
 
-    local lvm_part="${device}p${lvm_part_num}"
-    lvm_start_sector=$(disk::align_start_sector "${lvm_start_sector}")
-    log::info "Creating lvm partition as LVM PV ($lvm_start_sector ... last sector)"
-    parted "$device" --script -- mkpart primary "${lvm_start_sector}s" "100%"
-    parted "$device" --script -- set "${lvm_part_num}" lvm on
-    partprobe "$device"
+    # dd EFI partition (preserve UUID, labels, all metadata)
+    log::info "Copying EFI partition"
+    dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
+
+    # Populate the output boot partition.
+    # Cases:
+    # 1. Source already had a boot partition -> dd from source-read (raw copy, preserves filesystem)
+    # 2. Source had /boot inside rootfs -> copy files from boot.img to the ext4-formatted output partition
+    if [ "$boot_part_exist" = "true" ]; then
+        # Source already had a separate boot partition: raw copy preserves UUID and filesystem
+        log::info "Copying boot partition from source"
+        dd if="${source_read_device}p${boot_part_num}" of="${output_device}p${boot_part_num}" bs=4M status=progress
+    elif [ "$uki" = false ]; then
+        # Boot partition was created in step 5, formatted with ext4.
+        # Get the boot.img filesystem UUID before copying, then set the
+        # output boot partition to the same UUID so that grub.cfg (which
+        # references the boot.img UUID) points to the correct partition.
+        local boot_img_uuid
+        boot_img_uuid=$(blkid -s UUID -o value "${boot_file_path}" 2>/dev/null || true)
+
+        log::info "Copying boot content from boot.img to output boot partition"
+        local boot_img_mount="${workdir}/boot_img"
+        local boot_part_mount="${workdir}/boot_part"
+        mkdir -p "$boot_img_mount" "$boot_part_mount"
+        proc::hook_exit "mountpoint -q ${boot_img_mount} && disk::umount_wait_busy ${boot_img_mount}"
+        proc::hook_exit "mountpoint -q ${boot_part_mount} && disk::umount_wait_busy ${boot_part_mount}"
+
+        mount -o ro "${boot_file_path}" "$boot_img_mount"
+        mount "${output_device}p${boot_part_num}" "$boot_part_mount"
+        cp -a "$boot_img_mount/." "$boot_part_mount/"
+        disk::umount_wait_busy "$boot_part_mount"
+        disk::umount_wait_busy "$boot_img_mount"
+
+        # Set the output boot partition UUID to match boot.img's UUID.
+        # tune2fs requires a freshly checked filesystem, so run e2fsck first.
+        if [ -n "$boot_img_uuid" ]; then
+            log::info "Setting boot partition UUID to $boot_img_uuid"
+            e2fsck -f -y "${output_device}p${boot_part_num}" >/dev/null 2>&1 || true
+            tune2fs -U "$boot_img_uuid" "${output_device}p${boot_part_num}"
+        fi
+    fi
+}
+
+step::setup_lvm() {
+    local output_rootfs_part="${output_device}p${rootfs_orig_part_num}"
+
+    # Set LVM flag on the rootfs partition
+    log::info "Setting LVM flag on rootfs partition"
+    parted "${output_device}" --script -- set "${rootfs_orig_part_num}" lvm on
+    partprobe "${output_device}"
+    udevadm settle --timeout=10
 
     log::info "Initializing LVM physical volume and volume group"
-    proc::exec_subshell_flose_fds pvcreate --force "$lvm_part"
-    proc::exec_subshell_flose_fds vgcreate --force cryptpilot "$lvm_part" --setautoactivation n # disable auto activation of LVM volumes to prevent it from being activated unexpectedly
-    proc::exec_subshell_flose_fds vgchange -a y cryptpilot  # activate the volume group
+    proc::exec_subshell_flose_fds pvcreate --force "${output_rootfs_part}"
+    proc::exec_subshell_flose_fds vgcreate --force cryptpilot "${output_rootfs_part}" --setautoactivation n # disable auto activation of LVM volumes to prevent it from being activated unexpectedly
+    proc::exec_subshell_flose_fds vgchange -a y cryptpilot # activate the volume group
 }
 
 step::setup_rootfs_lv_with_encrypt() {
@@ -1953,6 +2099,8 @@ main() {
     local rootfs_orig_part
     local rootfs_orig_part_num
     local rootfs_orig_part_exist=false
+    local source_read_device
+    local source_write_device
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
     local uki_stub_version="distro"
@@ -2065,7 +2213,7 @@ main() {
 
     # Install required host tools via appropriate package manager
     if command -v apt-get >/dev/null 2>&1; then
-        local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gawk)
+        local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gdisk gawk)
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
         fi
@@ -2077,7 +2225,7 @@ main() {
         apt-get update
         apt-get install -y "${tool_packages[@]}"
     else
-        local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof)
+        local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof gdisk)
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
         fi
@@ -2200,36 +2348,22 @@ main() {
     step::shrink_rootfs "${rootfs_orig_part}"
 
     #
-    # 5. Create a boot partition
+    # 5. Preparing output file and snapshots
     #
-    log::step "[ 5 ] Creating boot partition"
-    if [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
-        local boot_part_end_sector
-        step::create_boot_part "${boot_file_path}" "${rootfs_orig_start_sector}"
-    elif [ "$boot_part_exist" = "false" ] && [ "$uki" = true ]; then
-        log::info "Skipped since UKI mode does not require a separate boot partition"
-    else
-        log::info "Skipped since boot partition already exist"
-    fi
+    log::step "[ 5 ] Preparing output file and snapshots"
+    step::prepare_output_and_snapshots
 
     #
-    # 6. Creating lvm partition
+    # 6. Copying EFI and boot partitions
     #
-    log::step "[ 6 ] Creating lvm partition"
-    if [ "$boot_part_exist" = "true" ]; then
-        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_part_num"
-    elif [ "$boot_part_exist" = "false" ] && [ "$uki" = false ]; then
-        step::create_lvm_part "$((boot_part_end_sector + 1))" "$((rootfs_orig_part_num + 1))"
-    else
-        # In UKI mode with no boot partition, we start right after the EFI partition
-        # or at the beginning of the available space
-        step::create_lvm_part "$rootfs_orig_start_sector" "$rootfs_orig_part_num"
-    fi
+    log::step "[ 6 ] Copying EFI and boot partitions"
+    step::copy_partitions
 
     #
     # 7. Setting up rootfs logical volume
     #
     log::step "[ 7 ] Setting up rootfs logical volume"
+    step::setup_lvm
     if [ "${rootfs_no_encryption}" = false ]; then
         step::setup_rootfs_lv_with_encrypt "${rootfs_file_path}" "${rootfs_passphrase}"
     else
