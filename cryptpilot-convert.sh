@@ -2012,12 +2012,16 @@ step::setup_lvm() {
 }
 
 step::setup_rootfs_lv_with_encrypt() {
-    local rootfs_file_path=$1
-    local rootfs_passphrase=$2
+    local rootfs_passphrase=$1
 
-    local rootfs_size_in_byte
-    rootfs_size_in_byte=$(stat --printf="%s" "${rootfs_file_path}")
-    local rootfs_lv_size_in_bytes=$((rootfs_size_in_byte + 16 * 1024 * 1024)) # original rootfs partition size plus LUKS2 header size
+    local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
+
+    # The shrunk filesystem sits inside a full-size partition, so size from the filesystem, not the partition
+    local fs_block_size fs_block_count rootfs_size
+    fs_block_size=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
+    fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
+    rootfs_size=$((fs_block_size * fs_block_count))
+    local rootfs_lv_size_in_bytes=$((rootfs_size + 16 * 1024 * 1024)) # filesystem size plus LUKS2 header size
     log::info "Creating rootfs logical volume"
     proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${device}"
     proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B cryptpilot # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
@@ -2030,28 +2034,39 @@ step::setup_rootfs_lv_with_encrypt() {
     echo -n "${rootfs_passphrase}" | cryptsetup open /dev/mapper/cryptpilot-rootfs rootfs --key-file=-
     # Copy rootfs content to the encrypted volume
     log::info "Copying rootfs content to the encrypted volume"
-    dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/rootfs bs=4M
+    dd status=progress "if=${source_rootfs_part}" of=/dev/mapper/rootfs bs=4M count="${rootfs_size}" iflag=count_bytes
     disk::dm_remove_wait_busy rootfs
 }
 
 step::setup_rootfs_lv_without_encrypt() {
-    local rootfs_file_path=$1
+    local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
 
-    local rootfs_size_in_byte
-    rootfs_size_in_byte=$(stat --printf="%s" "${rootfs_file_path}")
-    local rootfs_lv_size_in_bytes=$((rootfs_size_in_byte + 16 * 1024 * 1024)) # original rootfs partition size plus LUKS2 header size
+    # The shrunk filesystem sits inside a full-size partition, so size from the filesystem, not the partition
+    local fs_block_size fs_block_count rootfs_size
+    fs_block_size=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
+    fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
+    rootfs_size=$((fs_block_size * fs_block_count))
     log::info "Creating rootfs logical volume"
     proc::hook_exit "[[ -e /dev/mapper/cryptpilot-rootfs ]] && disk::dm_remove_all ${device}"
-    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_lv_size_in_bytes}B cryptpilot # Note that the real size will be a little bit larger than the specified size, since they will be aligned to the Physical Extentsize (PE) size, which by default is 4MB.
+    # Exact filesystem size is fine: lvcreate rounds up to the physical extent boundary (4MB by default), so no LUKS-style slack is needed
+    proc::exec_subshell_flose_fds lvcreate -n rootfs --size ${rootfs_size}B cryptpilot
     # Copy rootfs content to the lvm volume
     log::info "Copying rootfs content to the logical volume"
-    dd status=progress "if=${rootfs_file_path}" of=/dev/mapper/cryptpilot-rootfs bs=4M
+    dd status=progress "if=${source_rootfs_part}" of=/dev/mapper/cryptpilot-rootfs bs=4M count="${rootfs_size}" iflag=count_bytes
 }
 
 step::setup_rootfs_hash_lv() {
-    local rootfs_file_path=$1
+    local source_rootfs_part="${source_read_device}p${source_rootfs_part_num}"
     local rootfs_hash_file_path="${workdir}/rootfs_hash.img"
-    veritysetup format "${rootfs_file_path}" "${rootfs_hash_file_path}" --format=1 --hash=sha256 |
+
+    # The partition is full size but only the shrunk filesystem inside it is protected, so verity must cover just the filesystem bytes
+    local fs_block_size fs_block_count fs_size_bytes data_blocks
+    fs_block_size=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block size' | awk '{print $3}')
+    fs_block_count=$(dumpe2fs "${source_rootfs_part}" 2>/dev/null | grep 'Block count' | awk '{print $3}')
+    fs_size_bytes=$((fs_block_size * fs_block_count))
+    data_blocks=$((fs_size_bytes / 4096)) # verity default data block size
+
+    veritysetup format "${source_rootfs_part}" "${rootfs_hash_file_path}" --format=1 --hash=sha256 --data-blocks "${data_blocks}" |
         tee "${workdir}/rootfs_hash.status" |
         gawk '(/^Root hash:/ && $NF ~ /^[0-9a-fA-F]+$/) { print $NF; }' \
             >"${workdir}/rootfs_hash.roothash"
@@ -2101,6 +2116,7 @@ main() {
     local rootfs_orig_part_exist=false
     local source_read_device
     local source_write_device
+    local rootfs_file_path # still read by step:update_initrd, which is being rewired away from the extracted rootfs image
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
     local uki_stub_version="distro"
@@ -2365,16 +2381,16 @@ main() {
     log::step "[ 7 ] Setting up rootfs logical volume"
     step::setup_lvm
     if [ "${rootfs_no_encryption}" = false ]; then
-        step::setup_rootfs_lv_with_encrypt "${rootfs_file_path}" "${rootfs_passphrase}"
+        step::setup_rootfs_lv_with_encrypt "${rootfs_passphrase}"
     else
-        step::setup_rootfs_lv_without_encrypt "${rootfs_file_path}"
+        step::setup_rootfs_lv_without_encrypt
     fi
 
     #
     # 8. Setting up rootfs hash volume
     #
     log::step "[ 8 ] Setting up rootfs hash volume"
-    step::setup_rootfs_hash_lv "${rootfs_file_path}"
+    step::setup_rootfs_hash_lv
 
     #
     # 9. Update initrd
