@@ -1,21 +1,6 @@
 name: Build Test Image
 
-on:
-  workflow_dispatch:
-    inputs:
-      url:
-        description: 'URL of the qcow2 image to download'
-        required: true
-        type: string
-      tag:
-        description: 'Tag for the resulting image (e.g., alinux3-20251030)'
-        required: true
-        type: string
-
-env:
-  REGISTRY: ghcr.io
-  # Target repository for test images
-  IMAGE_NAME: ${{ github.repository_owner }}/cryptpilot-fde-test-image
+on: workflow_dispatch
 
 jobs:
   build-test-image:

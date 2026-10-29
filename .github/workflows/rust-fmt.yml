@@ -1,14 +1,6 @@
 name: Rust Format Check
 
-on:
-  push:
-    branches:
-      - master
-    tags:
-      - "v*.*.*"
-  pull_request:
-    branches:
-      - 'master'
+on: workflow_dispatch
 
 jobs:
   fmt:
