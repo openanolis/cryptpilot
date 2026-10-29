@@ -134,7 +134,7 @@ cryptpilot-fde-guest boot-service --stage after-sysroot
 
 ### cryptpilot-convert
 
-Convert and encrypt existing disk images or system disks:
+Convert and encrypt existing disk images:
 
 ```sh
 cryptpilot-convert --help

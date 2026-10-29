@@ -133,7 +133,7 @@ cryptpilot-fde-guest boot-service --stage after-sysroot
 
 ### cryptpilot-convert
 
-转换并加密现有磁盘镜像或系统磁盘：
+转换并加密现有磁盘镜像：
 
 ```sh
 cryptpilot-convert --help
