@@ -313,7 +313,7 @@ impl<V: FileVerifier> fuser::Filesystem for VerityFS<V> {
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         tracing::debug!(ino, "getattr");
 
         let result = || -> _ {

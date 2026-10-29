@@ -1,7 +1,7 @@
 use std::path::Path;
 
 fn main() -> shadow_rs::SdResult<()> {
-    shadow_rs::new()?;
+    shadow_rs::ShadowBuilder::builder().build()?;
 
     // Compile FlatBuffers schema
     let metadata_schema = Path::new("src/metadata/metadata.fbs");
