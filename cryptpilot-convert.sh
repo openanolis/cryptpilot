@@ -240,10 +240,8 @@ proc::print_help_and_exit() {
     echo "Usage:"
     echo "    $0 --in <input_file> --out <output_file> --config-dir <cryptpilot_config_dir> --rootfs-passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
     echo "    $0 --in <input_file> --out <output_file> --config-dir <cryptpilot_config_dir> --rootfs-no-encryption [--package <rpm_package>...]"
-    echo "    $0 --device <device> --config-dir <cryptpilot_config_dir> --rootfs-passphrase <rootfs_encrypt_passphrase> [--package <rpm_package>...]"
     echo ""
     echo "Options:"
-    echo "  -d, --device <device>                                   The device to operate on."
     echo "      --in <input_file>                                   The input OS image file (vhd or qcow2)."
     echo "      --out <output_file>                                 The output OS image file (vhd or qcow2)."
     echo "  -c, --config-dir <cryptpilot_config_dir>                The directory containing cryptpilot configuration files."
@@ -255,7 +253,6 @@ proc::print_help_and_exit() {
     echo "      --package <rpm_package>                             Specify an RPM package name or path to the RPM file to install in to the disk before"
     echo "  -b, --boot_part_size <size>                             Instead of using the default partition size(512MB), specify the size of the boot partition"
     echo "                                                          converting. This can be specified multiple times."
-    echo "      --wipe-freed-space                                  Wipe the freed space with zero, so that the qemu-img convert would generate smaller image"
     echo "      --uki                                               Generate a Unified Kernel Image image and boot from it instead of boot with GRUB"
     echo "      --uki-append-cmdline <cmdline>                      Append custom command line parameters when generating a UKI image. By default, only essential"
     echo "                                                          parameters are included. This option allows you to extend the kernel command line. The default"
@@ -576,9 +573,9 @@ disk::install_rpm_on_rootfs() {
 
     # Try to query the version of cryptpilot-fde-host from the current system
     if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-host --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+        cryptpilot_fde_version=$(rpm -q --qf '%{VERSION}-%{RELEASE}' cryptpilot-fde-host 2>/dev/null) || cryptpilot_fde_version=""
     elif command -v dpkg-query >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null || true)
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null) || cryptpilot_fde_version=""
     fi
 
     local essential_packages_with_version=()
@@ -1778,8 +1775,6 @@ step::shrink_and_extract_rootfs_part() {
     tune2fs -O read-only "${rootfs_orig_part}"
     
     # Adjust file system content, all move to front
-    local before_shrink_size_in_bytes
-    before_shrink_size_in_bytes=$(blockdev --getsize64 "${rootfs_orig_part}")
     log::info "Checking and shrinking rootfs filesystem"
 
     if e2fsck -y -f "${rootfs_orig_part}"; then
@@ -1814,10 +1809,6 @@ step::shrink_and_extract_rootfs_part() {
     rootfs_file_path="${workdir}/rootfs.img"
     log::info "Extract rootfs to file on disk ${rootfs_file_path}"
     dd status=progress if="${rootfs_orig_part}" of="${rootfs_file_path}" "count=${after_shrink_size_in_bytes}" iflag=count_bytes bs=256M
-    if [ "${wipe_freed_space}" = true ]; then
-        log::info "Wipe rootfs partition on device ${before_shrink_size_in_bytes} bytes"
-        dd status=progress if=/dev/zero of="${rootfs_orig_part}" count="${before_shrink_size_in_bytes}" iflag=count_bytes bs=64M # Clean the freed space with zero, so that the qemu-img convert would generate smaller image
-    fi
 
     # Delete the original rootfs partition
     log::info "Deleting original rootfs partition"
@@ -1934,7 +1925,6 @@ main() {
         exit 1
     fi
 
-    local operate_on_device
     local device
     local input_file
     local output_file
@@ -1951,17 +1941,12 @@ main() {
     local rootfs_orig_part
     local rootfs_orig_part_num
     local rootfs_orig_part_exist=false
-    local wipe_freed_space=false
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
     local uki_stub_version="distro"
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
-        -d | --device)
-            device="$2"
-            shift 2
-            ;;
         --in)
             input_file="$2"
             shift 2
@@ -1993,10 +1978,6 @@ main() {
         -b | --boot_part_size)
             BOOT_PART_SIZE=("$2")
             shift 2
-            ;;
-        --wipe-freed-space)
-            wipe_freed_space=true
-            shift 1
             ;;
         --uki)
             uki=true
@@ -2032,15 +2013,8 @@ main() {
         uki_stub_version="distro"
     fi
 
-    if [ -n "${device:-}" ]; then
-        if [ -n "${input_file:-}" ] || [ -n "${output_file:-}" ]; then
-            proc::fatal "Cannot specify both --device and --in/--out"
-        fi
-        operate_on_device=true
-    elif [ -n "${input_file:-}" ] && [ -n "${output_file:-}" ]; then
-        operate_on_device=false
-    else
-        proc::fatal "Must specify either --device or --in/--out"
+    if [ -z "${input_file:-}" ] || [ -z "${output_file:-}" ]; then
+        proc::fatal "Must specify both --in and --out"
     fi
 
     if [ -z "${config_dir:-}" ]; then
@@ -2057,38 +2031,13 @@ main() {
         proc::fatal "Must specify either --rootfs-passphrase or --rootfs-no-encryption"
     fi
 
-    if [ "${operate_on_device}" = true ]; then
-        if [ ! -b "${device}" ]; then
-            proc::fatal "Input device $device does not exist"
-        fi
+    if [ ! -f "$input_file" ]; then
+        proc::fatal "Input file $input_file does not exist"
+    fi
 
-        # In a better way to notice user that the data on the device may be lost if the operation is failed or canceled.
-        log::warn "This operation will overwrite data on the device ($device), and may cause data loss if the operation is failed or canceled. Make sure you have create a backup of the data !!!"
-        while true; do
-            read -r -p "Are you sure you want to continue? (y/n) " yn
-            case $yn in
-            [y]*)
-                log::success "Starting to convert the disk ..."
-                break
-                ;;
-            [n]*)
-                log::info "Operation canceled."
-                exit
-                ;;
-            *) log::warn "Please answer 'y' or 'n'." ;;
-            esac
-        done
-    elif [ "${operate_on_device}" = false ]; then
-        if [ ! -f "$input_file" ]; then
-            proc::fatal "Input file $input_file does not exist"
-        fi
-
-        # Check if the input file is a vhd or qcow2
-        if [[ "$input_file" != *.vhd ]] && [[ "$input_file" != *.qcow2 ]] && [[ "$input_file" != *.img ]]; then
-            proc::fatal "Input file $input_file is not supported, should be a vhd or qcow2 file"
-        fi
-    else
-        proc::print_help_and_exit 1
+    # Check if the input file is a vhd or qcow2
+    if [[ "$input_file" != *.vhd ]] && [[ "$input_file" != *.qcow2 ]] && [[ "$input_file" != *.img ]]; then
+        proc::fatal "Input file $input_file is not supported, should be a vhd, qcow2, or img file"
     fi
 
     log::setup_log_file
@@ -2131,45 +2080,41 @@ main() {
     #
     log::step "[ 1 ] Prepare disk"
 
-    if [ "$operate_on_device" = true ]; then
-        log::info "Using device: $device"
-    else
-        log::info "Using input file: $input_file"
-        qemu-img info "${input_file}"
-        device="$(disk::get_available_nbd)" || proc::fatal "no free NBD device"
+    log::info "Using input file: $input_file"
+    qemu-img info "${input_file}"
+    device="$(disk::get_available_nbd)" || proc::fatal "no free NBD device"
 
-        local work_file="${input_file}.work"
-        if [ -f "${work_file}" ]; then
-            if flock --exclusive --nonblock "${work_file}"; then
-                log::error "File ${work_file} is locked by another process, maybe another cryptpilot instance is using it. Please stop it and try again."
-                exit 1
-            else
-                log::warn "Temporary file ${work_file} already exists, delete it now"
-                rm -f "${work_file}"
-            fi
-        fi
-
-        # Try to detect input file format
-        local input_format
-        input_format=$(qemu-img info "${input_file}" | grep '^file format:' | awk '{print $3}')
-        
-        # Try to create work file with backing file for faster processing
-        log::info "Detected input format: ${input_format}"
-        proc::hook_exit "rm -f ${work_file}"
-        if qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${work_file}" 2>/dev/null; then
-            log::info "Created work file ${work_file} with backing file ${input_file}"
+    local work_file="${input_file}.work"
+    if [ -f "${work_file}" ]; then
+        if flock --exclusive --nonblock "${work_file}"; then
+            log::error "File ${work_file} is locked by another process, maybe another cryptpilot instance is using it. Please stop it and try again."
+            exit 1
         else
-            log::warn "Failed to create work file with backing file, falling back to direct copy"
-            log::info "Copying ${input_file} to ${work_file}"
-            cp "${input_file}" "${work_file}"
+            log::warn "Temporary file ${work_file} already exists, delete it now"
+            rm -f "${work_file}"
         fi
-
-        proc::hook_exit "qemu-nbd --disconnect ${device} >/dev/null"
-        qemu-nbd --connect="${device}" --discard=on --detect-zeroes=unmap "${work_file}"
-        sleep 2
-        log::info "Mapped to NBD device ${device}:"
-        fdisk -l "${device}"
     fi
+
+    # Try to detect input file format
+    local input_format
+    input_format=$(qemu-img info "${input_file}" | grep '^file format:' | awk '{print $3}')
+
+    # Try to create work file with backing file for faster processing
+    log::info "Detected input format: ${input_format}"
+    proc::hook_exit "rm -f ${work_file}"
+    if qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${work_file}" 2>/dev/null; then
+        log::info "Created work file ${work_file} with backing file ${input_file}"
+    else
+        log::warn "Failed to create work file with backing file, falling back to direct copy"
+        log::info "Copying ${input_file} to ${work_file}"
+        cp "${input_file}" "${work_file}"
+    fi
+
+    proc::hook_exit "qemu-nbd --disconnect ${device} >/dev/null"
+    qemu-nbd --connect="${device}" --discard=on --detect-zeroes=unmap "${work_file}"
+    sleep 2
+    log::info "Mapped to NBD device ${device}:"
+    fdisk -l "${device}"
 
     disk::assert_disk_not_busy "${device}"
 
@@ -2181,6 +2126,8 @@ main() {
     if [ "${boot_part_exist}" = true ]; then
         boot_part="${device}p${boot_part_num}"
     else
+        # Initialize even when absent: later steps reference ${boot_part} under set -u
+        boot_part=""
         log::info "No boot partition on $device"
     fi
 
@@ -2287,32 +2234,27 @@ main() {
     disk::dm_remove_all "${device}"
     blockdev --flushbufs "${device}"
 
-    if [ "${operate_on_device}" == true ]; then
-        log::success "--------------------------------"
-        log::success "Everything done, the device is ready to use: ${device}"
+    #
+    # 11. Generating new image file
+    #
+    log::step "[ 11 ] Generating new image file"
+    disk::nbd_disconnect_and_wait "${device}" "${work_file}"
+
+    # check suffix of the output file
+    local output_file_suffix=${output_file##*.}
+    if [[ "${output_file_suffix}" == "vhd" ]]; then
+        qemu-img convert -p -O vpc "${work_file}" "${output_file}"
+    elif [[ ${output_file_suffix} == "qcow2" ]]; then
+        # It is not worth to enable the compression option "-c", since it does increase the compression time.
+        qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
     else
-        #
-        # 11. Generating new image file
-        #
-        log::step "[ 11 ] Generating new image file"
-        disk::nbd_disconnect_and_wait "${device}" "${work_file}"
-
-        # check suffix of the output file
-        local output_file_suffix=${output_file##*.}
-        if [[ "${output_file_suffix}" == "vhd" ]]; then
-            qemu-img convert -p -O vpc "${work_file}" "${output_file}"
-        elif [[ ${output_file_suffix} == "qcow2" ]]; then
-            # It is not worth to enable the compression option "-c", since it does increase the compression time.
-            qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
-        else
-            log::warn "Unknown output file suffix: ${output_file_suffix}"
-            log::info "Generating qcow2 file by default"
-            qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
-        fi
-
-        log::success "--------------------------------"
-        log::success "Everything done, the new disk image is ready to use: ${output_file}"
+        log::warn "Unknown output file suffix: ${output_file_suffix}"
+        log::info "Generating qcow2 file by default"
+        qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
     fi
+
+    log::success "--------------------------------"
+    log::success "Everything done, the new disk image is ready to use: ${output_file}"
 
     echo
     log::info "You can calculate reference value of the disk with:"
