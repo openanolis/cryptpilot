@@ -2254,7 +2254,7 @@ main() {
 
     # Install required host tools via appropriate package manager
     if command -v apt-get >/dev/null 2>&1; then
-        local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gdisk gawk)
+        local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gdisk gawk udev)
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
         fi
@@ -2266,7 +2266,7 @@ main() {
         apt-get update
         apt-get install -y "${tool_packages[@]}"
     else
-        local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof gdisk)
+        local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof gdisk systemd-udev) # systemd-udev provides udevadm
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
         fi
