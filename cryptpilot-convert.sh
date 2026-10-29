@@ -209,6 +209,25 @@ disk::get_available_nbd() {
     return 1
 }
 
+# Allocate an available NBD device, connect it to a qcow2 image, and register
+# the disconnect cleanup hook. Sets the variable named by var_name to the
+# connected device path.
+# Usage: disk::nbd_connect <qcow2_file> <var_name> [qemu-nbd options...]
+disk::nbd_connect() {
+    local image_file=$1
+    local var_name=$2
+    shift 2
+
+    local nbd_dev
+    nbd_dev="$(disk::get_available_nbd)" || proc::fatal "no free NBD device for ${var_name}"
+
+    proc::hook_exit "qemu-nbd -d ${nbd_dev} >/dev/null 2>&1 || true"
+    qemu-nbd --connect="${nbd_dev}" "$@" "${image_file}"
+    sleep 2
+
+    eval "${var_name}=\"${nbd_dev}\""
+}
+
 disk::umount_wait_busy() {
     while true; do
         if ! mountpoint -q "$1"; then
@@ -2082,37 +2101,54 @@ main() {
 
     log::info "Using input file: $input_file"
     qemu-img info "${input_file}"
-    device="$(disk::get_available_nbd)" || proc::fatal "no free NBD device"
 
-    local work_file="${input_file}.work"
-    if [ -f "${work_file}" ]; then
-        if flock --exclusive --nonblock "${work_file}"; then
-            log::error "File ${work_file} is locked by another process, maybe another cryptpilot instance is using it. Please stop it and try again."
-            exit 1
-        else
-            log::warn "Temporary file ${work_file} already exists, delete it now"
-            rm -f "${work_file}"
+    local source_mod_file="${input_file}.source-mod"
+    local source_read_file="${input_file}.source-read"
+    local source_write_file="${input_file}.source-write"
+    local overlay_file
+    for overlay_file in "${source_mod_file}" "${source_read_file}" "${source_write_file}"; do
+        if [ -f "${overlay_file}" ]; then
+            # Command-less flock reads the file path as a descriptor number and
+            # always fails (rc 64); -c true takes the lock, no-ops, releases.
+            if flock --exclusive --nonblock "${overlay_file}" -c true; then
+                log::warn "Temporary file ${overlay_file} left over, deleting it"
+                rm -f "${overlay_file}"
+            else
+                log::error "File ${overlay_file} is locked by another process, maybe another cryptpilot instance is using it. Please stop it and try again."
+                exit 1
+            fi
         fi
-    fi
+    done
 
     # Try to detect input file format
     local input_format
     input_format=$(qemu-img info "${input_file}" | grep '^file format:' | awk '{print $3}')
-
-    # Try to create work file with backing file for faster processing
     log::info "Detected input format: ${input_format}"
-    proc::hook_exit "rm -f ${work_file}"
-    if qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${work_file}" 2>/dev/null; then
-        log::info "Created work file ${work_file} with backing file ${input_file}"
-    else
-        log::warn "Failed to create work file with backing file, falling back to direct copy"
-        log::info "Copying ${input_file} to ${work_file}"
-        cp "${input_file}" "${work_file}"
-    fi
 
-    proc::hook_exit "qemu-nbd --disconnect ${device} >/dev/null"
-    qemu-nbd --connect="${device}" --discard=on --detect-zeroes=unmap "${work_file}"
-    sleep 2
+    # Overlays require a file backing chain, so the cp fallback of master's
+    # work_file path is gone: qcow2 -b only works with image files.
+    proc::hook_exit "rm -f ${source_mod_file}"
+    qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${source_mod_file}"
+    log::info "Created source-mod overlay: ${source_mod_file}"
+
+    # Pre-create the output at the input's virtual size. The .build.qcow2
+    # intermediate lets the final step convert to VHD while a qcow2 output
+    # is renamed into place.
+    local virtual_size_bytes
+    virtual_size_bytes=$(qemu-img info "${input_file}" | grep 'virtual size:' | sed 's/.*(\([0-9]*\) bytes).*/\1/')
+    [[ "${virtual_size_bytes}" =~ ^[0-9]+$ ]] || proc::fatal "Failed to determine virtual size of input image"
+    qemu-img create -f qcow2 -o size="${virtual_size_bytes}" "${output_file}.build.qcow2"
+    proc::hook_exit "rm -f ${output_file}.build.qcow2"
+
+    local source_mod_device
+    local output_device
+    disk::nbd_connect "${source_mod_file}" source_mod_device --discard=on --detect-zeroes=unmap
+    disk::nbd_connect "${output_file}.build.qcow2" output_device --discard=on --detect-zeroes=unmap
+    log::info "Mapped output build file to NBD device ${output_device}"
+
+    # Alias device to source_mod_device so the partition detection functions
+    # and later steps keep working unchanged.
+    device="${source_mod_device}"
     log::info "Mapped to NBD device ${device}:"
     fdisk -l "${device}"
 
@@ -2238,19 +2274,19 @@ main() {
     # 11. Generating new image file
     #
     log::step "[ 11 ] Generating new image file"
-    disk::nbd_disconnect_and_wait "${device}" "${work_file}"
+    disk::nbd_disconnect_and_wait "${device}" "${source_mod_file}"
 
     # check suffix of the output file
     local output_file_suffix=${output_file##*.}
     if [[ "${output_file_suffix}" == "vhd" ]]; then
-        qemu-img convert -p -O vpc "${work_file}" "${output_file}"
+        qemu-img convert -p -O vpc "${source_mod_file}" "${output_file}"
     elif [[ ${output_file_suffix} == "qcow2" ]]; then
         # It is not worth to enable the compression option "-c", since it does increase the compression time.
-        qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
+        qemu-img convert -p -O qcow2 "${source_mod_file}" "${output_file}"
     else
         log::warn "Unknown output file suffix: ${output_file_suffix}"
         log::info "Generating qcow2 file by default"
-        qemu-img convert -p -O qcow2 "${work_file}" "${output_file}"
+        qemu-img convert -p -O qcow2 "${source_mod_file}" "${output_file}"
     fi
 
     log::success "--------------------------------"
