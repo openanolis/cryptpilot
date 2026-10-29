@@ -1866,8 +1866,9 @@ step::prepare_output_and_snapshots() {
 
     # Disconnect source-mod NBD (release lock for snapshot creation)
     log::info "Disconnecting source-mod to create snapshots"
-    qemu-nbd -d "${source_mod_device}"
-    sleep 3
+    sync
+    blockdev --flushbufs "${source_mod_device}"
+    disk::nbd_disconnect_and_wait "${source_mod_device}" "${source_mod_file}"
 
     # Create two snapshots from the same backing file (source-mod)
     log::info "Creating source-read (read-only) and source-write (writable) snapshots"
@@ -2312,6 +2313,15 @@ main() {
     proc::hook_exit "rm -f ${source_mod_file}"
     qemu-img create -f qcow2 -b "${input_file}" -F "${input_format}" "${source_mod_file}"
     log::info "Created source-mod overlay: ${source_mod_file}"
+
+    # Hold the lock for the whole run so a second instance's -c true probe
+    # fails; qemu-nbd's own fcntl lock is invisible to flock(2), so the script
+    # must carry the guard itself.
+    local guard_fd
+    exec {guard_fd}<>"${source_mod_file}"
+    if ! flock --exclusive --nonblock "${guard_fd}"; then
+        proc::fatal "File ${source_mod_file} is locked by another process, maybe another cryptpilot instance is using it. Please stop it and try again."
+    fi
 
     # Pre-create the output at the input's virtual size. The .build.qcow2
     # intermediate lets the final step convert to VHD while a qcow2 output
