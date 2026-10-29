@@ -1,0 +1,82 @@
+name: Publish blktrace-rs
+
+# Publishes the blktrace-rs crate to crates.io whenever its version on
+# master differs from the latest published version. Version bumps always
+# touch blktrace-rs/Cargo.toml, so the path filter keeps unrelated
+# commits from spending a publish job.
+#
+# Trusted publishing (RFC 3691): the auth action exchanges the GitHub
+# OIDC identity of this workflow for a short-lived crates.io token, which
+# is revoked when the job ends. No long-lived registry token is stored as
+# a repository secret. This requires a Trusted Publisher configuration
+# for blktrace-rs on crates.io (owner openanolis, repository cryptpilot,
+# this workflow file name) created after the crate's initial manual
+# publish.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "blktrace-rs/Cargo.toml"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      # id-token lets the auth action mint the OIDC token that crates.io
+      # exchanges for the short-lived publish token.
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Install bindgen build dependencies
+        # cargo publish runs a verification build of the package, which
+        # needs libclang and the kernel UAPI headers (linux/blktrace_api.h
+        # ships with libc6-dev) for the build-time bindgen step.
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
+      - name: Compare version with crates.io
+        id: version
+        run: |
+          set -euo pipefail
+
+          crate_version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' blktrace-rs/Cargo.toml | head -n1)
+          if [ -z "$crate_version" ]; then
+            echo "Failed to read the version from blktrace-rs/Cargo.toml" >&2
+            exit 1
+          fi
+
+          # crates.io rejects requests without a User-Agent.
+          published=$(curl -sf -H "User-Agent: openanolis-cryptpilot-ci" \
+            "https://crates.io/api/v1/crates/blktrace-rs" \
+            | jq -r '.crate.max_stable_version // empty') || published=""
+
+          echo "crate version: $crate_version, published: ${published:-none}"
+
+          if [ "$crate_version" = "$published" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate with crates.io
+        id: auth
+        if: steps.version.outputs.changed == 'true'
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish to crates.io
+        if: steps.version.outputs.changed == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          cargo publish -p blktrace-rs

@@ -20,8 +20,8 @@ install() {
         # We need mkfs.ext4 for creating delta volume here
         inst_multiple mkfs.ext4
 
-        # For resize ext4 filesystem
-        inst_multiple tune2fs resize2fs
+        # For checking and resizing ext4 filesystems before mounting
+        inst_multiple tune2fs e2fsck resize2fs
         
         # For debug only
         # inst_multiple curl nc ip find systemctl journalctl ifconfig lsblk df

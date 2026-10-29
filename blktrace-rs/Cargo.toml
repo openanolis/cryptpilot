@@ -1,0 +1,39 @@
+[package]
+name = "blktrace-rs"
+version = "0.1.1"
+edition.workspace = true
+authors.workspace = true
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/openanolis/cryptpilot"
+description = "Capture and parse Linux block-layer I/O traces via kernel ioctls, without the blktrace CLI tools"
+keywords = ["blktrace", "block-io", "tracing", "linux"]
+categories = ["os::linux-apis"]
+
+# docs.rs builds with default features, which excludes the async API;
+# build the documentation with everything enabled instead.
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+name = "blktrace_rs"
+
+[features]
+default = []
+async = ["dep:tokio"]
+
+# tokio and nix are declared locally (not via workspace) so the published crate
+# pulls in only the features it needs instead of the app's full feature set.
+[dependencies]
+mnt = { workspace = true }
+nix = { version = "0.29.0", default-features = false, features = ["ioctl", "mount"] }
+num_cpus = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { version = "1.43.1", default-features = false, features = ["rt"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.43.1", default-features = false, features = ["rt", "rt-multi-thread", "macros"] }
+
+[build-dependencies]
+bindgen = { workspace = true }

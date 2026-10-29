@@ -126,6 +126,13 @@ flowchart LR
 
 UKI generation uses dracut's `--uefi` parameter. The default kernel command line is `console=tty0 console=ttyS0,115200n8`, and custom parameters can be appended via `--uki-append-cmdline`. `cryptpilot-fde-host` parses segments in the UKI image directly when calculating reference values.
 
+**EFI Stub Source (`--uki-stub-version`)**: dracut assembles the UKI by linking the kernel, initrd, and cmdline with the systemd UEFI stub (`linuxx64.efi.stub`). Different systemd-stub versions measure into PCR4/PCR8/PCR12 differently, so pinning the stub keeps the measurement reference values stable across builds.
+
+- `--uki-stub-version distro` (default): installs `systemd-boot-unsigned` from the distro's own repo. The version floats with the distro, so PCR reference values are only stable as long as the distro package does not change.
+- `--uki-stub-version <version>`: downloads a pinned, unsigned stub from the public [Arch Linux Archive](https://archive.archlinux.org/packages/s/systemd/). The value is a version prefix resolved to the highest matching package — `261` selects the latest `261.x`, `261.2-1` selects that exact package (fully pinned). The stub is downloaded, used to build the UKI, then removed, so the converted image is left unchanged. The resolved exact version and stub SHA-256 are logged, which lets you fix an exact value after verifying once.
+
+**Section layout**: after dracut has assembled the UKI, the conversion script rebuilds it, placing `.osrel`/`.cmdline`/`.linux`/`.initrd` directly behind the stub's own sections at aligned absolute VMAs. dracut 059 and older hardcode VMAs that assume the stub's `ImageBase` is 0 (upstream dracut-ng computes them dynamically since 060). Stubs from systemd v254 and later have a large `ImageBase`, so those VMAs wrap around and push `.linux`/`.initrd` about 2.8 GiB up: `SizeOfImage` grows to ~2.93 GiB for ~0.12 GiB of data, which slows boot down and makes stricter firmware fail with `Load error` (see dracut#2431 and systemd#28419). Rebuilding avoids that without touching the rootfs, and makes the layout a function of the pinned stub alone instead of the dracut version inside the image. The final `SizeOfImage` and file size are logged, and the conversion aborts if a hole remains.
+
 ### 3.3 Mode Comparison
 
 | Feature | GRUB Mode | UKI Mode |
@@ -148,11 +155,19 @@ This service executes before `initrd-root-device.target` and is the key stage fo
 
 The construction of the rootfs device chain varies depending on encryption configuration. If rootfs encryption is configured, the service first obtains the passphrase through a key provider and opens the LUKS2 encrypted volume, then establishes dm-verity on the decrypted device. If encryption is not configured, dm-verity is established directly on the rootfs logical volume.
 
+**Layering Order of dm-verity and dm-crypt**
+
+- CryptPilot adopts a "decrypt-then-verify" order: dm-crypt sits on the lower layer (close to the disk, performing decryption) and dm-verity sits on the upper layer (close to the filesystem, verifying plaintext), with the hash tree built over plaintext. This choice is based on two considerations: first, the root_hash is independent of the encryption key, so rotating keys or re-encrypting does not require rebuilding the hash tree, which lowers operational cost; second, a single reference value can attest multiple instances that use different keys, simplifying reference-value management in multi-tenant remote attestation scenarios.
+
+- By comparison, an alternative order places dm-verity below dm-crypt and builds the hash tree over ciphertext. This order follows the Encrypt-then-MAC cryptographic principle: it can verify disk integrity without unlocking the volume and avoids decrypting potentially tampered ciphertext, yielding a more rigorous security composition. The trade-off is that key rotation changes the entire on-disk ciphertext and forces a full rebuild of the hash tree, and the root_hash depends on the encryption key, requiring a separate reference value for each instance that uses an independent key, which is inconvenient for unified multi-tenant attestation. Weighing the practical requirements of the confidential computing scenario, CryptPilot chose the former.
+
 #### 4.1.1 Delta Volume Initialization and Expansion
 
 The service first checks whether the disk where the LVM physical volume resides has unallocated space, and if so, extends the partition table and expands the LVM physical volume. This mechanism enables the system to automatically adapt to disk expansion scenarios in cloud environments.
 
 Delta volume initialization is also completed at this stage. The service checks whether the delta logical volume exists, creating it if it does not and occupying all remaining space in the volume group. If the delta volume already exists, it is expanded to the remaining space in the volume group.
+
+Before resizing an ext4 filesystem, the service clears its read-only feature and runs `e2fsck -f -p` on the unmounted writable device. Only exit statuses 0 (clean) and 1 (errors corrected) permit resizing; other statuses stop boot. This forced check also runs when the filesystem is clean or its size has not changed, and can increase boot time for large filesystems.
 
 **Delta Volume Decryption Flow**:
 

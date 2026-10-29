@@ -124,6 +124,7 @@ mount /dev/mapper/data0 /mnt/data0
 
 - [Anolis OS 23](https://openanolis.cn/anolisos/23)
 - [Alibaba Cloud Linux 3](https://www.aliyun.com/product/alinux)
+- [Alibaba Cloud Linux 4](https://www.aliyun.com/product/alinux)
 
 ## 文档
 

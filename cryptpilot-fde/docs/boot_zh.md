@@ -126,6 +126,13 @@ flowchart LR
 
 UKI生成使用dracut的`--uefi`参数，默认内核命令行为`console=tty0 console=ttyS0,115200n8`，可通过`--uki-append-cmdline`追加自定义参数。`cryptpilot-fde-host`在计算参考值时直接解析UKI镜像中的各段进行度量。
 
+**EFI Stub 来源（`--uki-stub-version`）**：dracut 通过将内核、initrd、命令行与 systemd 的 UEFI stub（`linuxx64.efi.stub`）链接来组装 UKI。不同版本的 systemd-stub 向 PCR4/PCR8/PCR12 的度量行为不同，因此钉死 stub 版本可使度量参考值在多次构建间保持稳定。
+
+- `--uki-stub-version distro`（默认）：从发行版自身仓库安装 `systemd-boot-unsigned`。版本随发行版浮动，因此 PCR 参考值仅在发行版包不变时才稳定。
+- `--uki-stub-version <version>`：从公开的 [Arch Linux Archive](https://archive.archlinux.org/packages/s/systemd/) 下载一个钉死的 unsigned stub。取值为版本前缀，解析为最高匹配的包——`261` 选最新 `261.x`，`261.2-1` 选该精确包（完全钉死）。stub 下载后用于构建 UKI，随后删除，故转换后的镜像保持不变。解析到的精确版本与 stub 的 SHA-256 会被记录到日志，便于你验证一次后把精确值固化下来。
+
+**节区布局**：dracut 组装出 UKI 后，转换脚本会重新组装一遍，把 `.osrel`/`.cmdline`/`.linux`/`.initrd` 按对齐后的绝对 VMA 紧挨在 stub 自身节区之后。059 及更早版本的 dracut 硬编码 VMA，且假设 stub 的 `ImageBase` 为 0（上游 dracut-ng 自 060 起改为动态计算）；而 systemd v254 及以后的 stub 的 `ImageBase` 很大，这些 VMA 会回卷，把 `.linux`/`.initrd` 推到约 2.8 GiB 处：真实数据约 0.12 GiB，`SizeOfImage` 却涨到约 2.93 GiB，导致启动变慢，严格的固件还会直接报 `Load error`（见 dracut#2431 与 systemd#28419）。重新组装无需改动 rootfs 即可绕开该问题，并使布局只取决于钉死的 stub，而不再取决于镜像内的 dracut 版本。最终的 `SizeOfImage` 与文件大小会记录到日志，若仍存在空洞则转换直接失败。
+
 ### 3.3 模式对比
 
 | 特性 | GRUB模式 | UKI模式 |
@@ -148,12 +155,20 @@ Initrd阶段是系统盘加密方案的核心执行阶段，由systemd服务编�
 
 rootfs设备链的构建根据加密配置有所不同。若配置了rootfs加密，服务首先通过密钥提供者获取passphrase并打开LUKS2加密卷，再在该解密设备上建立dm-verity。若未配置加密，则直接在rootfs逻辑卷上建立dm-verity。
 
+**dm-verity与dm-crypt的分层顺序**
+
+- CryptPilot采用"先解密、后校验"的顺序：dm-crypt位于下层（紧贴磁盘，负责解密），dm-verity位于上层（靠近文件系统，对明文校验），哈希树针对明文构建。该选择主要基于两点考量：其一，root_hash与加密密钥无关，轮换密钥或重新加密时无需重建哈希树，运维成本更低；其二，同一份参考值可度量使用不同密钥的多个实例，便于在多租户远程证明场景下统一管理参考值。
+
+- 作为对比，另一种顺序是将dm-verity置于dm-crypt之下，哈希树针对密文构建。该顺序符合"先认证后解密"（Encrypt-then-MAC）的密码学原则，可在不解锁的情况下校验磁盘完整性，避免对可能被篡改的密文执行解密，安全性组合更严谨；但其代价是密钥轮换会导致全盘密文变化而必须重建整棵哈希树，且root_hash依赖加密密钥，每个使用独立密钥的实例都需要独立的参考值，不利于多租户统一度量。综合机密计算场景的实际需求，CryptPilot选择了前者。
+
 
 #### 3.1.1 delta卷的初始化和扩容
 
 服务会先检查LVM物理卷所在磁盘是否有未分配空间，若有则扩展分区表，并扩容LVM物理卷，这一机制使系统能够自动适应云环境中磁盘扩容的场景。
 
 delta卷的初始化也在此一阶段完成。服务会先检查delta逻辑卷是否存在，若不存在则创建并占用卷组全部剩余空间。若delta卷已存在，则将其扩容至卷组剩余空间。
+
+在扩容 ext4 文件系统前，服务先清除其只读特性，再对尚未挂载的可写块设备执行 `e2fsck -f -p`。仅退出码 0（正常）和 1（错误已修复）允许继续扩容，其他退出码会终止启动。即使文件系统处于 clean 状态或容量没有变化，也会执行强制检查，因此大文件系统的启动时间可能增加。
 
 **delta卷解密流程**：
 

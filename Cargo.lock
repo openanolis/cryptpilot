@@ -457,6 +457,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
+name = "blktrace-rs"
+version = "0.1.1"
+dependencies = [
+ "bindgen 0.71.1",
+ "mnt",
+ "nix 0.29.0",
+ "num_cpus",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -941,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "cryptpilot"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "again",
  "anyhow",
@@ -949,7 +962,7 @@ dependencies = [
  "async-walkdir",
  "authenticode",
  "base64 0.22.1",
- "bindgen 0.71.1",
+ "blktrace-rs",
  "block-devs",
  "cgroups-rs",
  "clap",
@@ -970,9 +983,7 @@ dependencies = [
  "libc",
  "libcryptsetup-rs",
  "loopdev-3",
- "mnt",
  "nix 0.29.0",
- "num_cpus",
  "object",
  "ordermap",
  "protobuf 3.7.2",
@@ -991,7 +1002,6 @@ dependencies = [
  "strum",
  "tempfile",
  "tokio",
- "tokio-util",
  "toml 0.8.19",
  "toml_edit 0.22.24",
  "tracing",
@@ -1006,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "cryptpilot-crypt"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1039,7 +1049,7 @@ dependencies = [
 
 [[package]]
 name = "cryptpilot-fde"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1073,7 +1083,7 @@ dependencies = [
 
 [[package]]
 name = "cryptpilot-verity"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "anyhow",
  "async-trait",

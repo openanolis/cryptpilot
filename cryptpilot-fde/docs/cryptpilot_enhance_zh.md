@@ -86,11 +86,13 @@ cryptpilot-enhance --mode MODE --image IMAGE_PATH [--ssh-key PUBKEY_FILE]
 
 ## 依赖要求
 
-- 必须安装 `libguestfs-tools` 软件包
+- 必须安装 `libguestfs-tools` 软件包（Alinux 3 为 `libguestfs-tools-c`，Alinux 4 为 `guestfs-tools`，RPM 已通过弱依赖默认安装）
 - 系统中需可用 `virt-customize` 命令
 - 当前用户需具备读写镜像文件的权限
 
 适用于主流 CentOS/RHEL 7/8/9 镜像环境。其他发行版可能需要适配路径或包管理器命令。
+
+> **注意**：当 `virt-customize` 缺失或不可用时（Alinux 4 上 supermin 缺少 anolis 驱动，无法构建 appliance），`cryptpilot-enhance` 会打印警告并成功退出、跳过镜像加固，不影响 FDE 转换/启动流程。
 
 ## 环境变量
 

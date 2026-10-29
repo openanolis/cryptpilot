@@ -159,6 +159,41 @@ disk::nbd_available() {
     [[ $(blockdev --getsize64 "$1") == 0 ]]
 }
 
+# Disconnect an NBD device and wait for the image lock to actually be
+# released, so a subsequent qemu-img convert does not race on the OFD write
+# lock ("Failed to get shared write lock").
+#
+# qemu-nbd --disconnect returns before the nbd daemon finishes exiting and
+# releasing the write lock it holds on the backing image. blockdev
+# --getsize64 is NOT a reliable signal here: the device reports size 0 while
+# the daemon still holds the file lock, so polling it exits immediately and
+# the race is back. Instead, poll lsof on the image file: once no process
+# holds it open, the daemon has exited and the lock is gone. Bounded by
+# interval + max attempts so we never block forever.
+disk::nbd_disconnect_and_wait() {
+    local device="$1"
+    local image="${2:-}"
+    local max_attempts="${3:-30}"
+    local interval="${4:-1}"
+    local i
+
+    qemu-nbd --disconnect "${device}" >/dev/null 2>&1 || true
+
+    # No image to probe (e.g. operate-on-device path); fall back to a bounded
+    # wait on the device itself.
+    [[ -n "${image}" ]] || return 0
+
+    for ((i = 0; i < max_attempts; i++)); do
+        if ! lsof -t "${image}" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep "${interval}"
+    done
+
+    log::warn "Image ${image} still in use after ${max_attempts} attempts; proceeding anyway"
+    return 0
+}
+
 disk::get_available_nbd() {
     { lsmod | grep nbd >/dev/null; } || modprobe nbd max_part=8
     # If run in container, use following instead
@@ -225,6 +260,13 @@ proc::print_help_and_exit() {
     echo "      --uki-append-cmdline <cmdline>                      Append custom command line parameters when generating a UKI image. By default, only essential"
     echo "                                                          parameters are included. This option allows you to extend the kernel command line. The default"
     echo "                                                          value is 'console=tty0 console=ttyS0,115200n8'."
+    echo "      --uki-stub-version <distro|version>                Source of the systemd UEFI stub (linuxx64.efi.stub) used to assemble the UKI."
+    echo "                                                          Only meaningful with --uki. 'distro' (default) installs systemd-boot-unsigned"
+    echo "                                                          from the distro repo (version floats with the distro). Any other value is a"
+    echo "                                                          version prefix resolved against the public Arch Linux Archive to the highest"
+    echo "                                                          matching package, e.g. '261' -> latest 261.x, '261.2-1' -> that exact package"
+    echo "                                                          (fully pinned, so the PCR measurement reference stays stable). A pinned stub"
+    echo "                                                          is downloaded, used, and removed so the converted image is unchanged."
     echo "  -h, --help                                              Show this help message and exit."
     exit "$1"
 }
@@ -1028,6 +1070,37 @@ if [ "${uki:-false}" = false ]; then
             done
         done
     fi
+
+    # Normalize the ESP "early" grub.cfg that shim-loaded GRUB reads first.
+    # Some distros (notably Alinux 4) ship a UUID-based search here. After
+    # conversion the referenced partition (the boot partition) has been
+    # reformatted, so its UUID no longer exists and GRUB fails with
+    # "search.c: no such device: <uuid>" before it can load the main
+    # grub.cfg. Rewrite any such stub to a path-based search that locates
+    # the main grub.cfg by file path. This relies on the /boot->. symlink
+    # created earlier (so /boot/grub2/grub.cfg resolves on the boot
+    # partition) and is a no-op for distros already shipping path-based
+    # stubs (e.g. Alinux 3).
+    for _esp_early in /boot/efi/EFI/*/grub.cfg; do
+        [ -e "$_esp_early" ] || continue
+        if grep -q -- '--fs-uuid' "$_esp_early" 2>/dev/null; then
+            if [ -e /boot/grub2/grub.cfg ]; then
+                _esp_main=/boot/grub2/grub.cfg
+            elif [ -e /boot/grub/grub.cfg ]; then
+                _esp_main=/boot/grub/grub.cfg
+            else
+                echo "Cannot determine main grub.cfg path; leaving $_esp_early unchanged"
+                continue
+            fi
+            _esp_main_dir=$(dirname "$_esp_main")
+            echo "Normalizing ESP early grub.cfg ($_esp_early) -> path-based search for $_esp_main"
+            printf '%s\n' \
+                "search --no-floppy --set prefix --file ${_esp_main}" \
+                "set prefix=(\$prefix)${_esp_main_dir}" \
+                "configfile \$prefix/grub.cfg" > "$_esp_early"
+        fi
+    done
+
     echo "Cleaning up package manager cache..."
     if command -v yum >/dev/null 2>&1; then
         yum clean all
@@ -1047,24 +1120,157 @@ EOF
 
 }
 
+# --- efi stub provisioning (systemd-stub / linuxx64.efi.stub) -------------------
+#
+# dracut --uefi assembles a UKI by linking kernel+initrd+cmdline with the
+# systemd UEFI stub at /usr/lib/systemd/boot/efi/linuxx64.efi.stub. Different
+# systemd-stub versions measure into PCR4/PCR8/PCR12 differently, so pinning
+# the stub makes the measurement reference values stable.
+#
+# --uki-stub-version controls the source:
+#   distro                install systemd-boot-unsigned from the distro's own
+#                         repo (version floats with the distro; the legacy
+#                         behavior). This is the default when --uki is given
+#                         without --uki-stub-version.
+#   <version-prefix>      download a pinned stub from the public Arch Linux
+#                         Archive. The prefix is resolved against the archive
+#                         directory listing to the highest matching package:
+#                           "261"     -> latest 261.x  (e.g. 261.2-1)
+#                           "261.2"   -> 261.2-1
+#                           "261.2-1" -> 261.2-1 (exact, fully pinned)
+#                         A prefix must be followed by a segment boundary
+#                         ("." or "-"), so "25" does NOT silently resolve to
+#                         259.x -- it errors and lists what is available.
+readonly STUB_SPECIAL_DISTRO="distro"
+readonly STUB_REL_PATH="usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+readonly ARCH_STUB_ARCHIVE_URL="https://archive.archlinux.org/packages/s/systemd/"
+readonly ARCH_STUB_MEMBER="usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+
+# Print the base systemd package filenames available in the Arch Linux Archive,
+# newest-last. Excludes subpackages (systemd-libs, -sysvcompat, ...) because
+# those start with a letter after "systemd-", and excludes .sig files.
+_arch_stub_list_pkgs() {
+    curl -sS --max-time 60 "${ARCH_STUB_ARCHIVE_URL}" \
+        | grep -oE "systemd-[0-9][^\"<>[:space:]]*-x86_64\.pkg\.tar\.zst" \
+        | grep -v '\.sig$' \
+        | sort -uV
+}
+
+# Resolve a version prefix to the exact Arch package filename matching it, or
+# fail with a suggestion list of available versions. The match requires the
+# prefix to be followed by a segment boundary so short prefixes like "25" do
+# not jump across major versions (e.g. to 259.x).
+resolve_arch_stub_pkg() {
+    local prefix="$1"
+    local pkgs best=""
+    local rest nxt
+
+    pkgs="$(_arch_stub_list_pkgs)"
+    if [ -z "$pkgs" ]; then
+        echo "ERROR: could not fetch the systemd package list from the Arch Linux Archive (${ARCH_STUB_ARCHIVE_URL})." >&2
+        echo "       Check network connectivity, then retry." >&2
+        return 1
+    fi
+
+    while IFS= read -r p; do
+        [ -z "$p" ] && continue
+        rest="${p#systemd-}"            # e.g. 261.2-1-x86_64.pkg.tar.zst
+        # literal (non-regex) prefix match on the version portion
+        if [ "${rest:0:${#prefix}}" = "$prefix" ]; then
+            nxt="${rest:${#prefix}:1}"
+            if [ "$nxt" = "." ] || [ "$nxt" = "-" ] || [ -z "$nxt" ]; then
+                best="$p"              # keep last; pkgs are already newest-last
+            fi
+        fi
+    done <<<"$pkgs"
+
+    if [ -n "$best" ]; then
+        echo "$best"
+        return 0
+    fi
+
+    # No match: suggest the most recent available major versions.
+    local available
+    available=$(printf '%s\n' "${pkgs}" \
+        | sed -E 's/^systemd-([0-9]+)(\.|-).*/\1/' \
+        | sort -un | tail -n 8 | awk '{printf "%s.x ", $1}' | sed 's/ $//')
+    echo "ERROR: efi stub version '${prefix}' did not match any package in the Arch Linux Archive." >&2
+    echo "       Available systemd versions: ${available:-none}" >&2
+    echo "       Pass a major version (e.g. --uki-stub-version 261) or an exact pkgver-pkgrel (e.g. 261.2-1)." >&2
+    return 1
+}
+
 step:update_initrd() {
     local efi_part=$1
     local boot_file_path=$2
     local uki=$3
     local uki_append_cmdline=$4
+    local uki_stub_version=$5
 
     update_initrd_inner() {
         local rootfs_mount_point=$1
         local uki=$2
         local uki_append_cmdline=$3
+        local uki_stub_version=$4
 
         # Copy files to the chroot environment
         cp "${workdir}/metadata.toml" "${rootfs_mount_point}/tmp/"
         mkdir -p "${rootfs_mount_point}/tmp/cryptpilot/"
         cp -a "${config_dir}/." "${rootfs_mount_point}/tmp/cryptpilot/"
+
+        # When a pinned stub version is requested (anything other than the
+        # "distro" sentinel), download it from the public Arch Linux Archive
+        # and place it at the canonical path dracut --uefi expects. The stub
+        # is removed (and any pre-existing one restored) after the UKI is
+        # built below, so the converted image's rootfs is left byte-for-byte
+        # unchanged. The distro path instead installs the package inside the
+        # chroot and leaves it in place.
+        local stub_placed=false
+        local stub_backup=""
+        local stub_path="${rootfs_mount_point}/${STUB_REL_PATH}"
+        if [ "${uki:-false}" = true ] && [ "${uki_stub_version}" != "${STUB_SPECIAL_DISTRO}" ]; then
+            # Verify the host tools needed to download/extract/log a pinned stub
+            # (a .pkg.tar.zst). Step 0 tries to install them, but check here so a
+            # missing tool is reported clearly instead of a confusing extract error.
+            local _missing _t
+            _missing=""
+            for _t in curl zstd tar sha256sum; do
+                command -v "$_t" >/dev/null 2>&1 || _missing="${_missing} ${_t}"
+            done
+            if [ -n "$_missing" ]; then
+                proc::fatal "host tools required for --uki-stub-version are missing:${_missing} (install zstd, tar, curl, coreutils)"
+            fi
+            local pkg tmp_pkg
+            if ! pkg=$(resolve_arch_stub_pkg "${uki_stub_version}"); then
+                proc::fatal "could not resolve efi stub version '${uki_stub_version}'"
+            fi
+            mkdir -p "$(dirname "${stub_path}")"
+            if [ -e "${stub_path}" ]; then
+                stub_backup="${stub_path}.cryptpilot.orig"
+                mv "${stub_path}" "${stub_backup}"
+            fi
+            log::info "Downloading pinned efi stub from Arch Linux Archive: ${pkg}"
+            tmp_pkg=$(mktemp)
+            if ! curl -sS --max-time 120 -o "${tmp_pkg}" "${ARCH_STUB_ARCHIVE_URL}${pkg}"; then
+                rm -f "${tmp_pkg}"
+                [ -n "${stub_backup}" ] && mv "${stub_backup}" "${stub_path}"
+                proc::fatal "failed to download efi stub ${pkg} from the Arch Linux Archive"
+            fi
+            if ! zstd -d -c "${tmp_pkg}" 2>/dev/null | tar -xOf - "${ARCH_STUB_MEMBER}" > "${stub_path}" 2>/dev/null || [ ! -s "${stub_path}" ]; then
+                rm -f "${tmp_pkg}" "${stub_path}"
+                [ -n "${stub_backup}" ] && mv "${stub_backup}" "${stub_path}"
+                proc::fatal "failed to extract efi stub ${ARCH_STUB_MEMBER} from ${pkg}"
+            fi
+            rm -f "${tmp_pkg}"
+            local stub_sha
+            stub_sha=$(sha256sum "${stub_path}" | cut -d' ' -f1)
+            log::info "resolved efi stub: ${pkg} (from prefix '${uki_stub_version}'), sha256=${stub_sha}"
+            stub_placed=true
+        fi
+
         # update initrd
         log::info "Updating initrd"
-        chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; uki_append_cmdline='${uki_append_cmdline}' ; $(
+        chroot "${rootfs_mount_point}" bash -c "uki='${uki}' ; uki_append_cmdline='${uki_append_cmdline}' ; uki_stub_version='${uki_stub_version}' ; $(
             cat <<'EOF'
 set -e
 set -u
@@ -1101,7 +1307,342 @@ if [[ -f /tmp/cryptpilot/global.toml ]]; then
     dracut_common_args+=(--include /tmp/cryptpilot/global.toml /etc/cryptpilot/global.toml)
 fi
 
+# --- UKI section layout ------------------------------------------------------
+#
+# dracut 059 and older hardcode absolute section VMAs when they assemble a UKI
+# (.osrel=0x20000, .cmdline=0x30000, .linux=0x2000000, .initrd=0x3000000).
+# Those values assume the stub's ImageBase is 0. systemd >= v254 builds
+# linuxx64.efi.stub with lld, whose ImageBase is large (e.g. 0x4ff70000), and
+# objcopy writes RVA = VMA - ImageBase. The subtraction underflows and wraps
+# modulo 2^32: 0x2000000 - 0x4ff70000 == 0xb2090000. The stub's own sections
+# stay below RVA 0x1d000 while .linux/.initrd land ~2.8 GiB up, so SizeOfImage
+# grows to ~2.93 GiB for ~0.12 GiB of real data. Firmware maps that whole range
+# page by page (slow boot, memory pressure), and stricter firmware refuses the
+# image with "Load error". Disk usage and the PCR4/PCR11 values are unaffected,
+# which is what makes the bug easy to miss.
+#
+# --uki-stub-version pins a recent stub from the Arch archive, so on an image
+# with an old dracut this combination is hit every time. Neither upstream way
+# out works here: upgrading dracut or installing ukify means installing
+# packages into the rootfs, and the conversion has to leave the rootfs
+# byte-for-byte unchanged (that is why even the pinned stub is downloaded, used
+# and removed again). So reassemble the UKI here: derive the first free VMA from
+# the stub's own section table and re-add the payload sections at aligned
+# absolute VMAs (>= ImageBase). This mirrors the dynamic offset algorithm that
+# upstream dracut-ng only gained in 060; dracut 059 and older hardcode the
+# offsets and produce the hole. See dracut#2431 and systemd#28419.
+#
+# As a bonus the layout then depends only on the stub, not on the dracut
+# version inside the image, which is the layout stability --uki-stub-version is
+# after for its PCR reference values.
+#
+# Known limitations of this implementation:
+#   - Sections are matched by name, which assumes every name is unique. dracut
+#     on x86_64 never emits the repeatable .dtbauto/.efifw sections, so this
+#     holds today.
+#   - A stub-owned .sbat is treated as replaced by dracut based on its size
+#     alone.
+#   - x86_64 only (linuxx64 stub, BOOTX64.EFI), like the rest of this script.
+
+# Print one field of the PE optional header, hex, as objdump -p spells it.
+pe_header_field() {
+    objdump -p "$1" 2>/dev/null | awk -v key="$2" '$1 == key { print $2; exit }'
+}
+
+# Print "<name> <size-hex> <vma-hex>" for every section, in section table order.
+pe_sections() {
+    objdump -h "$1" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ && NF == 7 { print $2, $3, $4 }'
+}
+
+# Size of one section, hex, empty if the section is absent.
+pe_section_size() {
+    pe_sections "$1" | awk -v name="$2" '$1 == name { print $2; exit }'
+}
+
+# Round $1 up to the next multiple of $2, the way dracut does it (an already
+# aligned value still gets one full alignment of slack).
+pe_align_up() {
+    echo $(($1 + $2 - $1 % $2))
+}
+
+# Patch a Linux kernel bzImage's PE/COFF OptionalHeader.ImageBase to 0, in
+# place. systemd's UKI stub (linuxx64.efi.stub) >= 258 and < 260 computes each
+# inner kernel section's load offset as (section.VirtualAddress - ImageBase)
+# and rejects the image when that underflows, printing
+# "Section would write outside of memory" (systemd src/boot/linux.c, issue
+# #40342). Kernels v5.7..v6.6 are built with ImageBase = CONFIG_PHYSICAL_START
+# (default 0x1000000) while their section RVAs (~0x4000) are below it, so a
+# pinned 258/259 stub cannot boot them (e.g. alinux3 5.10); systemd fixed it in
+# >= 260 (PR #40429) and mainline kernel reverted to ImageBase=0 in v6.7.
+#
+# Setting ImageBase to 0 makes the buggy stub's math yield the correct RVA. It
+# is safe per the PE spec: ImageBase is the *preferred* load address, not used
+# by the position-independent kernel at runtime (the stub loads it into its own
+# base-0 buffer regardless). Caveat: changes the kernel hash -> re-sign and
+# re-measure. No-op (returns 0) if the file is not a valid PE kernel or
+# ImageBase is already 0; returns 1 only if it looks like a PE but cannot be
+# patched (truncated headers, unknown optional-header magic, write/verify
+# failure).
+patch_kernel_image_base_zero() {
+    local file=$1
+    [ -n "${file:-}" ] || { echo 'ERROR: patch_kernel_image_base_zero: no file given' >&2; return 1; }
+    [ -f "$file" ] || { echo "ERROR: kernel file not found: $file" >&2; return 1; }
+    command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 required to patch kernel ImageBase; cannot patch ${file##*/}" >&2; return 1; }
+
+    python3 - "$file" <<'PYEOF'
+import sys, struct, os
+path = sys.argv[1]
+name = os.path.basename(path)
+
+def note(m): print('NOTE: %s: %s' % (name, m))
+def err(m):  print('ERROR: %s: %s' % (name, m), file=sys.stderr)
+
+try:
+    size = os.path.getsize(path)
+    if size < 0x40:
+        note('too small to be a PE kernel; skip ImageBase patch')
+        sys.exit(0)
+    with open(path, 'r+b') as f:
+        head = f.read(min(size, 4096))
+        if head[0:2] != b'MZ':
+            note('no MZ DOS magic; skip ImageBase patch')
+            sys.exit(0)
+        if len(head) < 0x40:
+            err('truncated DOS header; cannot patch ImageBase')
+            sys.exit(1)
+        e_lfanew = struct.unpack_from('<I', head, 0x3c)[0]
+        if e_lfanew + 24 > len(head) or head[e_lfanew:e_lfanew+4] != b'PE\x00\x00':
+            err('bad PE signature; cannot patch ImageBase')
+            sys.exit(1)
+        opt_off = e_lfanew + 4 + 20
+        if opt_off + 28 > len(head):
+            err('truncated PE optional header; cannot patch ImageBase')
+            sys.exit(1)
+        magic = struct.unpack_from('<H', head, opt_off)[0]
+        if magic == 0x20b:
+            ib_off, fmt, w = opt_off + 24, '<Q', 8
+        elif magic == 0x10b:
+            ib_off, fmt, w = opt_off + 28, '<I', 4
+        else:
+            err('unknown PE optional-header magic 0x%x; cannot patch ImageBase' % magic)
+            sys.exit(1)
+        if ib_off + w > len(head):
+            err('truncated PE headers; cannot patch ImageBase')
+            sys.exit(1)
+        cur = struct.unpack_from(fmt, head, ib_off)[0]
+        if cur == 0:
+            note('ImageBase already 0; no patch needed')
+            sys.exit(0)
+        f.seek(ib_off)
+        f.write(struct.pack(fmt, 0))
+        f.flush()
+        os.fsync(f.fileno())
+        f.seek(ib_off)
+        chk = struct.unpack_from(fmt, f.read(w), 0)[0]
+        if chk != 0:
+            err('ImageBase patch verify failed (still 0x%x)' % chk)
+            sys.exit(1)
+        print('PATCHED %s: PE ImageBase 0x%x -> 0x0 (file offset 0x%x, %d bytes)' % (name, cur, ib_off, w))
+        sys.exit(0)
+except SystemExit:
+    raise
+except Exception as e:
+    err('ImageBase patch failed: %s' % e)
+    sys.exit(1)
+PYEOF
+}
+
+# Rebuild $2 (a dracut-generated UKI) on top of a pristine copy of the stub $1,
+# placing the payload sections right after the stub's own ones.
+uki_reassemble() {
+    local stub=$1
+    local uki=$2
+    local align image_base offs=0 end
+    local name size vma s
+    local stub_sections uki_sections payload="" replaced=""
+    local dumpdir build_stub dump_args=() add_args=()
+    local size_of_image file_size
+
+    if ! command -v objdump > /dev/null 2>&1; then
+        echo "ERROR: objdump is needed to lay out the UKI, install binutils" >&2
+        return 1
+    fi
+
+    # Release the scratch dir and any half-written relayout on every exit path
+    # (including set -e aborts from the cp/mv/objcopy below), so a failure
+    # never leaks /tmp/cryptpilot-uki-XXXXXX across runs.
+    trap '[ -n "$dumpdir" ] && rm -rf "$dumpdir" "${uki}.relayout"' RETURN
+
+    align=$(pe_header_field "$stub" SectionAlignment)
+    image_base=$(pe_header_field "$stub" ImageBase)
+    if [ -z "$align" ] || [ -z "$image_base" ]; then
+        echo "ERROR: cannot read the PE header of the efi stub $stub" >&2
+        return 1
+    fi
+    align=$((16#$align))
+    image_base=$((16#$image_base))
+    if [ "$align" -le 0 ]; then
+        echo "ERROR: bogus SectionAlignment in the efi stub $stub" >&2
+        return 1
+    fi
+
+    # First free VMA behind the stub's own sections. objdump reports absolute
+    # VMAs, so every offset derived from it stays >= ImageBase and objcopy's
+    # RVA = VMA - ImageBase can no longer underflow.
+    while read -r name size vma; do
+        end=$((16#$size + 16#$vma))
+        if [ "$end" -gt "$offs" ]; then
+            offs=$end
+        fi
+    done < <(pe_sections "$stub")
+    if [ "$offs" -lt "$image_base" ]; then
+        offs=$image_base
+    fi
+    offs=$(pe_align_up "$offs" "$align")
+
+    # Sections to carry over from the generated UKI, in a fixed order so the
+    # result only depends on the stub. A section the stub already owns is only
+    # carried over if dracut replaced it (newer dracut merges .sbat that way).
+    stub_sections=" $(pe_sections "$stub" | awk '{ print $1 }' | tr '\n' ' ')"
+    uki_sections=" $(pe_sections "$uki" | awk '{ print $1 }' | tr '\n' ' ')"
+    for s in .osrel .cmdline .uname .splash .dtb .sbat .linux .initrd; do
+        case "$uki_sections" in
+            *" $s "*) ;;
+            *) continue ;;
+        esac
+        case "$stub_sections" in
+            *" $s "*)
+                if [ "$(pe_section_size "$uki" "$s")" = "$(pe_section_size "$stub" "$s")" ]; then
+                    # SBAT is a revocation list; flag it so operators can audit
+                    # which version is kept when both sides carry the same size.
+                    if [ "$s" = ".sbat" ]; then
+                        echo "NOTE: stub and dracut both ship .sbat with the same size; keeping the stub's, dropping dracut's" >&2
+                    fi
+                    continue
+                fi
+                replaced="${replaced} ${s}"
+                ;;
+        esac
+        payload="${payload} ${s}"
+    done
+    # Anything else dracut added goes last, so nothing is silently dropped.
+    for s in $uki_sections; do
+        case "$stub_sections" in
+            *" $s "*) continue ;;
+        esac
+        case " ${payload} " in
+            *" $s "*) continue ;;
+        esac
+        echo "WARNING: unexpected section $s in the generated UKI, appending it last" >&2
+        payload="${payload} ${s}"
+    done
+    if [ -z "$payload" ]; then
+        echo "ERROR: the generated UKI carries no payload section on top of $stub" >&2
+        return 1
+    fi
+
+    dumpdir=$(mktemp -d /tmp/cryptpilot-uki-XXXXXX)
+    for s in $payload; do
+        dump_args+=(--dump-section "${s}=${dumpdir}/${s}")
+    done
+    # In place, so objcopy's scratch file stays in /tmp next to the UKI.
+    if ! objcopy "${dump_args[@]}" "$uki"; then
+        rm -rf "$dumpdir"
+        echo "ERROR: failed to dump the payload sections of the generated UKI" >&2
+        return 1
+    fi
+
+    for s in $payload; do
+        size=$(stat -Lc%s "${dumpdir}/${s}")
+        if [ "$size" -le 0 ]; then
+            rm -rf "$dumpdir"
+            echo "ERROR: section $s of the generated UKI is empty" >&2
+            return 1
+        fi
+        add_args+=(--add-section "${s}=${dumpdir}/${s}" --change-section-vma "${s}=$(printf '0x%x' "$offs")")
+        offs=$(pe_align_up $((offs + size)) "$align")
+    done
+    # The final objcopy copies build_stub (a byte copy of the stub) to the
+    # output, so it inherits the stub's ImageBase from the PE optional header.
+    # Pinning --image-base to the same value is a no-op (verified on binutils
+    # 2.35: outputs are byte-identical with and without it), and on binutils
+    # that lack the flag it cannot be passed at all. Rely on preservation; the
+    # post-reassembly SizeOfImage sanity check below catches any regression.
+
+    build_stub="${dumpdir}/stub.efi"
+    if ! cp "$stub" "$build_stub"; then
+        echo "ERROR: failed to copy the efi stub $stub to $build_stub" >&2
+        return 1
+    fi
+    for s in $replaced; do
+        # Separate pass: removing and adding the same section name in one
+        # objcopy run is ambiguous.
+        if ! objcopy --remove-section "$s" "$build_stub"; then
+            rm -rf "$dumpdir"
+            echo "ERROR: failed to drop section $s from the efi stub copy" >&2
+            return 1
+        fi
+    done
+
+    if ! objcopy "${add_args[@]}" "$build_stub" "${uki}.relayout"; then
+        rm -rf "$dumpdir" "${uki}.relayout"
+        echo "ERROR: failed to reassemble the UKI from the efi stub" >&2
+        return 1
+    fi
+    if ! mv "${uki}.relayout" "$uki"; then
+        echo "ERROR: failed to move the relayouted UKI ${uki}.relayout into place" >&2
+        return 1
+    fi
+    rm -rf "$dumpdir"
+
+    size_of_image=$(pe_header_field "$uki" SizeOfImage)
+    size_of_image=$((16#${size_of_image:-0}))
+    file_size=$(stat -Lc%s "$uki")
+    echo "UKI sections:${payload}, SizeOfImage=${size_of_image} bytes, file size=${file_size} bytes"
+    # A sane UKI maps just a bit more than it stores. A big gap means the RVAs
+    # wrapped again, and such an image boots slowly or not at all.
+    if [ "$size_of_image" -gt $((file_size + 64 * 1024 * 1024)) ]; then
+        echo "ERROR: the UKI still has a $(((size_of_image - file_size) / 1024 / 1024)) MiB hole (SizeOfImage=${size_of_image}, file size=${file_size})" >&2
+        return 1
+    fi
+}
+
 if [ "${uki:-false}" = true ]; then
+    # objcopy/objdump are needed to patch the cmdline and to fix the section
+    # layout below. Fail before dracut spends minutes building the UKI.
+    for tool in objcopy objdump; do
+        if ! command -v "$tool" > /dev/null 2>&1; then
+            echo "ERROR: $tool is needed to build the UKI, install binutils" >&2
+            exit 1
+        fi
+    done
+    # dracut --uefi needs the systemd UEFI stub (linuxx64.efi.stub) at
+    # /usr/lib/systemd/boot/efi/ to assemble a UKI. Two sourcing modes,
+    # selected by uki_stub_version (the literal "distro" sentinel must match
+    # the host-side STUB_SPECIAL_DISTRO):
+    #   "distro"     -> install systemd-boot-unsigned from the distro repo on
+    #                   demand (legacy behavior; version floats). On Alinux 3
+    #                   the stub ships with systemd-udev; on Alinux 4 it is
+    #                   in the disabled *-devel repo.
+    #   <prefix>     -> a pinned stub was already downloaded from the Arch
+    #                   Linux Archive and placed at the canonical path by the
+    #                   host before entering the chroot; just verify it.
+    if [ "${uki_stub_version:-distro}" = "distro" ]; then
+        if [ ! -e /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]; then
+            echo "EFI stub linuxx64.efi.stub not found; installing systemd-boot-unsigned"
+            # mirrors.cloud.aliyuncs.com is only reachable from inside Alibaba
+            # Cloud; switch to the public mirror so the install works in CI and
+            # other non-Aliyun environments too.
+            sed -i 's|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g' /etc/yum.repos.d/*.repo 2>/dev/null || true
+            yum --enablerepo='*devel*' install -y systemd-boot-unsigned || yum install -y systemd-boot-unsigned
+        fi
+    else
+        if [ ! -e /usr/lib/systemd/boot/efi/linuxx64.efi.stub ]; then
+            echo "ERROR: pinned efi stub (uki_stub_version='${uki_stub_version}') was not placed at /usr/lib/systemd/boot/efi/linuxx64.efi.stub" >&2
+            exit 1
+        fi
+    fi
+
     # Remove all existing EFI entries
     find /boot/efi/EFI -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     # Remove NvVars file
@@ -1109,15 +1650,63 @@ if [ "${uki:-false}" = true ]; then
 
     # Generate UKI with dracut
     echo "Generating UKI image"
-    dracut_args=("${dracut_common_args[@]}" --uefi --hostonly-cmdline)
-    cmdline=$(dracut "${dracut_args[@]}" --print-cmdline)
+    # No --hostonly-cmdline on the real build: devtmpfs is a single shared
+    # instance, so the chroot's /dev/disk reflects the build host's udev state,
+    # and dracut would bake build-host device paths into the initrd's wait
+    # hooks and cmdline.d. The cmdline is supplied in full via --kernel-cmdline;
+    # the --print-cmdline probe below enables its own hostonly mode regardless.
+    dracut_args=("${dracut_common_args[@]}" --uefi)
+    # Drop dracut's banner lines (e.g. "running in hostonly mode in a
+    # container!!") so only the computed kernel parameters are captured; they
+    # otherwise end up verbatim in the UKI's .cmdline section.
+    cmdline=$(dracut "${dracut_args[@]}" --print-cmdline 2>/dev/null | grep -v "^dracut: ")
     cmdline=$(echo "${cmdline} ${uki_append_cmdline}" | xargs)
+    # Normalize root= to the filesystem UUID. A /dev path here names the device
+    # as seen on the build host and the guest can never satisfy it; an
+    # unsatisfiable root would leave dracut waiting until the initqueue timeout.
+    root_val=""
+    if [[ ${cmdline} =~ root=([^ ]+) ]]; then
+        root_val="${BASH_REMATCH[1]}"
+    fi
+    if [[ ${root_val} == /dev/* ]]; then
+        root_uuid=$(blkid -o value -s UUID "${root_val}" 2>/dev/null || true)
+        if [[ -n ${root_uuid} ]]; then
+            echo "Normalizing root=${root_val} to UUID=${root_uuid}"
+            cmdline=${cmdline//root=${root_val}/root=UUID=${root_uuid}}
+        fi
+    fi
     dracut_args=("${dracut_args[@]}" --kernel-cmdline "$cmdline")
 
     # Put UKI to /tmp/ instead of /boot directory since objcopy will create a temporary file in the same directory, which may cause no space left error
     TMP_UKI_FILE="/tmp/BOOTX64.EFI"
     FINAL_UKI_FILE="/boot/efi/EFI/BOOT/BOOTX64.EFI"
     dracut "${dracut_args[@]}" "$TMP_UKI_FILE"
+
+    # dracut may have scattered the payload sections far above the stub, see the
+    # comment at uki_reassemble. Rebuild the layout from the stub itself before
+    # touching anything else, so the following passes work on a compact image.
+    echo "Fixing UKI section layout"
+    uki_reassemble /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$TMP_UKI_FILE"
+
+    # Workaround for systemd stub 258/259 + kernels whose PE ImageBase is
+    # non-zero (v5.7..v6.6, e.g. alinux3 5.10): the stub rejects them with
+    # "Section would write outside of memory" (systemd #40342, fixed in >= 260
+    # by PR #40429). Patch ONLY the kernel embedded in the UKI's .linux section
+    # to ImageBase=0 (objcopy dump/update-section, mirroring the cmdline patch
+    # below); /boot/vmlinuz is never touched. No-op if ImageBase is already 0
+    # (>= v6.7 kernels / alinux4). Only for pinned stubs in the buggy range.
+    if [ "${uki:-false}" = true ] && [ "${uki_stub_version:-distro}" != "distro" ]; then
+        _stub_major=""
+        case "${uki_stub_version}" in
+            [0-9]*) _stub_major=${uki_stub_version%%[!0-9]*} ;;
+        esac
+        if [ -n "${_stub_major}" ] && [ "${_stub_major}" -lt 260 ]; then
+            objcopy --dump-section .linux="/tmp/.linux.bin" "$TMP_UKI_FILE"
+            patch_kernel_image_base_zero /tmp/.linux.bin || \
+                echo "WARNING: kernel ImageBase patch failed (boot may fail with 'Load Error' on stub < 260)" >&2
+            objcopy --update-section .linux="/tmp/.linux.bin" "$TMP_UKI_FILE"
+        fi
+    fi
 
     echo "Patching cmdline in UKI"
     # The generated cmdline will have a leading space, remove it
@@ -1139,13 +1728,23 @@ fi
 EOF
         )"
 
+        # Remove the pinned stub (and restore any pre-existing one) so the
+        # converted image's rootfs is byte-for-byte unchanged. Only the Arch
+        # path places a stub here; the distro path leaves its package install
+        # in place.
+        if [ "${stub_placed}" = true ]; then
+            rm -f "${stub_path}"
+            if [ -n "${stub_backup}" ] && [ -e "${stub_backup}" ]; then
+                mv "${stub_backup}" "${stub_path}"
+            fi
+        fi
     }
 
     # Remove read-only flag from rootfs.img
     tune2fs -O ^read-only "${rootfs_file_path}"
 
     # Note that the rootfs.img will not be used any more so mount it without '-o ro' flag will not change the hash of rootfs.
-    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline"
+    run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline" "$uki_stub_version"
 }
 
 step::shrink_and_extract_rootfs_part() {
@@ -1331,6 +1930,7 @@ main() {
     local wipe_freed_space=false
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
+    local uki_stub_version="distro"
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -1382,6 +1982,10 @@ main() {
             uki_append_cmdline="$2"
             shift 2
             ;;
+        --uki-stub-version)
+            uki_stub_version="$2"
+            shift 2
+            ;;
         -h | --help)
             proc::print_help_and_exit 0
             ;;
@@ -1390,6 +1994,19 @@ main() {
             ;;
         esac
     done
+
+    # Validate --uki-stub-version: either the "distro" sentinel or a numeric
+    # Arch version prefix (digits, dots, hyphens). The char-class check also
+    # prevents single-quote injection since the value is interpolated into the
+    # chroot bash -c command string.
+    if [ "${uki}" = true ] && [ "${uki_stub_version}" != "distro" ]; then
+        if ! [[ "${uki_stub_version}" =~ ^[0-9][0-9.-]*$ ]]; then
+            proc::fatal "Invalid --uki-stub-version '${uki_stub_version}': use 'distro' or a version prefix like '261' / '261.2-1'"
+        fi
+    elif [ "${uki}" = false ] && [ "${uki_stub_version}" != "distro" ]; then
+        log::warn "--uki-stub-version is ignored without --uki"
+        uki_stub_version="distro"
+    fi
 
     if [ -n "${device:-}" ]; then
         if [ -n "${input_file:-}" ] || [ -n "${output_file:-}" ]; then
@@ -1467,12 +2084,20 @@ main() {
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
         fi
+        # A pinned stub from the Arch Linux Archive is a .pkg.tar.zst, so the
+        # Arch path needs curl (download), zstd + tar (extract), sha256sum (log).
+        if [[ "$uki" == "true" && "$uki_stub_version" != "distro" ]]; then
+            tool_packages+=(curl zstd tar)
+        fi
         apt-get update
         apt-get install -y "${tool_packages[@]}"
     else
         local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof)
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+        fi
+        if [[ "$uki" == "true" && "$uki_stub_version" != "distro" ]]; then
+            tool_packages+=(curl zstd tar)
         fi
         yum install -y "${tool_packages[@]}"
     fi
@@ -1622,12 +2247,12 @@ main() {
     #
     log::step "[ 9 ] Update initrd"
     if [ "$boot_part_exist" = "true" ]; then
-        step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
+        step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
     else
         if [ "$uki" = true ]; then
-            step:update_initrd "${efi_part}" "" "${uki}" "${uki_append_cmdline}"
+            step:update_initrd "${efi_part}" "" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
         else
-            step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}"
+            step:update_initrd "${efi_part}" "${boot_part}" "${uki}" "${uki_append_cmdline}" "${uki_stub_version}"
         fi
     fi
 
@@ -1646,8 +2271,7 @@ main() {
         # 11. Generating new image file
         #
         log::step "[ 11 ] Generating new image file"
-        qemu-nbd --disconnect "${device}"
-        sleep 2 # wait for the qemu-nbd daemon to release the file lock
+        disk::nbd_disconnect_and_wait "${device}" "${work_file}"
 
         # check suffix of the output file
         local output_file_suffix=${output_file##*.}

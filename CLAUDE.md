@@ -14,13 +14,10 @@ Never commit files under `docs/superpowers/` or `.claude/` to git. These are Cla
 
 ## Git Commit Requirements
 
-When creating or amending commits:
+General commit norms (author/committer from local git config, no `Co-Authored-By:`, `Assisted-by:` as the only accepted AI attribution, no session URLs or AI footers, never commit plan/spec files or anything gitignored) are stated in the global agent instructions and apply here; this section lists only what differs in this project:
 
-- **Author and committer** must always be taken from the local git config (`git config user.name` / `git config user.email`). Never use Claude's own identity.
-- **Never** add `Co-Authored-By:` trailers of any kind.
-- **Never** include any Claude session URLs, session IDs, or links to claude.ai in commit messages or PR descriptions. Commit messages should only describe the code changes.
-- **Never** include `🤖 Generated with [Claude Code](https://claude.com/claude-code)` or similar AI assistant references in PR descriptions or commit messages.
-- **Always** use `--no-gpg-sign` to avoid GPG signing.
+- **Always** add a `Signed-off-by:` trailer with the author's own identity, taken from the local git config. Use `git commit -s` (which appends it from the configured identity). This Developer Certificate of Origin trailer is required on every commit.
+- **Always** use `--no-gpg-sign`: this repo's commits are unsigned by policy, overriding the global default of respecting `commit.gpgsign`. Consequently the pre-push rule is stricter here: no commit may carry a `gpgsig` header at all (not just an unverified one); strip it before pushing.
 
 ## Pre-Commit Checks
 
@@ -74,25 +71,13 @@ linking `libfuse3.so.3`. This allows `cryptpilot-verity` to run on systems witho
 libfuse3 installed, as long as `/dev/fuse` and the FUSE kernel module are available.
 The pure-Rust FUSE implementation communicates directly with the kernel via `/dev/fuse`.
 
-## Pre-Push Checks
+## Release (make bump-version)
 
-Before pushing, verify that no commits in the push carry a gpgsig header or a Claude committer identity:
+Releases are driven by the global `release-version` skill; this section holds the project-specific facts that skill delegates to the project's docs.
 
-```bash
-for sha in $(git log --format="%H" origin/$(git rev-parse --abbrev-ref HEAD)..HEAD 2>/dev/null); do
-    git cat-file -p "$sha" | grep -q "^gpgsig" && echo "ERROR: commit $sha has gpgsig — rewrite with filter-branch before pushing" && exit 1
-    git log -1 --format="%ce" "$sha" | grep -qi "anthropic" && echo "ERROR: commit $sha has Claude committer — rewrite with filter-branch before pushing" && exit 1
-done
-echo "Pre-push checks passed"
-```
-
-If any commit fails, rewrite the committer with:
-
-```bash
-git filter-branch -f --env-filter '
-  if [ "$GIT_COMMITTER_EMAIL" = "noreply@anthropic.com" ]; then
-    export GIT_COMMITTER_NAME="$(git config user.name)"
-    export GIT_COMMITTER_EMAIL="$(git config user.email)"
-  fi
-' <base-commit>..HEAD
-```
+- `make bump-version-{major,minor,patch}` regenerates version info in 6 places: `Cargo.toml`, `Cargo.lock`, `cryptpilot.spec` (`Version:` plus an auto-collected `%changelog` from commit subjects since the last tag), `debian/changelog`, and the three `APPLICATION/*/buildspec.yml` files. Version bump commits use `git commit -s --no-gpg-sign`.
+- **Never manually edit version information**: not the `cryptpilot.spec` `Version:`/`Release:`/`%changelog`, not `debian/changelog`, not the `Cargo.toml` version. `make bump-version-*` owns all of it; a hand-written changelog entry would carry a wrong release number and duplicate the auto-collected commits. Edit the spec only for packaging logic (`BuildRequires`/`Requires`, `%build` flags).
+- The repo is GitHub `openanolis/cryptpilot`; default branch is **`master`** (not `main`), and PRs target it. There is no `origin` remote; derive the push remote at runtime from the branch's tracking config.
+- Pushing the `v<X.Y.Z>` tag triggers the release pipelines in `.github/workflows/` (vendored-source tarball, RPM/DEB packages, GitHub release with SLSA provenance). They build from the tag and publish nothing unreviewed, so the tag is pushed immediately after the PR opens, in parallel with PR CI. The tarball asset is named `cryptpilot-<X.Y.Z>-vendored-source.tar.gz`; discover the full asset list from the previous release.
+- Shortly after a PR opens, the **`ostest-bot`** GitHub account comments with a table of openanolis images it will build and the line "如已确认，请回复 **/build** 进行构建". Reply `/build` as a PR comment to confirm. Wait for the bot's reply containing the 镜像制作中心 (cr.openanolis.cn) build URL and include it in the release report.
+- Known non-blocking CI failure: `test-convert` on `alinux3` with `uki_stub_version=258` fails with `StartImage` "Load Error" at all RAM sizes (a known stub-version CI gap, not a regression). Accept it only after confirming the failure mode matches; `alinux4` + stub-258 rows passing is the gate. Any other failing check must be investigated before reporting.

@@ -58,6 +58,7 @@ Package: cryptpilot-fde-guest
 Architecture: any
 Depends: dracut,
          dracut-network,
+         e2fsprogs,
          lvm2,
          cryptsetup-bin,
          coreutils,
@@ -67,7 +68,6 @@ Depends: dracut,
          cloud-guest-utils,
          ${shlibs:Depends},
          ${misc:Depends}
-Recommends: e2fsprogs
 Description: Full-disk encryption guest-side boot service (initrd decryption)
  Cryptpilot-fde-guest provides the boot-service binary that runs during initrd
  to set up encrypted volumes (dm-crypt, dm-verity, LVM, overlayfs) before the

@@ -2,13 +2,23 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.8.0
+Version: 0.9.3
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
 License: Apache-2.0
 URL: https://www.alibaba.com
 Source0: https://github.com/openanolis/cryptpilot/releases/download/v%{version}/cryptpilot-%{version}-vendored-source.tar.gz
+
+# Subpackage build switches: build a subset of the Rust binaries from the
+# same spec so per-image container builds only compile the crate they
+# package, e.g.
+#   rpmbuild -ba cryptpilot.spec --without crypt --without verity
+# builds only the cryptpilot-fde-host / cryptpilot-fde-guest RPMs.
+# Default (no flags) builds everything, unchanged.
+%bcond_without fde
+%bcond_without crypt
+%bcond_without verity
 
 # Shared BuildRequires for all packages
 %{!?with_rustup:%global use_system_rust 1}
@@ -30,10 +40,16 @@ BuildRequires: clang
 BuildRequires: device-mapper-devel
 
 # Runtime dependencies for cryptpilot (main package)
+%if %{with fde}
 Requires: cryptpilot-fde-host = %{version}-%{release}
 Requires: cryptpilot-fde-guest = %{version}-%{release}
+%endif
+%if %{with crypt}
 Requires: cryptpilot-crypt = %{version}-%{release}
+%endif
+%if %{with verity}
 Requires: cryptpilot-verity = %{version}-%{release}
+%endif
 
 %description
 Cryptpilot is a full-disk encryption utility for protecting data at rest in confidential computing environments.
@@ -41,6 +57,7 @@ It provides LUKS2-based encryption for rootfs and data volumes, integrates with 
 and supports multiple key providers including TPM2, KBS (Key Broker Service), KMS, OIDC, OTP, and custom exec plugins.
 Includes tools for disk image conversion (cryptpilot-convert) and enhancement (cryptpilot-enhance).
 
+%if %{with verity}
 %package -n cryptpilot-verity
 Summary: Integrity measurement tool for directory trees
 Group: Applications/System
@@ -70,7 +87,9 @@ integrity checks at read time. Unlike kernel fs-verity which works per-file, cry
 protects the entire directory tree structure including path-to-file mappings, making it suitable
 for confidential computing scenarios where the underlying storage is untrusted (e.g., virtio-fs,
 object storage, or host-side disks).
+%endif
 
+%if %{with fde}
 %package -n cryptpilot-fde-host
 Summary: Full-disk encryption host-side tooling (conversion, configuration, reference values)
 Group: Applications/System
@@ -85,9 +104,21 @@ Requires: coreutils
 Requires: util-linux
 Requires: veritysetup
 Requires: lvm2
-# qemu-img and libguestfs-tools-c used by cryptpilot-convert on the host
+# qemu-img and libguestfs (virt-customize) used by cryptpilot-convert and
+# cryptpilot-enhance on the host.
+# virt-customize ships in "libguestfs-tools-c" on Alinux 3 / RHEL 8. On
+# Alinux 4 it ships in "guestfs-tools", which provides and obsoletes
+# "libguestfs-tools-c", so the same names resolve on both distros. The
+# boolean fallback to plain "libguestfs" keeps the RPM installable where
+# neither tools package is reachable (e.g. an Alinux 4 mirror of only the
+# base repo, which does not carry guestfs-tools).
+# dnf may still resolve the boolean to the dependency-cheaper "libguestfs"
+# package, which does NOT contain virt-customize, so cryptpilot-enhance
+# would silently skip hardening. Pull the real tools in via a weak
+# dependency: installed by default wherever the name resolves.
 Requires: qemu-img
-Requires: libguestfs-tools-c
+Requires: (libguestfs-tools-c or libguestfs)
+Recommends: libguestfs-tools-c
 # growpart for partition manipulation
 Requires: cloud-utils-growpart
 # Filesystem tools (recommended, not required)
@@ -110,7 +141,9 @@ Cryptpilot-fde-host provides host-side tools for full-disk encryption management
 including disk image conversion (cryptpilot-convert), image hardening (cryptpilot-enhance),
 boot artifact reference value computation (show-reference-value), and configuration
 validation (config check/dump).
+%endif
 
+%if %{with fde}
 %package -n cryptpilot-fde-guest
 Summary: Full-disk encryption guest-side boot service (initrd decryption)
 Group: Applications/System
@@ -130,8 +163,8 @@ Requires: util-linux
 Requires: veritysetup
 # Partition expansion for cloud environments
 Requires: cloud-utils-growpart
-# Filesystem tools needed during boot (tune2fs, resize2fs)
-Recommends: e2fsprogs
+# Filesystem tools needed during boot (tune2fs, e2fsck, resize2fs)
+Requires: e2fsprogs
 
 # No qemu-img, libguestfs-tools-c in guest image
 
@@ -143,7 +176,9 @@ Cryptpilot-fde-guest provides the boot-service binary that runs during initrd
 to set up encrypted volumes (dm-crypt, dm-verity, LVM, overlayfs) before the
 root filesystem is mounted. This package is designed for inclusion in guest
 disk images and has minimal dependencies.
+%endif
 
+%if %{with crypt}
 %package -n cryptpilot-crypt
 Summary: Data volume encryption tooling
 Group: Applications/System
@@ -174,12 +209,14 @@ Obsoletes: cryptpilot < %{version}-%{release}
 
 %description -n cryptpilot-crypt
 Cryptpilot-crypt provides data volume encryption and automatic volume management for confidential computing environments.
+%endif
 
 %prep
 %setup -q -n %{name}-%{version}
 
 
 %build
+%if %{with fde}
 # Build cryptpilot-fde-host
 pushd src/cryptpilot-fde/
 cargo install --path . --bin cryptpilot-fde-host --root %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-host/ --locked --offline
@@ -189,22 +226,29 @@ popd
 pushd src/cryptpilot-fde/
 cargo install --path . --bin cryptpilot-fde-guest --root %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-guest/ --locked --offline
 popd
+%endif
 
+%if %{with crypt}
 # Build cryptpilot-crypt
 pushd src/cryptpilot-crypt/
 cargo install --path . --bin cryptpilot-crypt --root %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/ --locked --offline
 popd
+%endif
 
+%if %{with verity}
 # Build cryptpilot-verity
 pushd src/cryptpilot-verity/
 cargo install --path . --bin cryptpilot-verity --root %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/ --locked --offline
 popd
+%endif
 
 
 %install
-# Install cryptpilot-fde-host binaries
 pushd src/
 install -d -p %{buildroot}%{_prefix}/bin
+
+%if %{with fde}
+# Install cryptpilot-fde-host binaries
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-host/bin/cryptpilot-fde-host %{buildroot}%{_prefix}/bin/cryptpilot-fde-host
 # Install FDE enhancement scripts (host only)
 install -p -m 755 cryptpilot-convert.sh %{buildroot}%{_prefix}/bin/cryptpilot-convert
@@ -212,12 +256,6 @@ install -p -m 755 cryptpilot-enhance.sh %{buildroot}%{_prefix}/bin/cryptpilot-en
 
 # Install cryptpilot-fde-guest binary
 install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-fde-guest/bin/cryptpilot-fde-guest %{buildroot}%{_prefix}/bin/cryptpilot-fde-guest
-
-# Install cryptpilot-crypt
-install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/bin/cryptpilot-crypt %{buildroot}%{_prefix}/bin/cryptpilot-crypt
-
-# Install cryptpilot-verity
-install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/bin/cryptpilot-verity %{buildroot}%{_prefix}/bin/cryptpilot-verity
 
 # Install dracut module (guest package - used during initrd)
 rm -rf %{buildroot}%{dracut_dst}
@@ -230,24 +268,39 @@ install -p -m 644 dist/dracut/modules.d/91cryptpilot/cryptpilot-fde-after-sysroo
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/initrd-wait-network-online.service %{buildroot}%{dracut_dst}
 install -p -m 644 dist/dracut/modules.d/91cryptpilot/lvm.conf %{buildroot}%{dracut_dst}
 
-# Install systemd services (guest)
-install -d -p %{buildroot}%{_prefix}/lib/systemd/system
-install -p -m 644 dist/systemd/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/system/cryptpilot.service
-
 # Install config templates (host package is where users configure)
 install -d -p %{buildroot}/etc/cryptpilot
 install -p -m 600 dist/etc/global.toml.template %{buildroot}/etc/cryptpilot/global.toml.template
 install -p -m 600 dist/etc/fde.toml.template %{buildroot}/etc/cryptpilot/fde.toml.template
+
+# Install udev rules
+install -d -p %{buildroot}/usr/lib/udev/rules.d
+install -p -m 644 dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules %{buildroot}/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+%endif
+
+%if %{with crypt}
+# Install cryptpilot-crypt
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-crypt/bin/cryptpilot-crypt %{buildroot}%{_prefix}/bin/cryptpilot-crypt
+
+# Volume configuration templates
 install -d -p %{buildroot}/etc/cryptpilot/volumes
 install -p -m 600 dist/etc/volumes/otp.toml.template %{buildroot}/etc/cryptpilot/volumes/otp.toml.template
 install -p -m 600 dist/etc/volumes/kbs.toml.template %{buildroot}/etc/cryptpilot/volumes/kbs.toml.template
 install -p -m 600 dist/etc/volumes/kms.toml.template %{buildroot}/etc/cryptpilot/volumes/kms.toml.template
 install -p -m 600 dist/etc/volumes/oidc.toml.template %{buildroot}/etc/cryptpilot/volumes/oidc.toml.template
 install -p -m 600 dist/etc/volumes/exec.toml.template %{buildroot}/etc/cryptpilot/volumes/exec.toml.template
+%endif
 
-# Install udev rules
-install -d -p %{buildroot}/usr/lib/udev/rules.d
-install -p -m 644 dist/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules %{buildroot}/usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+%if %{with verity}
+# Install cryptpilot-verity
+install -p -m 755 %{_builddir}/%{name}-%{version}/install/cryptpilot-verity/bin/cryptpilot-verity %{buildroot}%{_prefix}/bin/cryptpilot-verity
+%endif
+
+%if %{with fde} || %{with crypt}
+# Install systemd service (claimed by both cryptpilot-fde-guest and cryptpilot-crypt)
+install -d -p %{buildroot}%{_prefix}/lib/systemd/system
+install -p -m 644 dist/systemd/cryptpilot.service %{buildroot}%{_prefix}/lib/systemd/system/cryptpilot.service
+%endif
 popd
 
 
@@ -258,10 +311,13 @@ rm -rf %{buildroot}
 %files
 %license src/LICENSE
 
+%if %{with verity}
 %files -n cryptpilot-verity
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot-verity
+%endif
 
+%if %{with fde}
 %files -n cryptpilot-fde-host
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot-fde-host
@@ -271,7 +327,9 @@ rm -rf %{buildroot}
 %dir /etc/cryptpilot
 /etc/cryptpilot/global.toml.template
 /etc/cryptpilot/fde.toml.template
+%endif
 
+%if %{with fde}
 %post -n cryptpilot-fde-guest
 # Reload udev rules to apply new device filtering rules
 if command -v udevadm >/dev/null 2>&1; then
@@ -294,7 +352,9 @@ fi
 %{_prefix}/lib/systemd/system/cryptpilot.service
 # Udev rules for device hiding
 /usr/lib/udev/rules.d/12-cryptpilot-hide-intermediate-devices.rules
+%endif
 
+%if %{with crypt}
 %files -n cryptpilot-crypt
 %license src/LICENSE
 %{_prefix}/bin/cryptpilot-crypt
@@ -328,9 +388,92 @@ if [ $1 == 0 ]; then #uninstall
   systemctl daemon-reload
   systemctl reset-failed
 fi
+%endif
 
 
 %changelog
+* Tue Oct 13 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.3-1
+- fix(enhance): skip hardening when supermin cannot detect the package manager
+- test(convert): probe the root partition with blkid, not lsblk
+- test(convert): verify delta data survival and interrupted init recovery
+- fix(docker): make the fde image able to convert alinux4 guests
+- ci(convert): create the persist overlay next to the output image
+- ci(convert): start dockerd for the direct QEMU boot on alinux4
+- ci(convert): boot the disk-persist integrity scenario twice
+- fix(fde): initialize a full snapshot chunk when wiping the COW header
+- ci(docker): build the three images in parallel matrix jobs
+- Drop agent skills and config maintained centrally
+- ci(convert): add disk-persist regression coverage for #140 and #141
+- fix(convert): wait for nbd image lock release before qemu-img convert
+- test(fde): cover filesystem checks before resizing
+- fix(fde): check ext4 filesystems before offline resize
+
+* Mon Sep 21 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.2-1
+- docs(skill): add release-version skill adapted from inclavare-containers/tng
+- ci(convert): boot the converted image across a vCPU/RAM matrix (2:4G/4:8G/4:16G) with --uki-stub-version 258 coverage
+- fix(uki): patch the UKI's embedded .linux ImageBase to 0 for systemd stub 258/259
+- refactor(uki): drop redundant --image-base from uki_reassemble
+- fix(uki): log when dracut's .sbat is dropped for a same-size stub copy
+- fix(uki): guarantee uki_reassemble scratch cleanup on early exit
+- fix(uki): check objcopy/objdump before running dracut
+- fix(uki): correct malformed section layout in UKIs generated by legacy dracut
+- test(convert): pin QEMU guest RAM to 4G in CI
+- docs(cryptpilot-fde): explain dm-verity/dm-crypt layering order rationale
+
+* Tue Sep 01 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.1-1
+- docs(claude.md): formalize git commit requirements
+- feat(cryptpilot-convert): pin systemd UEFI stub via --uki-stub-version
+
+* Fri Aug 21 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.0-1
+- fix(fde): enable UKI build and QEMU boot test on Alinux 4
+- feat(fde): add Alibaba Cloud Linux 4 support
+- fix(crypt): address clippy warnings in three_state_init tests
+- fix(fde): always mark delta volume as initialized after recreation
+- fix(fde): mark DiskPersist delta volume as initialized after recreation
+- test(crypt): remove unused parallel blkid monitor from init lifecycle test
+- refactor(boot_service): include subsystem in COW device error message
+- test(crypt): add serial_test and stable blkid lifecycle test with retries
+- refactor(core): set subsystem in CryptParamsLuks2, add blkid SUBTYPE field, and parallel lifecycle test
+- refactor(core): merge initializing marker into format() atomically
+- test(crypt): add three-state init integration tests
+- feat(crypt): add Initializing state to volume status display
+- feat(core): write initializing marker in format()
+- feat(core): add VolumeInitState enum and get_init_state() API
+- fix(kms): add IMDS error handling and IMDSv2 TODO note
+- fix(crypt): update KmsConfig struct literal in volume.rs test for AuthMode enum
+- docs: update KMS provider docs with ECS RAM role auth mode
+- refactor(gen-template): use new KmsConfig constructor for kms template
+- feat(provider/kms): add ECS RAM role auth mode with auto-discovery
+- ci(test): use Rust 1.86.0 for aarch64 coverage to fix profiler builtins linker error
+- docs: add Codecov badge to README
+- ci: add coverage collection and Codecov upload to test workflow
+- feat: add run-test-coverage target with cargo-llvm-cov
+- fix(make): add cleanup-stale-devices target to remove orphan dm-crypt and loop devices before test suite
+- ci: pass --define 'with_rustup 1' to all yum-builddep invocations
+- fix(metadata): use canonical JSON library for cross-language hash compatibility
+- fix(verity-go): add missing --hash-output flag to CLI example
+- fix(verity-go): correct README examples and module path
+- fix(test): increase QEMU boot timeout from 3 to 6 minutes
+- ci: remove redundant interop-test Makefile targets
+- ci: remove redundant interop-test job
+- fix(ci): cd into verity-core before running make_testfiles.py
+- refactor(cryptpilot-verity): clean up metadata module and remove cross-lang tests
+- docs(verity-go): rewrite README with serialize/verify sections
+- docs(verity-go): add bilingual README and fix CI fixture ordering
+- refactor(test): simplify testing to two clean categories
+- fix: address code review feedback for interop infrastructure
+- ci: add Go test job and interop test targets
+- chore: regenerate FlatBuffers Rust code from updated flatc
+- test(cryptpilot-verity): add cross-language deserialize tests
+- feat(verity-go): add metadata package with FlatBuffers serialization
+- refactor(verity-go): export DigestSize and BlockSize methods
+- feat(verity-go): add cross-validation tests for FsVerityDigest
+- feat(verity-go): add FsVerityDigest streaming hasher
+- feat(verity-go): add MerkleTree type
+- feat(verity-go): add FsVerityDescriptor and HashAlgorithm types
+- feat(verity-go): scaffold Go module and FlatBuffers generated code
+- ci: print cryptpilot-convert diagnostic log on test failure
+
 * Sat May 09 2026 Kun Lai <laikun@linux.alibaba.com> - 0.8.0-1
 - fix(verity): drop libfuse3 dynamic link dependency
 - fix(ci): restore generated FlatBuffers files and drop debian:trixie from DEB test matrix

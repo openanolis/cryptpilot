@@ -203,12 +203,16 @@ install-test-depend:
 
 .PHONY: install-convert-test-depend
 install-convert-test-depend:
-	yum install -y wget qemu-img cryptsetup lvm2 parted e2fsprogs util-linux libguestfs-tools-c
+	yum install -y wget qemu-img cryptsetup lvm2 parted e2fsprogs util-linux
+	# Alinux 3 / RHEL 8 ship the libguestfs tools as "libguestfs-tools-c";
+	# Alinux 4 merges them into "libguestfs". Try the legacy name first,
+	# fall back to the merged package.
+	yum install -y libguestfs-tools-c || yum install -y libguestfs
 	which docker || { yum install -y docker ; }
 
 .PHONY: run-convert-test-case
 run-convert-test-case: install-convert-test-depend
-	bash tests/test-convert.sh --rpm $(CRYPTPILOT_FDE_RPM) --bootloader $(BOOTLOADER) --rootfs-$(ROOTFS_ENC) --delta-location $(DELTA_LOCATION) $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),)
+	bash tests/test-convert.sh --rpm $(CRYPTPILOT_FDE_RPM) --bootloader $(BOOTLOADER) --rootfs-$(ROOTFS_ENC) --delta-location $(DELTA_LOCATION) $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),) $(if $(BOOT_MATRIX),--boot-matrix "$(BOOT_MATRIX)",) $(if $(UKI_STUB_VERSION),--uki-stub-version $(UKI_STUB_VERSION),) $(if $(DELTA_KEY),--delta-key $(DELTA_KEY),) $(if $(INTEGRITY),--integrity $(INTEGRITY),) $(if $(SECOND_BOOT),--second-boot,) $(if $(SKIP_ENHANCE),--skip-enhance,)
 
 .PHONE: shellcheck
 shellcheck:
