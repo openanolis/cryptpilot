@@ -184,9 +184,24 @@ disk::nbd_disconnect_and_wait() {
     [[ -n "${image}" ]] || return 0
 
     for ((i = 0; i < max_attempts; i++)); do
-        if ! lsof -t "${image}" >/dev/null 2>&1; then
-            return 0
-        fi
+        # main()'s flock guard fd keeps this script holding the image open,
+        # and forked children inherit a copy, so lsof would count our own
+        # probes as holders. Close the inherited descriptors inside the probe
+        # subshell (and keep it alive across the scan via "|| true" so it
+        # never execs into lsof), then ignore our pid: only genuine other
+        # holders keep the wait going.
+        local holders fd
+        holders="$(
+            set +x
+            for fd in {3..255}; do eval "exec ${fd}>&-" 2>/dev/null || true; done
+            lsof -t "${image}" 2>/dev/null || true
+        )"
+        local other_holders=""
+        local holder
+        for holder in ${holders}; do
+            [[ "${holder}" == "$$" ]] || other_holders="${other_holders}${holder}"
+        done
+        [[ -z "${other_holders}" ]] && return 0
         sleep "${interval}"
     done
 
