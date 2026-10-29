@@ -1787,7 +1787,7 @@ EOF
     run_in_chroot_mounts "$rootfs_file_path" "$efi_part" "$boot_file_path" update_initrd_inner "$uki" "$uki_append_cmdline" "$uki_stub_version"
 }
 
-step::shrink_and_extract_rootfs_part() {
+step::shrink_rootfs() {
     local rootfs_orig_part=$1
 
     # Mark the rootfs partition as read-only
@@ -1823,16 +1823,9 @@ step::shrink_and_extract_rootfs_part() {
     echo "    Block count: $after_shrink_block_count"
     echo "    Size in Bytes: $after_shrink_size_in_bytes"
     echo "    Size in Sector: $after_shrink_size_in_sector"
-
-    # Extract rootfs to file on disk
-    rootfs_file_path="${workdir}/rootfs.img"
-    log::info "Extract rootfs to file on disk ${rootfs_file_path}"
-    dd status=progress if="${rootfs_orig_part}" of="${rootfs_file_path}" "count=${after_shrink_size_in_bytes}" iflag=count_bytes bs=256M
-
-    # Delete the original rootfs partition
-    log::info "Deleting original rootfs partition"
-    parted "$device" --script -- rm "${rootfs_orig_part_num}"
-    partprobe "$device" # Inform the OS of partition table changes
+    # No extraction to rootfs.img and no parted rm: source-read/source-write
+    # keep the original partition layout and the shrunk partition stays the
+    # data source for the later steps.
 }
 
 step::create_boot_part() {
@@ -2201,10 +2194,10 @@ main() {
     step:update_rootfs "${efi_part}" "${boot_file_path}" "${uki}"
 
     #
-    # 4. Shrinking rootfs and extract
+    # 4. Shrinking rootfs
     #
-    log::step "[ 4 ] Shrinking rootfs and extract"
-    step::shrink_and_extract_rootfs_part "${rootfs_orig_part}"
+    log::step "[ 4 ] Shrinking rootfs"
+    step::shrink_rootfs "${rootfs_orig_part}"
 
     #
     # 5. Create a boot partition
