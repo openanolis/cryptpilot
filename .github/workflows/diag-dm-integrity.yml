@@ -101,6 +101,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
+          yum install -y -q yum-utils
           yum-builddep -y --skip-unavailable --define 'with_rustup 1' ./cryptpilot.spec
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
