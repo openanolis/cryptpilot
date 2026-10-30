@@ -1,0 +1,117 @@
+name: Diagnose dm-integrity EILSEQ
+
+# One-shot diagnostic for the Run Tests dm-integrity failures (ext4/xfs
+# integrity=true mount EILSEQ). Not a gate; delete the branch after triage.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - diag-dm-integrity
+
+jobs:
+  cli-repro:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: registry.openanolis.cn/openanolis/anolisos:23
+      volumes:
+        - /run/udev/control:/run/udev/control
+        - /dev:/dev
+      options: --privileged --ipc=host
+    steps:
+      - name: Environment
+        run: |
+          echo "=== uname ==="; uname -a
+          echo "=== cpu ==="; grep -m1 -E "model name|^Model" /proc/cpuinfo || true
+          grep -m1 -oE "(^| )(vaes|avx512f|avx512vl|sha_ni|aes)( |$)" /proc/cpuinfo | tr ' ' '\n' | grep -v '^$' | sort -u || true
+          echo "=== disks ==="; lsblk -o NAME,SIZE,PHYSEC,LOGSEC || true
+          echo "=== crypto implementations ==="
+          awk '/^name/{n=$3} /^driver/{d=$3} /^priority/{p=$3} /^type/{t=$3; print n, d, p, t}' /proc/crypto | grep -iE "xts|authenc|hmac|sha256|aes" | sort -k3 -n -r | head -40
+      - name: CLI minimal repro
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set +e
+          sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
+          yum install -y -q cryptsetup e2fsprogs xfsprogs dosfstools util-linux device-mapper kmod
+          cryptsetup --version
+
+          run_one() {
+            local name="$1" mkfs="$2"
+            echo "##### VARIANT $name #####"
+            truncate -s 1G "/root/m-$name.img"
+            local DEV
+            DEV=$(losetup --find --show "/root/m-$name.img")
+            cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --integrity hmac-sha256 --sector-size 4096 --batch-mode --key-file <(echo -n test-passphrase) "$DEV" || { echo "RESULT $name FORMAT_FAIL"; dmesg | tail -20; losetup -d "$DEV" 2>/dev/null; return; }
+            cryptsetup open "$DEV" "d$ARCH-$name" --key-file <(echo -n test-passphrase) || { echo "RESULT $name OPEN1_FAIL"; dmesg | tail -20; losetup -d "$DEV" 2>/dev/null; return; }
+            dmsetup table
+            $mkfs "/dev/mapper/d$ARCH-$name" || { echo "RESULT $name MKFS_FAIL"; dmesg | tail -20; cryptsetup close "d$ARCH-$name"; losetup -d "$DEV"; return; }
+            cryptsetup close "d$ARCH-$name"
+            cryptsetup open "$DEV" "d$ARCH-$name" --key-file <(echo -n test-passphrase) || { echo "RESULT $name OPEN2_FAIL"; dmesg | tail -20; losetup -d "$DEV" 2>/dev/null; return; }
+            mkdir -p /root/rvmnt
+            if mount "/dev/mapper/d$ARCH-$name" /root/rvmnt; then
+              echo "RESULT $name MOUNT_OK"
+              dd if=/dev/zero of=/root/rvmnt/data.bin bs=1M count=8 2>/dev/null; sync; md5sum /root/rvmnt/data.bin
+              umount /root/rvmnt
+            else
+              echo "RESULT $name MOUNT_FAIL"
+            fi
+            dmesg | grep -iE "integrity|dm-crypt|device-mapper|I/O error|tag|checksum" | tail -30
+            cryptsetup close "d$ARCH-$name" 2>/dev/null
+            losetup -d "$DEV" 2>/dev/null
+          }
+
+          run_one ext4 "mkfs.ext4 -F"
+          run_one xfs "mkfs.xfs -f"
+          run_one vfat "mkfs.vfat -F 32"
+          echo "=== full dmesg tail ==="
+          dmesg | tail -60
+
+  rust-repro:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: registry.openanolis.cn/openanolis/anolisos:23
+      volumes:
+        - /run/udev/control:/run/udev/control
+        - /dev:/dev
+      options: --privileged --ipc=host
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: 'true'
+      - name: Install build dependencies
+        run: |
+          sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
+          yum-builddep -y --skip-unavailable --define 'with_rustup 1' ./cryptpilot.spec
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+      - name: Run provider_exec tests with dm-table polling
+        run: |
+          (while :; do dmsetup table 2>/dev/null; sleep 0.3; done > /root/dmpoll.log) &
+          POLLER=$!
+          set +e
+          cargo test -p cryptpilot-crypt --test provider_exec -- --nocapture 2>&1 | tail -150
+          TEST_RC=${PIPESTATUS[0]}
+          kill $POLLER 2>/dev/null
+          echo "=== dm tables observed during run ==="
+          sort -u /root/dmpoll.log | grep -v '^$' | head -60
+          echo "=== kernel messages ==="
+          dmesg | grep -iE "integrity|dm-crypt|device-mapper|I/O error|tag|checksum" | tail -60
+          echo "TEST_RC=$TEST_RC"
