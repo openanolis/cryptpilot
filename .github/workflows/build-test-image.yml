@@ -3,12 +3,25 @@ name: Build Test Image
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: 'URL of the qcow2 image to download'
+      mode:
+        description: 'direct: package the qcow2 from the given URL; ubuntu: build the Ubuntu Noble guest test image'
         required: true
+        type: choice
+        default: 'direct'
+        options:
+          - direct
+          - ubuntu
+      url:
+        description: 'URL of the qcow2 image to download (direct mode, required)'
+        required: false
         type: string
+      ubuntu_url:
+        description: 'URL of the Ubuntu Noble cloud image (ubuntu mode)'
+        required: false
+        type: string
+        default: 'https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img'
       tag:
-        description: 'Tag for the resulting image (e.g., alinux3-20251030)'
+        description: 'Tag for the resulting image (e.g., alinux3-20251030, noble-dracut-20260518)'
         required: true
         type: string
 
@@ -19,12 +32,20 @@ env:
 
 jobs:
   build-test-image:
+    if: inputs.mode == 'direct'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
+      - name: Validate direct mode inputs
+        run: |
+          if [[ -z "${{ inputs.url }}" ]]; then
+            echo "::error::direct mode requires the 'url' input"
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -59,6 +80,74 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.description=Test image with qcow2 for cryptpilot-convert integration tests
             qcow2.source.url=${{ inputs.url }}
+
+      - name: Output image reference
+        run: |
+          echo "Test image built and pushed:"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}"
+
+  # Ubuntu guest test image for the convert integration tests
+  # (build-deb.yml test-convert). Starts from the stock Noble cloud image:
+  # a stock image (~3.5G virtual) is far too small for the converted layout
+  # (ESP + /boot + LVM with hash tree), so the virtual size is grown to 10G
+  # with the space landing unallocated behind the last partition, where
+  # cryptpilot-convert grows the rootfs partition from. dracut must be
+  # preinstalled because the conversion rebuilds the guest initramfs with
+  # the cryptpilot dracut module.
+  build-ubuntu-test-image:
+    if: inputs.mode == 'ubuntu'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download and prepare Ubuntu Noble guest image
+        run: |
+          set -e
+          echo "Downloading image from: ${{ inputs.ubuntu_url }}"
+          mkdir -p /tmp/qcow2-image
+          wget -O /tmp/qcow2-image/test-image.qcow2 "${{ inputs.ubuntu_url }}"
+          ls -lh /tmp/qcow2-image/test-image.qcow2
+
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils libguestfs-tools
+
+          # Grow the virtual disk to 10G. The partitions are left untouched:
+          # the new space stays unallocated behind the last partition.
+          qemu-img resize /tmp/qcow2-image/test-image.qcow2 10G
+
+          # Preinstall dracut (cloud images ship initramfs-tools only).
+          export LIBGUESTFS_BACKEND=direct
+          virt-customize -a /tmp/qcow2-image/test-image.qcow2 --install dracut
+
+      - name: Copy Dockerfile
+        run: |
+          cp tests/test-image.Dockerfile /tmp/qcow2-image/Dockerfile
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v5
+        with:
+          context: /tmp/qcow2-image
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.description=Test image with qcow2 for cryptpilot-convert integration tests
+            qcow2.source.url=${{ inputs.ubuntu_url }}
 
       - name: Output image reference
         run: |
