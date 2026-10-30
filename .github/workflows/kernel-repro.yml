@@ -1,5 +1,7 @@
 name: Kernel dm-integrity repro
 on:
+  push:
+    branches: [diag/kernel-repro]
   pull_request:
     branches: [master]
   workflow_dispatch:
