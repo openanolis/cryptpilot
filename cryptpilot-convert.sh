@@ -530,8 +530,8 @@ install_zram_module_if_needed() {
         kernel_version=$(chroot "${rootfs_mount_point}" bash -c "ls /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | grep -v rescue | sort -V | tail -n1")
 
         if [ -z "$kernel_version" ]; then
-            log::error "Could not determine kernel version, zram module installation failed"
-            return 1
+            log::warn "Could not determine standard Ubuntu kernel version, skipping zram installation"
+            return 0
         fi
 
         log::info "Detected kernel version: $kernel_version"
@@ -566,7 +566,7 @@ install_zram_module_if_needed() {
         done
 
         if [ "$installed" = false ]; then
-            log::error "Could not install zram modules, possibly due to disk space constraints or missing package"
+            log::warn "Could not install zram modules, possibly due to disk space constraints or missing package"
             return 1
         fi
     fi
@@ -693,10 +693,7 @@ disk::install_deb_on_rootfs() {
 
     # Install user-provided packages
     if [ ${#user_packages[@]} -gt 0 ]; then
-        chroot "${rootfs_mount_point}" bash -c "dpkg --configure -a || true"
-        chroot "${rootfs_mount_point}" bash -c "dpkg -i $(printf '%s ' "${user_packages[@]}"| sed 's/ $//')" || true
-
-        # Fix dependencies
+        # First ensure apt indexes are available
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
@@ -705,7 +702,20 @@ disk::install_deb_on_rootfs() {
             ${no_proxy:+no_proxy=$no_proxy} \
             apt-get update || true
 
-        # Fix dependencies
+        # Pre-install common deb dependencies (dracut, dracut-network are required by cryptpilot-fde-guest)
+        chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
+            ${https_proxy:+https_proxy=$https_proxy} \
+            ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
+            ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
+            ${all_proxy:+all_proxy=$all_proxy} \
+            ${no_proxy:+no_proxy=$no_proxy} \
+            apt-get install -y dracut dracut-network lvm2 cryptsetup-bin || true
+
+        # Now install the deb packages
+        chroot "${rootfs_mount_point}" bash -c "dpkg --configure -a || true"
+        chroot "${rootfs_mount_point}" bash -c "dpkg -i $(printf '%s ' "${user_packages[@]}"| sed 's/ $//')" || true
+
+        # Fix any remaining dependency issues
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
@@ -718,12 +728,15 @@ disk::install_deb_on_rootfs() {
     # Step 2: Build essential packages list
     local cryptpilot_fde_version=""
 
-    # Try to query the version of cryptpilot-fde-host from the current system
+    # Try to query the version of cryptpilot-fde-host from the current system.
+    # The 2>/dev/null must stay INSIDE the $(...) with the || fallback outside:
+    # rpm writes its "package ... is not installed" message to stdout, so an
+    # "|| true" inside the substitution would capture that text as the version
+    # on hosts that have rpm but no cryptpilot-fde-host installed.
     if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-host --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
+        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-host --qf '%{VERSION}-%{RELEASE}' 2>/dev/null) || cryptpilot_fde_version=""
     elif command -v dpkg-query >/dev/null 2>&1; then
-        # Extract version from dpkg-query output, removing epoch if present
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null || true)
+        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null) || cryptpilot_fde_version=""
     fi
 
     local essential_packages_with_version=()
@@ -758,19 +771,26 @@ disk::install_deb_on_rootfs() {
         fi
     done
 
-    # Install missing essential packages
-    if [ ${#packages_to_install[@]} -gt 0 ]; then
+    # Install missing essential packages. cryptpilot-fde-guest is skipped when
+    # it was already installed via dpkg -i above: the version string detected
+    # on an RPM-based host does not match any apt candidate, so apt-get would
+    # fail on it.
+    local non_cryptpilot=()
+    for pkg in "${packages_to_install[@]}"; do
+        case "$pkg" in cryptpilot-fde-guest*) ;; *) non_cryptpilot+=("$pkg") ;; esac
+    done
+    if [ ${#non_cryptpilot[@]} -gt 0 ]; then
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
             ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
             ${all_proxy:+all_proxy=$all_proxy} \
             ${no_proxy:+no_proxy=$no_proxy} \
-            apt-get -y install "${packages_to_install[@]}"
+            apt-get -y install "${non_cryptpilot[@]}"
     fi
 
-    # Step 4: Install zram kernel module for Ubuntu
-    install_zram_module_if_needed "${rootfs_mount_point}"
+    # Step 4: Install zram kernel module for Ubuntu (best-effort only)
+    install_zram_module_if_needed "${rootfs_mount_point}" || log::warn "zram module installation skipped; may not be available for this kernel"
 
     # Step 5: Lock version for all essential packages (using base package name)
     chroot "${rootfs_mount_point}" apt-mark hold "${essential_package_names[@]}"
