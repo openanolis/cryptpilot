@@ -12,9 +12,12 @@
 #                           Reuses the converted image across the matrix. If
 #                           omitted, a single boot runs with nproc and 80% of
 #                           host MemTotal.
+# and by the guest distro under test:
+#   --distro        alinux3 (default) | ubuntu
 #
 # Usage:
 #   ./tests/test-convert.sh --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist>
+#   ./tests/test-convert.sh --distro ubuntu --deb <path> --bootloader uki --rootfs-enc --delta-location ram
 #   ./tests/test-convert.sh --help              # Show usage
 #
 
@@ -35,13 +38,30 @@ readonly NC='\033[0m' # No Color
 # Test configuration
 readonly TEST_IMAGE_URL="https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2"
 readonly TEST_IMAGE_CACHE="/tmp/test-input-alinux3.qcow2"
+# Ubuntu guests boot the noble test image from ghcr (a stock Ubuntu Noble
+# cloud image grown to 10G with dracut preinstalled, built by the ubuntu
+# mode of .github/workflows/build-test-image.yml). There is no plain download
+# URL for it, so the qcow2 is extracted from the container image like the CI
+# workflows do.
+readonly UBUNTU_TEST_IMAGE_REF="ghcr.io/openanolis/cryptpilot-fde-test-image:noble-dracut-20260518"
+readonly UBUNTU_TEST_IMAGE_CACHE="/tmp/test-input-ubuntu.qcow2"
 readonly TEST_PASSPHRASE="test-passphrase-12345"
+
+# Guest distro under test: alinux3 (default, unchanged behavior) or ubuntu.
+DISTRO="alinux3"
 
 # Source image path (can be overridden via --input)
 SOURCE_IMAGE=""
 
-# Path to cryptpilot-fde-guest RPM package (required)
+# Path to cryptpilot-fde-guest RPM package (alinux3 guests, required)
 CRYPTPILOT_FDE_RPM=""
+
+# Path to cryptpilot-fde-guest DEB package (ubuntu guests, required)
+CRYPTPILOT_FDE_DEB=""
+
+# The guest package actually handed to cryptpilot-convert --package: set from
+# CRYPTPILOT_FDE_RPM or CRYPTPILOT_FDE_DEB once the distro is validated.
+CRYPTPILOT_FDE_PACKAGE=""
 
 # Delta key provider for the test config: "otp" (default, recreates the delta
 # every boot — preserves the original CI behavior) or "stable" (exec provider
@@ -283,6 +303,41 @@ download_test_image() {
     fatal "Failed to download test image after $max_retries attempts"
 }
 
+# Fetch the Ubuntu guest image from ghcr and cache it. The qcow2 is extracted
+# the same way the CI workflows extract it (docker create + docker cp, then
+# the container image is dropped again to reclaim space).
+extract_ubuntu_test_image() {
+    if [[ -f "${UBUNTU_TEST_IMAGE_CACHE}" ]]; then
+        log::info "Using cached test image: ${UBUNTU_TEST_IMAGE_CACHE}"
+        return 0
+    fi
+
+    log::step "Fetching Ubuntu test image: ${UBUNTU_TEST_IMAGE_REF}"
+
+    # The QEMU boot test needs a usable container runtime anyway; make sure
+    # one is available before pulling. No-op when docker already works (e.g.
+    # podman emulation or a running dockerd).
+    if ! ensure_docker_runtime; then
+        return 1
+    fi
+
+    local tmp_file="${UBUNTU_TEST_IMAGE_CACHE}.extracting"
+    local extract_name="cryptpilot-ubuntu-image-extract-$$"
+    if ! docker pull "${UBUNTU_TEST_IMAGE_REF}" \
+        || ! docker create --name "${extract_name}" "${UBUNTU_TEST_IMAGE_REF}" /bin/true \
+        || ! docker cp "${extract_name}:/image.qcow2" "${tmp_file}"; then
+        docker rm -f "${extract_name}" >/dev/null 2>&1 || true
+        rm -f "${tmp_file}"
+        log::error "Failed to extract the Ubuntu test image from ${UBUNTU_TEST_IMAGE_REF}"
+        return 1
+    fi
+    docker rm "${extract_name}" >/dev/null 2>&1 || true
+    docker rmi "${UBUNTU_TEST_IMAGE_REF}" >/dev/null 2>&1 || true
+    mv "${tmp_file}" "${UBUNTU_TEST_IMAGE_CACHE}"
+    log::success "Ubuntu test image extracted to: ${UBUNTU_TEST_IMAGE_CACHE}"
+    return 0
+}
+
 # Create test configuration directory. delta_key controls the delta key
 # provider ("otp" recreates the delta every boot; "stable" uses an exec
 # provider with the same passphrase as rootfs so the delta persists across
@@ -476,7 +531,7 @@ run_convert() {
         cmd+=("--rootfs-no-encryption")
     fi
 
-    cmd+=("--package" "${CRYPTPILOT_FDE_RPM}")
+    cmd+=("--package" "${CRYPTPILOT_FDE_PACKAGE}")
 
     log::info "Command: ${cmd[*]}"
 
@@ -668,6 +723,32 @@ ensure_docker_runtime() {
     return 0
 }
 
+# Boot-success detection on the serial console. Alinux images print their
+# issue banner at the login prompt ("... on an x86_64"). Ubuntu cloud images
+# never print that: their serial getty shows the /etc/issue banner ("Ubuntu
+# 24.04.4 LTS <host> ttyS0") followed by the "login:" prompt (systemd spawns
+# serial-getty because the kernel cmdline carries console=ttyS0 via
+# /etc/default/grub.d/50-cloudimg-settings.cfg). The banner already proves
+# getty.target is up, which is the success criterion; the bare "login:"
+# string can lag the banner by seconds and needlessly eat into the timeout
+# budget. "Welcome to Ubuntu" is deliberately NOT a marker: the dracut
+# initramfs prints that banner on the serial console seconds into the boot,
+# long before the FDE services have run, so it cannot prove anything.
+boot_login_reached() {
+    local boot_log="$1"
+
+    if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+        return 0
+    fi
+    if grep -q -i "login:" "${boot_log}" 2>/dev/null; then
+        return 0
+    fi
+    if grep -q -E "Ubuntu [0-9.]+ LTS [^ ]+ ttyS[0-9]+" "${boot_log}" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
 # Test booting the converted image with QEMU in container
 # Returns 0 if login prompt appears, 1 if emergency shell or timeout
 test_qemu_boot() {
@@ -726,7 +807,12 @@ test_qemu_boot() {
     log::info "QEMU container started: ${container_name}"
 
     # Stream logs to file and check for boot status
-    local timeout=540  # 9 minutes; TCG under GitHub runner contention can push a 2-min boot well past 6.
+    # 9 minutes; TCG under GitHub runner contention can push a 2-min boot well past 6.
+    # Ubuntu's fuller userspace boots much slower under TCG (snapd, ModemManager,
+    # plymouth and friends alone can take over ten emulated minutes), so it
+    # gets 25.
+    local timeout=540
+    [[ "${DISTRO}" == "ubuntu" ]] && timeout=1500
     local elapsed=0
     local check_interval=2
     local boot_success=false
@@ -746,7 +832,7 @@ test_qemu_boot() {
         fi
 
         # Check for login prompt (success)
-        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+        if boot_login_reached "${boot_log}"; then
             log::success "Login prompt detected - boot successful!"
             boot_success=true
             break
@@ -784,6 +870,11 @@ test_qemu_boot() {
     # Stop and remove container
     log::info "Stopping QEMU container..."
     docker stop "${container_name}" >/dev/null 2>&1 || true
+    # Removal of a --rm container is asynchronous: when docker stop returns
+    # (or gives up after its 10s kill timeout) the name can still be occupied,
+    # which makes the retry's docker run abort with a name conflict. Force the
+    # removal so the name is free for the next attempt.
+    docker rm -f "${container_name}" >/dev/null 2>&1 || true
 
     # Show full boot log for debugging
     log::info "Full boot log:"
@@ -859,10 +950,14 @@ exec qemu-system-x86_64 \
     docker logs -f "${container_name}" > "${boot_log}" 2>&1 &
     local log_pid=$!
 
-    local timeout=540 elapsed=0 boot_success=false
+    # 9 minutes for alinux; Ubuntu's fuller userspace boots much slower under
+    # TCG, so it gets 25 (same rationale as test_qemu_boot).
+    local timeout=540
+    [[ "${DISTRO}" == "ubuntu" ]] && timeout=1500
+    local elapsed=0 boot_success=false
     while [[ $elapsed -lt $timeout ]]; do
         sleep 5; elapsed=$((elapsed+5))
-        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+        if boot_login_reached "${boot_log}"; then
             if [[ -z "${require_pattern}" ]] || grep -q -F "${require_pattern}" "${boot_log}" 2>/dev/null; then
                 log::success "Login prompt detected - boot successful!"
                 boot_success=true
@@ -894,7 +989,7 @@ exec qemu-system-x86_64 \
         log::success "Direct QEMU boot test passed for: ${test_name}"
         return 0
     fi
-    if [[ -n "${require_pattern}" ]] && grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+    if [[ -n "${require_pattern}" ]] && boot_login_reached "${boot_log}"; then
         log::error "Login prompt appeared but the required marker never did: ${require_pattern}"
     fi
     log::error "Direct QEMU boot test failed for: ${test_name}"
@@ -1183,17 +1278,22 @@ run_test_case() {
 show_help() {
     cat <<EOF
 Usage: $(basename "$0") --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist> [OPTIONS]
+       $(basename "$0") --distro ubuntu --deb <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist> [OPTIONS]
 
 Integration tests for cryptpilot-convert
 
 Required:
-    --rpm <path>              Path to cryptpilot-fde-guest RPM package
+    --rpm <path>              Path to cryptpilot-fde-guest RPM package (alinux3 guests)
+    --deb <path>              Path to cryptpilot-fde-guest DEB package (ubuntu guests)
     --bootloader <uki|grub>   Boot mode
     --rootfs-enc              Enable rootfs encryption
     --rootfs-noenc            Disable rootfs encryption
     --delta-location <value>  Delta partition location: ram | disk | disk-persist
 
 Options:
+    --distro <alinux3|ubuntu>  Guest distro under test (default alinux3).
+                     alinux3 requires --rpm, ubuntu requires --deb. The ubuntu
+                     image source is the ghcr noble test image (or --input).
     --input <path>   Use specified qcow2 image instead of downloading
     --boot-matrix <list>  Space-separated "cpu:ram" tokens to boot the converted
                      image with, e.g. "2:4G 4:8G 8:16G 12:16G 16:16G". The
@@ -1217,6 +1317,7 @@ Options:
 Examples:
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location ram
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader grub --rootfs-noenc --delta-location disk --input /path/to/image.qcow2
+    $(basename "$0") --distro ubuntu --deb ./cryptpilot-fde-guest-*.deb --bootloader grub --rootfs-enc --delta-location ram
     # Issue #141 regression (disk-persist + integrity=true, first-boot failure):
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location disk-persist --delta-key stable --integrity true
     # Issue #140 regression (disk-persist, stable key, second-boot resize failure):
@@ -1235,6 +1336,14 @@ main() {
         case "$1" in
             --rpm)
                 CRYPTPILOT_FDE_RPM="$2"
+                shift 2
+                ;;
+            --deb)
+                CRYPTPILOT_FDE_DEB="$2"
+                shift 2
+                ;;
+            --distro)
+                DISTRO="$2"
                 shift 2
                 ;;
             --bootloader)
@@ -1291,15 +1400,46 @@ main() {
         esac
     done
 
-    # Validate required --rpm argument
-    if [[ -z "${CRYPTPILOT_FDE_RPM}" ]]; then
+    # Validate --distro
+    if [[ "${DISTRO}" != "alinux3" && "${DISTRO}" != "ubuntu" ]]; then
         show_help
-        fatal "Missing required argument: --rpm <path>"
+        fatal "Invalid --distro: must be 'alinux3' or 'ubuntu'"
     fi
-    if [[ ! -f "${CRYPTPILOT_FDE_RPM}" ]]; then
-        fatal "cryptpilot-fde-guest RPM package not found: ${CRYPTPILOT_FDE_RPM}"
+
+    # Validate the required guest package argument. The package type must
+    # match the distro: --rpm for alinux3 guests, --deb for ubuntu guests.
+    # A mismatch is a caller error, so fail loudly instead of converting the
+    # guest with a package its package manager cannot install.
+    if [[ -n "${CRYPTPILOT_FDE_RPM}" && -n "${CRYPTPILOT_FDE_DEB}" ]]; then
+        fatal "Specify only one of --rpm and --deb, not both"
     fi
-    log::info "Using cryptpilot-fde-guest RPM: ${CRYPTPILOT_FDE_RPM}"
+    if [[ "${DISTRO}" == "alinux3" ]]; then
+        if [[ -n "${CRYPTPILOT_FDE_DEB}" ]]; then
+            fatal "--deb requires --distro ubuntu, but the distro is alinux3"
+        fi
+        if [[ -z "${CRYPTPILOT_FDE_RPM}" ]]; then
+            show_help
+            fatal "Missing required argument: --rpm <path>"
+        fi
+        if [[ ! -f "${CRYPTPILOT_FDE_RPM}" ]]; then
+            fatal "cryptpilot-fde-guest RPM package not found: ${CRYPTPILOT_FDE_RPM}"
+        fi
+        CRYPTPILOT_FDE_PACKAGE="${CRYPTPILOT_FDE_RPM}"
+        log::info "Using cryptpilot-fde-guest RPM: ${CRYPTPILOT_FDE_RPM}"
+    else
+        if [[ -n "${CRYPTPILOT_FDE_RPM}" ]]; then
+            fatal "--rpm requires --distro alinux3, but the distro is ubuntu; pass the guest DEB with --deb"
+        fi
+        if [[ -z "${CRYPTPILOT_FDE_DEB}" ]]; then
+            show_help
+            fatal "Missing required argument: --deb <path>"
+        fi
+        if [[ ! -f "${CRYPTPILOT_FDE_DEB}" ]]; then
+            fatal "cryptpilot-fde-guest DEB package not found: ${CRYPTPILOT_FDE_DEB}"
+        fi
+        CRYPTPILOT_FDE_PACKAGE="${CRYPTPILOT_FDE_DEB}"
+        log::info "Using cryptpilot-fde-guest DEB: ${CRYPTPILOT_FDE_DEB}"
+    fi
 
     # Validate --bootloader
     if [[ "${bootloader}" != "uki" && "${bootloader}" != "grub" ]]; then
@@ -1361,6 +1501,7 @@ main() {
     [[ "${rootfs_enc}" == "enc" ]] && use_encryption="true"
     local test_name="${bootloader}-${rootfs_enc}-${delta_location}"
     # Append a suffix for non-default options so logs/artifacts are distinct.
+    [[ "${DISTRO}" != "alinux3" ]] && test_name="${test_name}-${DISTRO}"
     [[ "${DELTA_KEY}" == "stable" ]] && test_name="${test_name}-stable"
     [[ "${INTEGRITY}" == "true" ]] && test_name="${test_name}-integ"
     [[ "${SECOND_BOOT}" == "true" ]] && test_name="${test_name}-2boot"
@@ -1383,6 +1524,13 @@ main() {
     if [[ -n "${custom_input}" ]]; then
         SOURCE_IMAGE="${custom_input}"
         log::info "Using custom input image: ${SOURCE_IMAGE}"
+    elif [[ "${DISTRO}" == "ubuntu" ]]; then
+        # Ubuntu guests have no plain download URL: the noble test image is a
+        # ghcr container image (dracut preinstalled, grown to 10G).
+        if ! extract_ubuntu_test_image; then
+            fatal "Failed to obtain the Ubuntu test image"
+        fi
+        SOURCE_IMAGE="${UBUNTU_TEST_IMAGE_CACHE}"
     else
         # Download test image if not using custom input
         download_test_image

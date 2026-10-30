@@ -202,17 +202,32 @@ install-test-depend:
 	which stress-ng || { yum install -y http://mirrors.openanolis.cn/anolis/8/AppStream/$(ARCH)/os/Packages/stress-ng-0.17.08-2.0.1.an8.$(ARCH).rpm ; }
 
 .PHONY: install-convert-test-depend
+# The convert test runs inside a distro-specific runtime container (alinux
+# for RPM guests, ubuntu:24.04 for DEB guests), so pick the package manager
+# that is actually present. On the apt branch libguestfs-tools drives
+# cryptpilot-enhance. On the yum branch: Alinux 3 / RHEL 8 ship the libguestfs
+# tools as "libguestfs-tools-c"; Alinux 4 merges them into "libguestfs", so
+# try the legacy name first and fall back to the merged package.
 install-convert-test-depend:
-	yum install -y wget qemu-img cryptsetup lvm2 parted e2fsprogs util-linux
-	# Alinux 3 / RHEL 8 ship the libguestfs tools as "libguestfs-tools-c";
-	# Alinux 4 merges them into "libguestfs". Try the legacy name first,
-	# fall back to the merged package.
-	yum install -y libguestfs-tools-c || yum install -y libguestfs
-	which docker || { yum install -y docker ; }
+	if command -v apt-get >/dev/null 2>&1; then \
+		export DEBIAN_FRONTEND=noninteractive ; \
+		apt-get update && \
+		apt-get install -y wget qemu-utils cryptsetup lvm2 parted e2fsprogs util-linux && \
+		apt-get install -y libguestfs-tools && \
+		{ command -v docker >/dev/null 2>&1 || apt-get install -y docker.io ; } ; \
+	else \
+		yum install -y wget qemu-img cryptsetup lvm2 parted e2fsprogs util-linux ; \
+		yum install -y libguestfs-tools-c || yum install -y libguestfs ; \
+		which docker || { yum install -y docker ; } ; \
+	fi
+
+# Guest distro for the convert test: alinux3 (default, --rpm guest package)
+# or ubuntu (--deb guest package).
+DISTRO ?= alinux3
 
 .PHONY: run-convert-test-case
 run-convert-test-case: install-convert-test-depend
-	bash tests/test-convert.sh --rpm $(CRYPTPILOT_FDE_RPM) --bootloader $(BOOTLOADER) --rootfs-$(ROOTFS_ENC) --delta-location $(DELTA_LOCATION) $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),) $(if $(BOOT_MATRIX),--boot-matrix "$(BOOT_MATRIX)",) $(if $(UKI_STUB_VERSION),--uki-stub-version $(UKI_STUB_VERSION),) $(if $(DELTA_KEY),--delta-key $(DELTA_KEY),) $(if $(INTEGRITY),--integrity $(INTEGRITY),) $(if $(SECOND_BOOT),--second-boot,) $(if $(SKIP_ENHANCE),--skip-enhance,)
+	bash tests/test-convert.sh --distro $(DISTRO) $(if $(filter ubuntu,$(DISTRO)),--deb $(CRYPTPILOT_FDE_DEB),--rpm $(CRYPTPILOT_FDE_RPM)) --bootloader $(BOOTLOADER) --rootfs-$(ROOTFS_ENC) --delta-location $(DELTA_LOCATION) $(if $(INPUT_IMAGE),--input $(INPUT_IMAGE),) $(if $(BOOT_MATRIX),--boot-matrix "$(BOOT_MATRIX)",) $(if $(UKI_STUB_VERSION),--uki-stub-version $(UKI_STUB_VERSION),) $(if $(DELTA_KEY),--delta-key $(DELTA_KEY),) $(if $(INTEGRITY),--integrity $(INTEGRITY),) $(if $(SECOND_BOOT),--second-boot,) $(if $(SKIP_ENHANCE),--skip-enhance,)
 
 .PHONE: shellcheck
 shellcheck:
