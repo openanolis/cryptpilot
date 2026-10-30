@@ -1,0 +1,42 @@
+name: Kernel dm-integrity repro
+on: workflow_dispatch
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    container:
+      image: registry.openanolis.cn/openanolis/anolisos:23
+      volumes:
+        - /run/udev/control:/run/udev/control
+        - /dev:/dev
+      options: --privileged --ipc=host
+    steps:
+      - name: Env info
+        run: uname -r; cat /proc/version
+      - name: Minimal dm-integrity + ext4 mount repro
+        run: |
+          set -x
+          dmesg -c > /dev/null || true
+          yum install -y device-mapper e2fsprogs util-linux kmod >/dev/null 2>&1
+          truncate -s 1G /repro.img
+          losetup -f /repro.img
+          DEV=$(losetup -j /repro.img | cut -d: -f1)
+          echo "loop device: $DEV"
+          dmsetup create repro --table "0 2097152 integrity $DEV 0 4096 J 1 journal_sectors:4096 interleave_sectors:32768"
+          ls -l /dev/mapper/repro
+          mkfs.ext4 -F /dev/mapper/repro || echo "MKFS_FAILED rc=$?"
+          mkdir -p /mnt/repro
+          mount /dev/mapper/repro /mnt/repro || echo "MOUNT_FAILED rc=$? errno_hint=$(dmesg | tail -5)"
+          dmesg | tail -20
+          umount /mnt/repro; dmsetup remove repro; losetup -d $DEV
+      - name: dm-integrity table variants (discard/fix params)
+        run: |
+          set -x
+          truncate -s 1G /repro2.img
+          losetup -f /repro2.img
+          DEV=$(losetup -j /repro2.img | cut -d: -f1)
+          dmsetup create repro2 --table "0 2097152 integrity $DEV 0 4096 J 3 journal_sectors:4096"
+          mkfs.ext4 -F /dev/mapper/repro2; echo "MKFS2 rc=$?"
+          mkdir -p /mnt/repro2
+          mount /dev/mapper/repro2 /mnt/repro2 || echo "MOUNT2_FAILED rc=$?"
+          dmesg | tail -10
+          umount /mnt/repro2; dmsetup remove repro2; losetup -d $DEV
