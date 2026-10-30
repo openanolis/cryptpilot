@@ -14,7 +14,7 @@
 #                           host MemTotal.
 #
 # Usage:
-#   ./tests/test-convert.sh --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist>
+#   ./tests/test-convert.sh (--rpm|--deb|--package) <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist>
 #   ./tests/test-convert.sh --help              # Show usage
 #
 
@@ -32,16 +32,26 @@ readonly YELLOW='\033[1;33m'
 readonly CYAN='\033[0;36m'
 readonly NC='\033[0m' # No Color
 
-# Test configuration
-readonly TEST_IMAGE_URL="https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2"
-readonly TEST_IMAGE_CACHE="/tmp/test-input-alinux3.qcow2"
+# Test image URLs and cache paths per distro
+readonly ALINUX3_IMAGE_URL="https://alinux3.oss-cn-hangzhou.aliyuncs.com/aliyun_3_x64_20G_nocloud_alibase_20251030.qcow2"
+readonly ALINUX3_IMAGE_CACHE="/tmp/test-input-alinux3.qcow2"
+readonly UBUNTU_IMAGE_URL="https://cloud-images.ubuntu.com/noble/20260518/noble-server-cloudimg-amd64.img"
+readonly UBUNTU_IMAGE_CACHE="/tmp/test-input-ubuntu.qcow2"
+
 readonly TEST_PASSPHRASE="test-passphrase-12345"
 
 # Source image path (can be overridden via --input)
 SOURCE_IMAGE=""
 
-# Path to cryptpilot-fde-guest RPM package (required)
-CRYPTPILOT_FDE_RPM=""
+# Set when --input is used: a custom input image is treated as already
+# prepared, so cryptpilot-enhance is skipped for it.
+USE_CUSTOM_INPUT=false
+
+# Path to cryptpilot-fde-guest package (.rpm or .deb)
+CRYPTPILOT_FDE_PACKAGE=""
+
+# Distro: "alinux3" (default) or "ubuntu"
+DISTRO="alinux3"
 
 # Delta key provider for the test config: "otp" (default, recreates the delta
 # every boot — preserves the original CI behavior) or "stable" (exec provider
@@ -117,7 +127,7 @@ check_tools() {
     # gracefully when the binary is absent or unusable (e.g. on Alinux 4,
     # where supermin cannot detect the distro's package manager). All other
     # tools are mandatory for the convert/boot flow itself.
-    local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4")
+    local tools=("wget" "qemu-img" "qemu-nbd" "cryptsetup" "lvm" "parted" "blkid" "mkfs.ext4" "sgdisk")
     local missing=()
 
     for tool in "${tools[@]}"; do
@@ -252,25 +262,28 @@ cleanup() {
 # Test image functions
 # ============================================================================
 
-# Download test image with caching
-download_test_image() {
-    if [[ -f "${TEST_IMAGE_CACHE}" ]]; then
-        log::info "Using cached test image: ${TEST_IMAGE_CACHE}"
+# Download a file with caching and retry support
+download_file() {
+    local url="$1"
+    local cache_path="$2"
+
+    if [[ -f "${cache_path}" ]]; then
+        log::info "Using cached image: ${cache_path}"
         return 0
     fi
 
     log::step "Downloading test image..."
-    log::info "URL: ${TEST_IMAGE_URL}"
-    log::info "Destination: ${TEST_IMAGE_CACHE}"
+    log::info "URL: ${url}"
+    log::info "Destination: ${cache_path}"
 
-    local tmp_file="${TEST_IMAGE_CACHE}.downloading"
+    local tmp_file="${cache_path}.downloading"
 
     # Download with resume support and retry
     local retry=0
     local max_retries=3
     while [[ $retry -lt $max_retries ]]; do
-        if wget -c -O "${tmp_file}" "${TEST_IMAGE_URL}"; then
-            mv "${tmp_file}" "${TEST_IMAGE_CACHE}"
+        if wget -c -O "${tmp_file}" "${url}"; then
+            mv "${tmp_file}" "${cache_path}"
             log::success "Test image downloaded successfully"
             return 0
         fi
@@ -281,6 +294,62 @@ download_test_image() {
 
     rm -f "${tmp_file}"
     fatal "Failed to download test image after $max_retries attempts"
+}
+
+# Prepare the Ubuntu image: the stock noble cloud image is only ~2.2G, too
+# small to hold boot + ESP + the LVM volumes the conversion produces, so grow
+# it to 10G and relocate the backup GPT to the new disk end (sgdisk -e).
+# dracut is installed by the conversion itself (install_deb_on_rootfs
+# pre-installs it), so no guest customization is needed here.
+prepare_ubuntu_image() {
+    download_file "${UBUNTU_IMAGE_URL}" "${UBUNTU_IMAGE_CACHE}"
+
+    local virtual_size
+    virtual_size=$(qemu-img info --output=json "${UBUNTU_IMAGE_CACHE}" | sed -n 's/.*"virtual-size": \([0-9]*\).*/\1/p')
+    if [[ -n "${virtual_size}" && "${virtual_size}" -ge $((10 * 1024 * 1024 * 1024)) ]]; then
+        return 0
+    fi
+
+    log::step "Resizing Ubuntu image to 10G and repairing the GPT..."
+    qemu-img resize "${UBUNTU_IMAGE_CACHE}" 10G
+
+    local nbd_device
+    nbd_device=$(get_available_nbd)
+    if ! qemu-nbd --connect="${nbd_device}" "${UBUNTU_IMAGE_CACHE}"; then
+        log::error "Failed to connect Ubuntu image to NBD: ${UBUNTU_IMAGE_CACHE}"
+        return 1
+    fi
+    local rc=0
+    if ! ( set -e
+        sleep 2
+        partprobe "${nbd_device}" 2>/dev/null || true
+        sleep 1
+        sgdisk -e "${nbd_device}"
+    ); then
+        rc=1
+    fi
+    qemu-nbd --disconnect "${nbd_device}" >/dev/null 2>&1 || true
+    sleep 1
+    if [[ $rc -ne 0 ]]; then
+        log::error "Failed to repair the GPT of ${UBUNTU_IMAGE_CACHE}"
+        return 1
+    fi
+    log::success "Ubuntu image prepared successfully"
+}
+
+# Download and cache the test image based on distro
+download_test_image() {
+    case "${DISTRO}" in
+        alinux3)
+            download_file "${ALINUX3_IMAGE_URL}" "${ALINUX3_IMAGE_CACHE}"
+            ;;
+        ubuntu)
+            prepare_ubuntu_image
+            ;;
+        *)
+            fatal "Unknown distro: ${DISTRO}"
+            ;;
+    esac
 }
 
 # Create test configuration directory. delta_key controls the delta key
@@ -344,6 +413,13 @@ run_enhance() {
     local input_image="$2"
 
     log::step "Running cryptpilot-enhance for test: ${test_name}"
+
+    # A custom --input image is already prepared; hardening it again is not
+    # the point of the test that uses it.
+    if [[ "${USE_CUSTOM_INPUT}" == "true" ]]; then
+        log::info "Skipping cryptpilot-enhance (custom input image)"
+        return 0
+    fi
 
     # Use 'direct' backend to avoid libvirtd dependency in CI/containers
     export LIBGUESTFS_BACKEND=direct
@@ -476,7 +552,7 @@ run_convert() {
         cmd+=("--rootfs-no-encryption")
     fi
 
-    cmd+=("--package" "${CRYPTPILOT_FDE_RPM}")
+    cmd+=("--package" "${CRYPTPILOT_FDE_PACKAGE}")
 
     log::info "Command: ${cmd[*]}"
 
@@ -726,7 +802,9 @@ test_qemu_boot() {
     log::info "QEMU container started: ${container_name}"
 
     # Stream logs to file and check for boot status
-    local timeout=540  # 9 minutes; TCG under GitHub runner contention can push a 2-min boot well past 6.
+    # 15 minutes; TCG under GitHub runner contention can push a 2-min boot
+    # well past 6, and Ubuntu's systemd reaches the login getty late.
+    local timeout=900
     local elapsed=0
     local check_interval=2
     local boot_success=false
@@ -746,7 +824,15 @@ test_qemu_boot() {
         fi
 
         # Check for login prompt (success)
-        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+        # RHEL/Alibaba Cloud Linux: " on an x86_64"
+        # Ubuntu: no prompt on serial until a getty starts; "Welcome to
+        # Ubuntu", a ttyN login: line, or systemd reaching multi-user all
+        # count as booted.
+        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null ||
+           grep -q -i "Welcome to Ubuntu" "${boot_log}" 2>/dev/null ||
+           grep -q -E "[Tt]ty[0-9]+ login:" "${boot_log}" 2>/dev/null ||
+           grep -q -E "Reached target.*Multi-User" "${boot_log}" 2>/dev/null ||
+           grep -q -E "Started.*serial-getty" "${boot_log}" 2>/dev/null; then
             log::success "Login prompt detected - boot successful!"
             boot_success=true
             break
@@ -862,7 +948,10 @@ exec qemu-system-x86_64 \
     local timeout=540 elapsed=0 boot_success=false
     while [[ $elapsed -lt $timeout ]]; do
         sleep 5; elapsed=$((elapsed+5))
-        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null; then
+        if grep -q -i " on an x86_64" "${boot_log}" 2>/dev/null ||
+           grep -q -i "Welcome to Ubuntu" "${boot_log}" 2>/dev/null ||
+           grep -q -E "[Tt]ty[0-9]+ login:" "${boot_log}" 2>/dev/null ||
+           grep -q -E "Reached target.*Multi-User" "${boot_log}" 2>/dev/null; then
             if [[ -z "${require_pattern}" ]] || grep -q -F "${require_pattern}" "${boot_log}" 2>/dev/null; then
                 log::success "Login prompt detected - boot successful!"
                 boot_success=true
@@ -1182,18 +1271,21 @@ run_test_case() {
 
 show_help() {
     cat <<EOF
-Usage: $(basename "$0") --rpm <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist> [OPTIONS]
+Usage: $(basename "$0") (--rpm|--deb|--package) <path> --bootloader <uki|grub> --rootfs-enc|--rootfs-noenc --delta-location <ram|disk|disk-persist> [OPTIONS]
 
 Integration tests for cryptpilot-convert
 
 Required:
-    --rpm <path>              Path to cryptpilot-fde-guest RPM package
     --bootloader <uki|grub>   Boot mode
     --rootfs-enc              Enable rootfs encryption
     --rootfs-noenc            Disable rootfs encryption
     --delta-location <value>  Delta partition location: ram | disk | disk-persist
+    --rpm <path>              Path to cryptpilot-fde-guest RPM package (alinux3)
+    --deb <path>              Path to cryptpilot-fde-guest DEB package (ubuntu)
+    --package <path>          Path to a package file (.rpm or .deb)
 
 Options:
+    --distro <alinux3|ubuntu>  Target distro (default: alinux3)
     --input <path>   Use specified qcow2 image instead of downloading
     --boot-matrix <list>  Space-separated "cpu:ram" tokens to boot the converted
                      image with, e.g. "2:4G 4:8G 8:16G 12:16G 16:16G". The
@@ -1217,6 +1309,7 @@ Options:
 Examples:
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location ram
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader grub --rootfs-noenc --delta-location disk --input /path/to/image.qcow2
+    $(basename "$0") --deb ./cryptpilot-fde-guest-*.deb --distro ubuntu --bootloader grub --rootfs-enc --delta-location ram
     # Issue #141 regression (disk-persist + integrity=true, first-boot failure):
     $(basename "$0") --rpm ./cryptpilot-fde-guest-*.rpm --bootloader uki --rootfs-enc --delta-location disk-persist --delta-key stable --integrity true
     # Issue #140 regression (disk-persist, stable key, second-boot resize failure):
@@ -1229,12 +1322,27 @@ main() {
     local rootfs_enc=""
     local delta_location=""
     local custom_input=""
+    local rpm_path=""
+    local deb_path=""
+    local pkg_path=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --rpm)
-                CRYPTPILOT_FDE_RPM="$2"
+                rpm_path="$2"
+                shift 2
+                ;;
+            --deb)
+                deb_path="$2"
+                shift 2
+                ;;
+            --package)
+                pkg_path="$2"
+                shift 2
+                ;;
+            --distro)
+                DISTRO="$2"
                 shift 2
                 ;;
             --bootloader)
@@ -1291,15 +1399,35 @@ main() {
         esac
     done
 
-    # Validate required --rpm argument
-    if [[ -z "${CRYPTPILOT_FDE_RPM}" ]]; then
+    # --rpm, --deb and --package are aliases for the same slot; exactly one
+    # is required.
+    local pkg_count=0
+    [[ -n "${rpm_path}" ]] && pkg_count=$((pkg_count + 1))
+    [[ -n "${deb_path}" ]] && pkg_count=$((pkg_count + 1))
+    [[ -n "${pkg_path}" ]] && pkg_count=$((pkg_count + 1))
+    if [[ $pkg_count -gt 1 ]]; then
+        fatal "--rpm, --deb, and --package are mutually exclusive; specify only one"
+    fi
+    if [[ $pkg_count -eq 0 ]]; then
         show_help
-        fatal "Missing required argument: --rpm <path>"
+        fatal "Missing required argument: --rpm, --deb, or --package <path>"
     fi
-    if [[ ! -f "${CRYPTPILOT_FDE_RPM}" ]]; then
-        fatal "cryptpilot-fde-guest RPM package not found: ${CRYPTPILOT_FDE_RPM}"
+    if [[ -n "${pkg_path}" ]]; then
+        CRYPTPILOT_FDE_PACKAGE="${pkg_path}"
+    elif [[ -n "${rpm_path}" ]]; then
+        CRYPTPILOT_FDE_PACKAGE="${rpm_path}"
+    else
+        CRYPTPILOT_FDE_PACKAGE="${deb_path}"
     fi
-    log::info "Using cryptpilot-fde-guest RPM: ${CRYPTPILOT_FDE_RPM}"
+    if [[ ! -f "${CRYPTPILOT_FDE_PACKAGE}" ]]; then
+        fatal "cryptpilot-fde-guest package not found: ${CRYPTPILOT_FDE_PACKAGE}"
+    fi
+    log::info "Using cryptpilot-fde-guest package: ${CRYPTPILOT_FDE_PACKAGE}"
+
+    # Validate --distro
+    if [[ "${DISTRO}" != "alinux3" && "${DISTRO}" != "ubuntu" ]]; then
+        fatal "Invalid --distro: must be 'alinux3' or 'ubuntu'"
+    fi
 
     # Validate --bootloader
     if [[ "${bootloader}" != "uki" && "${bootloader}" != "grub" ]]; then
@@ -1360,6 +1488,7 @@ main() {
     [[ "${bootloader}" == "uki" ]] && use_uki="true"
     [[ "${rootfs_enc}" == "enc" ]] && use_encryption="true"
     local test_name="${bootloader}-${rootfs_enc}-${delta_location}"
+    [[ "${DISTRO}" != "alinux3" ]] && test_name="${DISTRO}-${test_name}"
     # Append a suffix for non-default options so logs/artifacts are distinct.
     [[ "${DELTA_KEY}" == "stable" ]] && test_name="${test_name}-stable"
     [[ "${INTEGRITY}" == "true" ]] && test_name="${test_name}-integ"
@@ -1382,11 +1511,19 @@ main() {
     # Set source image path
     if [[ -n "${custom_input}" ]]; then
         SOURCE_IMAGE="${custom_input}"
+        USE_CUSTOM_INPUT=true
         log::info "Using custom input image: ${SOURCE_IMAGE}"
     else
-        # Download test image if not using custom input
+        # Download/prepare the test image for the selected distro
         download_test_image
-        SOURCE_IMAGE="${TEST_IMAGE_CACHE}"
+        case "${DISTRO}" in
+            alinux3)
+                SOURCE_IMAGE="${ALINUX3_IMAGE_CACHE}"
+                ;;
+            ubuntu)
+                SOURCE_IMAGE="${UBUNTU_IMAGE_CACHE}"
+                ;;
+        esac
     fi
 
     # Run test
