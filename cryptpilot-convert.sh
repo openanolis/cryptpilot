@@ -19,6 +19,10 @@ readonly NC='\033[0m' # No Color
 BOOT_PART_SIZE="512M"
 # Partition alignment in sectors (aligned to 1 MiB boundary)
 readonly PARTITION_SECTOR_ALIGNMENT=2048
+# Size the output ESP is grown to in UKI mode when the source ESP is smaller:
+# a UKI (kernel + initrd + cmdline in one EFI binary) does not fit the ~100M
+# ESPs Ubuntu cloud images ship.
+readonly UKI_ESP_SIZE_BYTES=$((512 * 1024 * 1024))
 
 # Set up logging: redirect stdout/stderr to both terminal and log file,
 # and enable shell tracing into the same log.
@@ -1991,6 +1995,92 @@ step::shrink_rootfs() {
     # data source for the later steps.
 }
 
+# Rewrite an sfdisk dump in place so the ESP entry covers target_sectors and
+# the partitions behind it on disk are shifted to make room. Every other
+# property rides along on the untouched part of each line: numbers keep their
+# slots because entries stay in the dump's order, and type/uuid/name/attrs are
+# copied verbatim, so PARTUUIDs survive. Only the last partition on the disk
+# changes size: it absorbs the growth within the output disk's fixed size,
+# while every start stays aligned to PARTITION_SECTOR_ALIGNMENT.
+# Usage: disk::rewrite_sfdisk_esp_size <dump_file> <esp_part_num> <target_sectors> <total_sectors>
+disk::rewrite_sfdisk_esp_size() {
+    local dump_file=$1
+    local esp_part_num=$2
+    local target_sectors=$3
+    local total_sectors=$4
+
+    local tmp_file
+    tmp_file=$(mktemp "${workdir}/partition_table.XXXXXX")
+    # fail() writes to stderr and aborts; partial stdout goes to tmp_file and
+    # is discarded with it.
+    awk -v esp="${esp_part_num}" -v target="${target_sectors}" -v align="${PARTITION_SECTOR_ALIGNMENT}" -v total="${total_sectors}" '
+        function fail(msg) { printf "ERROR: %s\n", msg > "/dev/stderr"; exit 1 }
+        /^[[:space:]]*$/ { next }
+        $1 !~ /^\/dev\// {
+            print
+            if ($1 == "last-lba:") last_lba = $2
+            next
+        }
+        {
+            i = ++n
+            raw[i] = $0
+            devnum = $1
+            sub(/^.*[^0-9]/, "", devnum)
+            pnum[i] = devnum + 0
+            match($0, /start=[ ]*[0-9]+/)
+            start[i] = substr($0, RSTART + 6, RLENGTH - 6) + 0
+            match($0, /size=[ ]*[0-9]+/)
+            size[i] = substr($0, RSTART + 5, RLENGTH - 5) + 0
+        }
+        END {
+            if (n == 0) fail("no partition entries found in the sfdisk dump")
+            if (!last_lba) last_lba = total - 33 # GPT secondary header + entry array
+
+            # insertion sort of the entry indices by on-disk start; tables are tiny
+            for (a = 1; a <= n; a++) order[a] = a
+            for (a = 2; a <= n; a++) {
+                v = order[a]
+                for (b = a - 1; b >= 1 && start[order[b]] > start[v]; b--)
+                    order[b + 1] = order[b]
+                order[b + 1] = v
+            }
+
+            prev_end = 0
+            seen_esp = 0
+            for (k = 1; k <= n; k++) {
+                i = order[k]
+                if (pnum[i] == esp) {
+                    newstart[i] = start[i]
+                    newsize[i] = target
+                    seen_esp = 1
+                } else if (seen_esp) {
+                    # align-up of the first free sector behind the previous entry
+                    newstart[i] = int((prev_end + align) / align) * align
+                    newsize[i] = (k == n) ? last_lba - newstart[i] + 1 : size[i]
+                } else {
+                    newstart[i] = start[i]
+                    newsize[i] = size[i]
+                }
+                if (newsize[i] <= 0) fail("partition " pnum[i] " has no room left (start " newstart[i] ", last-lba " last_lba ")")
+                if (newstart[i] + newsize[i] - 1 > last_lba) fail("partition " pnum[i] " exceeds the usable disk area")
+                prev_end = newstart[i] + newsize[i] - 1
+            }
+            if (!seen_esp) fail("ESP partition " esp " not found in the dump")
+
+            for (i = 1; i <= n; i++) {
+                line = raw[i]
+                sub(/start=[ ]*[0-9]+/, "start= " newstart[i], line)
+                sub(/size=[ ]*[0-9]+/, "size= " newsize[i], line)
+                print line
+            }
+        }
+    ' "${dump_file}" >"${tmp_file}" || {
+        rm -f "${tmp_file}"
+        return 1
+    }
+    mv "${tmp_file}" "${dump_file}"
+}
+
 # Fork the source into two snapshots sharing source-mod as qcow2 backing file:
 # source-read freezes the shrunk source data for the later copy and verity
 # reads, source-write takes the later writes. Then mirror the source partition
@@ -2027,6 +2117,29 @@ step::prepare_output_and_snapshots() {
     # (rootfs partition is preserved since we didn't delete it in shrink)
     log::info "Copying partition table to output file"
     sfdisk -d "${source_read_device}" > "${workdir}/partition_table.sfdisk"
+
+    # UKI mode writes the unified kernel image straight onto the ESP; a
+    # source ESP smaller than UKI_ESP_SIZE_BYTES cannot hold one. Grow the
+    # output ESP by rewriting the table (partitions behind it are relocated,
+    # the last one absorbs the size change; PARTUUIDs are kept). The ESP
+    # filesystem is recreated later at copy time: growing the partition alone
+    # would leave the old, smaller FAT inside, and the UKI write would fail
+    # with ENOSPC. A source ESP that is already large enough keeps today's
+    # byte-identical raw copy.
+    if [ "${uki}" = true ]; then
+        local uki_esp_target_sectors=$((UKI_ESP_SIZE_BYTES / sector_size))
+        local esp_current_sectors
+        esp_current_sectors=$(sed -n "s/^.*p${efi_part_num} : start=[[:space:]]*[0-9]*, size=[[:space:]]*\([0-9]*\),.*/\1/p" "${workdir}/partition_table.sfdisk")
+        [ -n "${esp_current_sectors}" ] || proc::fatal "Cannot determine the size of EFI partition ${efi_part_num} from the partition table"
+        if [ "${esp_current_sectors}" -lt "${uki_esp_target_sectors}" ]; then
+            local source_total_sectors
+            source_total_sectors=$(blockdev --getsz "${source_read_device}")
+            log::info "Source ESP (${esp_current_sectors} sectors) is too small for a UKI, growing the output ESP to $((uki_esp_target_sectors * sector_size)) bytes and relocating the partitions behind it"
+            disk::rewrite_sfdisk_esp_size "${workdir}/partition_table.sfdisk" "${efi_part_num}" "${uki_esp_target_sectors}" "${source_total_sectors}"
+            uki_esp_grow=true
+        fi
+    fi
+
     if ! sfdisk "${output_device}" < "${workdir}/partition_table.sfdisk"; then
         log::error "Failed to copy partition table to output"
         return 1
@@ -2117,9 +2230,38 @@ step::prepare_output_and_snapshots() {
 
 step::copy_partitions() {
 
-    # dd EFI partition (preserve UUID, labels, all metadata)
-    log::info "Copying EFI partition"
-    dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
+    if [ "${uki_esp_grow}" = true ]; then
+        # The output ESP was enlarged in the partition table; recreate the FAT
+        # filesystem so it spans the whole partition and carry the original
+        # ESP's files over. The PARTUUID is preserved by the table rewrite;
+        # keep the FAT label so the guest's fstab (LABEL=UEFI on Ubuntu)
+        # keeps resolving.
+        log::info "Recreating enlarged ESP filesystem on output and copying original ESP files"
+        local esp_label
+        esp_label=$(blkid -o value -s LABEL "${source_read_device}p${efi_part_num}" 2>/dev/null || true)
+        local mkfs_vfat_args=(mkfs.vfat -F 32)
+        # mkfs.vfat rejects labels outside its limited charset; skip those
+        case "${esp_label}" in
+        "" | *[!A-Za-z0-9._-]*) ;;
+        *) mkfs_vfat_args+=(-n "${esp_label}") ;;
+        esac
+        "${mkfs_vfat_args[@]}" "${output_device}p${efi_part_num}"
+
+        local esp_src_mount="${workdir}/esp_src"
+        local esp_dst_mount="${workdir}/esp_dst"
+        mkdir -p "$esp_src_mount" "$esp_dst_mount"
+        proc::hook_exit "mountpoint -q ${esp_src_mount} && disk::umount_wait_busy ${esp_src_mount}"
+        proc::hook_exit "mountpoint -q ${esp_dst_mount} && disk::umount_wait_busy ${esp_dst_mount}"
+        mount -o ro "${source_read_device}p${efi_part_num}" "$esp_src_mount"
+        mount "${output_device}p${efi_part_num}" "$esp_dst_mount"
+        cp -a "$esp_src_mount/." "$esp_dst_mount/"
+        disk::umount_wait_busy "$esp_dst_mount"
+        disk::umount_wait_busy "$esp_src_mount"
+    else
+        # dd EFI partition (preserve UUID, labels, all metadata)
+        log::info "Copying EFI partition"
+        dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
+    fi
 
     # Populate the output boot partition.
     # Cases:
@@ -2283,6 +2425,7 @@ main() {
     local uki=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
     local uki_stub_version="distro"
+    local uki_esp_grow=false
 
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -2417,6 +2560,7 @@ main() {
         local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gdisk gawk udev)
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+            tool_packages+=(dosfstools)  # mkfs.vfat recreates an enlarged output ESP
         fi
         # A pinned stub from the Arch Linux Archive is a .pkg.tar.zst, so the
         # Arch path needs curl (download), zstd + tar (extract), sha256sum (log).
@@ -2429,6 +2573,7 @@ main() {
         local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof gdisk systemd-udev) # systemd-udev provides udevadm
         if [[ "$uki" == "true" ]]; then
             tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+            tool_packages+=(dosfstools)  # mkfs.vfat recreates an enlarged output ESP
         fi
         if [[ "$uki" == "true" && "$uki_stub_version" != "distro" ]]; then
             tool_packages+=(curl zstd tar)
