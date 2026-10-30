@@ -473,6 +473,7 @@ jobs:
       - build
       - test
       - test-convert
+      - test-convert-persist
     strategy:
       max-parallel: 1
       matrix:
