@@ -1,5 +1,8 @@
 name: Kernel dm-integrity repro
-on: workflow_dispatch
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
 jobs:
   repro:
     runs-on: ubuntu-latest
