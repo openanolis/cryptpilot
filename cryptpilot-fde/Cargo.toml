@@ -47,4 +47,4 @@ tracing-subscriber = { workspace = true }
 shadow-rs = { workspace = true }
 
 [build-dependencies]
-shadow-rs = { workspace = true, default-features = true }
+shadow-rs = { workspace = true, features = ["tzdb"] }

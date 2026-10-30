@@ -30,7 +30,7 @@ tracing = {workspace = true}
 tracing-subscriber = {workspace = true}
 
 [build-dependencies]
-shadow-rs = {workspace = true, default-features = true}
+shadow-rs = {workspace = true, features = ["tzdb"]}
 
 [dev-dependencies]
 block-devs = {workspace = true}

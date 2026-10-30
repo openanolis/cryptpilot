@@ -33,4 +33,4 @@ verity-fuse = {path = "../verity-fuse"}
 [build-dependencies]
 flatc = {git = "https://github.com/petehayes102/flatc.rs", rev = "7ca870b7c576f95dfc869b0f7aa48b605cb60c70"}# v25.12.19
 flatc-rust = "0.2"
-shadow-rs = {workspace = true, default-features = true}
+shadow-rs = {workspace = true, features = ["tzdb"]}
