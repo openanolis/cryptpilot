@@ -513,6 +513,12 @@ step::extract_boot_part_from_rootfs() {
 }
 
 # Install zram kernel modules if needed (for Ubuntu systems)
+#
+# Best effort by design: the module package for the image's kernel flavor may
+# simply not exist in any configured repo (custom/PPA kernels), and missing
+# zram only rules out the "ram" delta_location mode, which the fde.toml in use
+# may not need anyway. A flavor apt cannot satisfy must not abort the
+# conversion, so failures downgrade to a warning.
 install_zram_module_if_needed() {
     local rootfs_mount_point="$1"
 
@@ -530,8 +536,8 @@ install_zram_module_if_needed() {
         kernel_version=$(chroot "${rootfs_mount_point}" bash -c "ls /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | grep -v rescue | sort -V | tail -n1")
 
         if [ -z "$kernel_version" ]; then
-            log::error "Could not determine kernel version, zram module installation failed"
-            return 1
+            log::warn "Could not determine kernel version, skipping zram module installation"
+            return 0
         fi
 
         log::info "Detected kernel version: $kernel_version"
@@ -566,10 +572,38 @@ install_zram_module_if_needed() {
         done
 
         if [ "$installed" = false ]; then
-            log::error "Could not install zram modules, possibly due to disk space constraints or missing package"
-            return 1
+            log::warn "Could not install zram modules (no linux-modules-extra for kernel ${kernel_version} in the repos), continuing without them"
+            return 0
         fi
     fi
+}
+
+# Query the cryptpilot-fde-host version installed on the convert host so the
+# matching cryptpilot-fde-guest version can be requested in the guest. The
+# query tools print "package ... is not installed" style errors when the host
+# lacks the package, and while command substitution keeps stdout only, the
+# shape of what lands there is not guaranteed across rpm/dpkg builds. Validate
+# that the result looks like a version before it is baked into an install
+# spec: a captured error message would otherwise surface much later as a
+# confusing "unable to locate package" failure inside the chroot.
+pkg::host_fde_version() {
+    local version=""
+
+    if command -v rpm >/dev/null 2>&1; then
+        version=$(rpm -q --qf '%{VERSION}-%{RELEASE}' cryptpilot-fde-host 2>/dev/null) || version=""
+    fi
+    if [ -z "${version}" ] && command -v dpkg-query >/dev/null 2>&1; then
+        version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null) || version=""
+    fi
+
+    # A version always starts with a digit (the optional epoch is a digit too)
+    # and carries no spaces; an error message never matches this.
+    if [ -n "${version}" ] && ! [[ "${version}" =~ ^[0-9][0-9A-Za-z.~+:-]*$ ]]; then
+        log::warn "Ignoring malformed cryptpilot-fde-host version string: ${version}"
+        version=""
+    fi
+
+    echo "${version}"
 }
 
 disk::install_rpm_on_rootfs() {
@@ -607,14 +641,8 @@ disk::install_rpm_on_rootfs() {
     fi
 
     # Step 2: Build essential packages list
-    local cryptpilot_fde_version=""
-
-    # Try to query the version of cryptpilot-fde-host from the current system
-    if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q --qf '%{VERSION}-%{RELEASE}' cryptpilot-fde-host 2>/dev/null) || cryptpilot_fde_version=""
-    elif command -v dpkg-query >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null) || cryptpilot_fde_version=""
-    fi
+    local cryptpilot_fde_version
+    cryptpilot_fde_version=$(pkg::host_fde_version)
 
     local essential_packages_with_version=()
     local essential_package_names=()
@@ -691,40 +719,35 @@ disk::install_deb_on_rootfs() {
         fi
     done
 
-    # Install user-provided packages
+    # Install user-provided packages. apt resolves the .deb's dependencies
+    # (dracut, dracut-network, lvm2, cryptsetup, ...) from the configured
+    # repositories, so the guest package lands configured in one step. A
+    # failure is fatal on purpose: a half-installed guest package would
+    # produce an image that cannot decrypt its rootfs at boot.
     if [ ${#user_packages[@]} -gt 0 ]; then
         chroot "${rootfs_mount_point}" bash -c "dpkg --configure -a || true"
-        chroot "${rootfs_mount_point}" bash -c "dpkg -i $(printf '%s ' "${user_packages[@]}"| sed 's/ $//')" || true
-
-        # Fix dependencies
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
             ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
             ${all_proxy:+all_proxy=$all_proxy} \
             ${no_proxy:+no_proxy=$no_proxy} \
-            apt-get update || true
+            DEBIAN_FRONTEND=noninteractive \
+            apt-get update
 
-        # Fix dependencies
         chroot "${rootfs_mount_point}" /usr/bin/env ${http_proxy:+http_proxy=$http_proxy} \
             ${https_proxy:+https_proxy=$https_proxy} \
             ${ftp_proxy:+ftp_proxy=$ftp_proxy} \
             ${rsync_proxy:+rsync_proxy=$rsync_proxy} \
             ${all_proxy:+all_proxy=$all_proxy} \
             ${no_proxy:+no_proxy=$no_proxy} \
-            apt-get -y -f install || true
+            DEBIAN_FRONTEND=noninteractive \
+            apt-get -y install "${user_packages[@]}"
     fi
 
     # Step 2: Build essential packages list
-    local cryptpilot_fde_version=""
-
-    # Try to query the version of cryptpilot-fde-host from the current system
-    if command -v rpm >/dev/null 2>&1; then
-        cryptpilot_fde_version=$(rpm -q cryptpilot-fde-host --qf '%{VERSION}-%{RELEASE}' 2>/dev/null || true)
-    elif command -v dpkg-query >/dev/null 2>&1; then
-        # Extract version from dpkg-query output, removing epoch if present
-        cryptpilot_fde_version=$(dpkg-query -W -f='${Version}' cryptpilot-fde-host 2>/dev/null || true)
-    fi
+    local cryptpilot_fde_version
+    cryptpilot_fde_version=$(pkg::host_fde_version)
 
     local essential_packages_with_version=()
     local essential_package_names=()
