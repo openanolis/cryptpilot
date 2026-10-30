@@ -156,6 +156,83 @@ jobs:
 
           echo "All verification checks passed!"
 
+  # Ubuntu e2e convert/boot coverage for the DEB packages: run
+  # tests/test-convert.sh against the prepared noble test image (dracut
+  # pre-installed) with the freshly built cryptpilot-fde-guest deb, in both
+  # bootloader modes. grub exercises the DEB install path and grubenv
+  # creation; uki additionally exercises the small-ESP growth.
+  test-convert:
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        bootloader: [grub, uki]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: 'true'
+
+      - name: Load NBD kernel module
+        run: |
+          sudo modprobe nbd max_part=16
+          lsmod | grep nbd
+
+      # Minimal tool set for the test harness itself (wget, qemu-nbd,
+      # cryptsetup, lvm, mkfs.ext4, sgdisk) plus dosfstools for the UKI ESP
+      # re-creation. cryptpilot-convert installs anything else it needs.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget \
+            qemu-utils \
+            cryptsetup-bin \
+            lvm2 \
+            e2fsprogs \
+            gdisk \
+            parted \
+            dosfstools
+
+      - name: Pull Ubuntu test image
+        run: |
+          docker pull ghcr.io/${{ github.repository_owner }}/cryptpilot-fde-test-image:noble-dracut-20260518
+
+      - name: Extract qcow2 from container
+        run: |
+          TEST_IMAGE="ghcr.io/${{ github.repository_owner }}/cryptpilot-fde-test-image:noble-dracut-20260518"
+          docker create --name temp-extract "$TEST_IMAGE" /bin/true
+          docker cp temp-extract:/image.qcow2 ./test-image.qcow2
+          docker rm temp-extract
+          docker rmi "$TEST_IMAGE"
+          ls -lh ./test-image.qcow2
+
+      - name: Download DEB packages
+        uses: actions/download-artifact@v8
+        with:
+          name: deb-packages-x86_64
+          path: ./deb-packages/
+
+      - name: Run conversion test
+        run: |
+          GUEST_DEB=$(ls ./deb-packages/cryptpilot-fde-guest_*.deb | head -1)
+          sudo ./tests/test-convert.sh \
+            --distro ubuntu \
+            --package "$GUEST_DEB" \
+            --bootloader ${{ matrix.bootloader }} \
+            --rootfs-enc \
+            --delta-location ram \
+            --input "${{ github.workspace }}/test-image.qcow2"
+
+      - name: Print convert diagnostic log
+        if: always()
+        run: |
+          sudo cat /tmp/.cryptpilot-convert.log 2>/dev/null || echo "(log file not available)"
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
