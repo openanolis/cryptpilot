@@ -156,6 +156,142 @@ jobs:
 
           echo "All verification checks passed!"
 
+  # Integration tests for cryptpilot-convert on Ubuntu guests (4 legs).
+  # Same shape as the test-convert job in build-rpm.yml: the convert/boot
+  # harness runs INSIDE a privileged ubuntu:24.04 runtime container so
+  # qemu-nbd / LUKS / LVM operate on the runner's /dev, and the host DEB is
+  # installed in the runtime container so the reference-value check runs for
+  # real. The guest DEB is handed to the harness via the Makefile
+  # run-convert-test-case mapping (DISTRO=ubuntu + CRYPTPILOT_FDE_DEB).
+  # The uki legs use the distro stub (no stub pin) and every leg runs a
+  # single auto-sized boot.
+  test-convert:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - bootloader: grub
+            rootfs_enc: enc
+            delta_location: ram
+          - bootloader: uki
+            rootfs_enc: enc
+            delta_location: ram
+          - bootloader: grub
+            rootfs_enc: noenc
+            delta_location: disk-persist
+          - bootloader: uki
+            rootfs_enc: noenc
+            delta_location: disk-persist
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    env:
+      TEST_IMAGE_TAG: "noble-dracut-20260518"
+      RUNTIME_IMAGE: "ubuntu:24.04"
+    steps:
+      - name: Load NBD kernel module
+        run: |
+          echo "Loading nbd module on host..."
+          sudo modprobe nbd max_part=16
+          lsmod | grep nbd
+
+      - name: Pull test image from ghcr.io
+        run: |
+          TEST_IMAGE="ghcr.io/${{ github.repository_owner }}/cryptpilot-fde-test-image:${{ env.TEST_IMAGE_TAG }}"
+          docker pull "$TEST_IMAGE"
+          echo "TEST_IMAGE=$TEST_IMAGE" >> $GITHUB_ENV
+
+      - name: Extract qcow2 image from container
+        run: |
+          echo "Extracting qcow2 image from container..."
+          mkdir -p ${{ github.workspace }}/test-images
+          docker create --name temp-extract-deb ${{ env.TEST_IMAGE }} /bin/true
+          docker cp temp-extract-deb:/image.qcow2 ${{ github.workspace }}/test-images/test-image.qcow2
+          docker rm temp-extract-deb
+          ls -lh ${{ github.workspace }}/test-images/test-image.qcow2
+          echo "Removing pulled test image to reclaim disk space..."
+          docker rmi "$TEST_IMAGE"
+
+      - name: Check available disk and memory
+        run: df -h && echo "---" && free -h
+
+      - name: Start test container
+        run: |
+          # /boot and /lib/modules are mounted read-only from the runner so
+          # supermin (libguestfs) finds a kernel to build its appliance from:
+          # the ubuntu:24.04 runtime container ships none, and cryptpilot-enhance
+          # drives virt-customize on every leg.
+          docker run -d \
+            --name test-container-deb \
+            --privileged \
+            --ipc=host \
+            -v /dev:/dev \
+            -v /run/udev/control:/run/udev/control \
+            -v /boot:/boot:ro \
+            -v /lib/modules:/lib/modules:ro \
+            -v ${{ github.workspace }}:/workspace \
+            ${{ env.RUNTIME_IMAGE }} \
+            sleep infinity
+
+      - name: Setup container environment
+        run: |
+          docker exec test-container-deb bash -c "
+            set -e
+            apt-get update
+            apt-get install -y git make
+          "
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: deb-packages-x86_64
+          path: ./deb-packages/
+          merge-multiple: false
+
+      - name: Install DEB packages
+        id: install-deb
+        run: |
+          # Install host DEB in the test container so show-reference-value runs
+          HOST_DEB_PATH=$(ls ./deb-packages/cryptpilot-fde-host_*.deb | head -1)
+          echo "Found host DEB: ${HOST_DEB_PATH}"
+          HOST_DEB_PATH_IN_CONTAINER="/workspace/${HOST_DEB_PATH#./}"
+          docker exec test-container-deb bash -c "
+            set -e
+            apt-get update
+            apt-get install -y ${HOST_DEB_PATH_IN_CONTAINER}
+            cryptpilot-fde-host --version
+          "
+
+          # Export guest DEB path for convert test (--package installs into the guest rootfs)
+          GUEST_DEB_PATH=$(ls ./deb-packages/cryptpilot-fde-guest_*.deb | head -1)
+          echo "Found guest DEB: ${GUEST_DEB_PATH}"
+          GUEST_DEB_PATH_IN_CONTAINER="/workspace/${GUEST_DEB_PATH#./}"
+          echo "cryptpilot_fde_deb=${GUEST_DEB_PATH}" >> $GITHUB_OUTPUT
+          echo "cryptpilot_fde_deb_container=${GUEST_DEB_PATH_IN_CONTAINER}" >> $GITHUB_OUTPUT
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          path: repo
+
+      - name: Run convert test
+        run: |
+          docker exec -w /workspace/repo test-container-deb bash -c "
+            make run-convert-test-case DISTRO=ubuntu CRYPTPILOT_FDE_DEB=${{ steps.install-deb.outputs.cryptpilot_fde_deb_container }} BOOTLOADER=${{ matrix.bootloader }} ROOTFS_ENC=${{ matrix.rootfs_enc }} DELTA_LOCATION=${{ matrix.delta_location }} INPUT_IMAGE=/workspace/test-images/test-image.qcow2
+          "
+
+      - name: Print convert diagnostic log
+        if: always()
+        run: |
+          echo "=== /tmp/.cryptpilot-convert.log (from test-container-deb) ==="
+          docker exec test-container-deb cat /tmp/.cryptpilot-convert.log 2>/dev/null || echo "(log file not available)"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f test-container-deb || true
+          rm -rf ${{ github.workspace }}/test-images
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
