@@ -101,22 +101,33 @@ jobs:
       - name: Install build dependencies
         run: |
           sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
-          yum install -y -q yum-utils
+          yum install -y -q yum-utils git
+          # runtime test deps from test.yml's Install dependencies step
+          yum install -y -q device-mapper kmod systemd systemd-udev lvm2 util-linux veritysetup dosfstools xfsprogs e2fsprogs fuse3 fuse3-libs
           yum-builddep -y --skip-unavailable --define 'with_rustup 1' ./cryptpilot.spec
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.85.0
-      - name: Run provider_exec tests with dm-table polling
+      - name: Run tests exactly like CI (make run-test-coverage) with instrumentation
         run: |
-          (while :; do dmsetup table 2>/dev/null; sleep 0.3; done > /root/dmpoll.log) &
+          (while :; do date +%T; dmsetup table 2>/dev/null; echo ---; sleep 0.3; done > /root/dmpoll.log) &
           POLLER=$!
+          (dmesg -w > /root/dmesg-live.log) &
+          DMLOG=$!
           set +e
-          cargo test -p cryptpilot-crypt --test provider_exec -- --nocapture 2>&1 | tail -150
+          make run-test-coverage 2>&1 | tail -200
           TEST_RC=${PIPESTATUS[0]}
-          kill $POLLER 2>/dev/null
+          kill $POLLER $DMLOG 2>/dev/null
           echo "=== dm tables observed during run ==="
-          sort -u /root/dmpoll.log | grep -v '^$' | head -60
-          echo "=== kernel messages ==="
-          dmesg | grep -iE "integrity|dm-crypt|device-mapper|I/O error|tag|checksum" | tail -60
+          sort -u /root/dmpoll.log | grep -v '^$' | head -80
+          echo "=== live dmesg (integrity-related) ==="
+          grep -iE "integrity|dm-crypt|device-mapper|I/O error|tag|checksum|AEAD" /root/dmesg-live.log | tail -80
           echo "TEST_RC=$TEST_RC"
+      - name: Retry provider_exec serially (concurrency discriminator)
+        run: |
+          make cleanup-stale-devices || true
+          set +e
+          cargo test -p cryptpilot-crypt --test provider_exec -- --nocapture --test-threads=1 2>&1 | tail -120
+          echo "SERIAL_RC=${PIPESTATUS[0]}"
+          dmesg | grep -iE "integrity|dm-crypt|I/O error|AEAD" | tail -40
