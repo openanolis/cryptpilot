@@ -20,6 +20,13 @@ BOOT_PART_SIZE="512M"
 # Partition alignment in sectors (aligned to 1 MiB boundary)
 readonly PARTITION_SECTOR_ALIGNMENT=2048
 
+# UKI mode needs an ESP big enough for the UKI itself plus the scratch files
+# firmware writes while booting it. Some cloud images ship a much smaller ESP
+# (Ubuntu noble: ~106M), so in UKI mode an output ESP below the minimum is
+# grown to the target size; see disk::grow_uki_efi_partition.
+readonly UKI_EFI_MIN_SIZE_BYTES=$((250 * 1024 * 1024))
+readonly UKI_EFI_TARGET_SIZE_BYTES=$((512 * 1024 * 1024))
+
 # Set up logging: redirect stdout/stderr to both terminal and log file,
 # and enable shell tracing into the same log.
 log::setup_log_file() {
@@ -1970,6 +1977,158 @@ step::shrink_rootfs() {
     # data source for the later steps.
 }
 
+# In UKI mode, grow the output ESP when the source image ships one too small
+# for a UKI (below UKI_EFI_MIN_SIZE_BYTES). The partition is enlarged to
+# UKI_EFI_TARGET_SIZE_BYTES at its current start; every partition that starts
+# after it is shifted behind the enlarged ESP, keeping its type, uuid and
+# size, with starts re-aligned to PARTITION_SECTOR_ALIGNMENT like
+# disk::align_start_sector. The last partition may shrink when the shifted
+# layout would run past the end of the disk. Partition UUIDs must survive
+# because the guest's grub.cfg references them as PART_UUIDs.
+#
+# The current layout is parsed from "sfdisk --dump --json" and the new one is
+# emitted as a fresh sfdisk script, both via python3 (no jq; python3 is
+# already required for the UKI section layout work). Sets
+# uki_efi_resized=true when the table was rewritten so step::copy_partitions
+# knows the output ESP must be re-created instead of dd'd.
+disk::grow_uki_efi_partition() {
+    local device=$1
+    local sector_size=$2
+    local efi_part_num=$3
+
+    uki_efi_resized=false
+
+    local json_file="${workdir}/partition_table.json"
+    sfdisk --dump --json "${device}" >"${json_file}" 2>/dev/null ||
+        proc::fatal "failed to dump the partition table of ${device}"
+
+    local script_file="${workdir}/uki_efi_partition_table.sfdisk"
+    # The || fallback must stay on the heredoc line: on its own line it is
+    # swallowed into the heredoc body and the failure is silently ignored.
+    local layout_rc=0
+    python3 - "${json_file}" "${sector_size}" "${efi_part_num}" \
+        "${UKI_EFI_MIN_SIZE_BYTES}" "${UKI_EFI_TARGET_SIZE_BYTES}" \
+        "${PARTITION_SECTOR_ALIGNMENT}" >"${script_file}" <<'PYEOF' || layout_rc=1
+import json
+import re
+import sys
+
+json_path, sector_size, efi_part_num = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+min_bytes, target_bytes, alignment = (
+    int(sys.argv[4]),
+    int(sys.argv[5]),
+    int(sys.argv[6]),
+)
+
+with open(json_path) as f:
+    table = json.load(f)["partitiontable"]
+parts = table.get("partitions") or []
+
+
+def part_num(p):
+    m = re.search(r"(\d+)$", p.get("node", ""))
+    return int(m.group(1)) if m else None
+
+
+def fail(msg):
+    sys.stderr.write("ERROR: %s\n" % msg)
+    sys.exit(1)
+
+
+efi = next((p for p in parts if part_num(p) == efi_part_num), None)
+if efi is None:
+    fail("partition p%d not found in the table" % efi_part_num)
+
+efi_start = int(efi["start"])
+if int(efi["size"]) * sector_size >= min_bytes:
+    # Large enough already: print nothing, the caller skips the rewrite.
+    sys.exit(0)
+
+# Partitions that start before the EFI partition stay untouched; the ones
+# after it are shifted behind the enlarged ESP in their original start order.
+before = [p for p in parts if int(p["start"]) < efi_start]
+after = sorted((p for p in parts if int(p["start"]) > efi_start), key=lambda p: int(p["start"]))
+if len(before) + len(after) + 1 != len(parts):
+    fail("a partition shares the EFI partition start; layout not supported")
+
+
+def align_up(sector):
+    return (sector + alignment - 1) // alignment * alignment
+
+
+target_size = target_bytes // sector_size
+last_lba = int(table.get("lastlba") or 0)
+
+cursor = align_up(efi_start + target_size)
+moved = {}
+for p in after:
+    start = cursor
+    size = int(p["size"])
+    if last_lba and start + size - 1 > last_lba:
+        # Only the final partition may shrink, and only to fit the disk.
+        size = last_lba - start + 1
+        if size <= 0:
+            fail("partition %s does not fit after the enlarged ESP" % p.get("node"))
+    moved[id(p)] = (start, size)
+    cursor = align_up(start + size)
+
+
+def entry_line(p, start, size):
+    line = "start=%d, size=%d, type=%s" % (start, size, p["type"])
+    if "uuid" in p:
+        line += ", uuid=%s" % p["uuid"]
+    if "name" in p:
+        line += ', name="%s"' % p["name"]
+    # The "<device>p<N> :" prefix is what makes sfdisk keep the original
+    # partition numbers; without it entries are renumbered sequentially.
+    if "node" in p:
+        line = "%s : %s" % (p["node"], line)
+    return line
+
+
+# Emit entries in the original order so partition numbers are unchanged.
+out = ["label: %s" % table["label"]]
+if "id" in table:
+    out.append("label-id: %s" % table["id"])
+out.append("unit: sectors")
+if "firstlba" in table:
+    out.append("first-lba: %d" % int(table["firstlba"]))
+if last_lba:
+    out.append("last-lba: %d" % last_lba)
+out.append("")
+for p in parts:
+    if p is efi:
+        out.append(entry_line(p, efi_start, target_size))
+    elif id(p) in moved:
+        start, size = moved[id(p)]
+        out.append(entry_line(p, start, size))
+    else:
+        out.append(entry_line(p, int(p["start"]), int(p["size"])))
+print("\n".join(out))
+PYEOF
+    if [ "${layout_rc}" -ne 0 ]; then
+        proc::fatal "failed to compute the enlarged-ESP partition layout"
+    fi
+    if [ ! -s "${script_file}" ]; then
+        log::info "EFI partition is large enough; no resize needed"
+        return 0
+    fi
+
+    log::info "Growing EFI partition p${efi_part_num} to $((UKI_EFI_TARGET_SIZE_BYTES / 1024 / 1024))M and shifting later partitions"
+    cat "${script_file}"
+    if ! sfdisk "${device}" <"${script_file}"; then
+        log::error "Failed to write the enlarged-ESP partition table to ${device}"
+        return 1
+    fi
+    partprobe "${device}" 2>/dev/null || true
+    udevadm settle --timeout=10
+
+    local new_efi_size
+    new_efi_size=$(blockdev --getsize64 "${device}p${efi_part_num}")
+    log::info "New EFI partition size: $((new_efi_size / 1024 / 1024))M"
+    uki_efi_resized=true
+}
+
 # Fork the source into two snapshots sharing source-mod as qcow2 backing file:
 # source-read freezes the shrunk source data for the later copy and verity
 # reads, source-write takes the later writes. Then mirror the source partition
@@ -2087,6 +2246,14 @@ step::prepare_output_and_snapshots() {
         udevadm settle --timeout=10
     fi
 
+    # UKI mode: enlarge the output ESP when the source image ships one too
+    # small for the UKI. Must run after the partition table copy above; it
+    # rewrites the output table only (source snapshots are untouched).
+    if [ "$uki" = true ]; then
+        disk::grow_uki_efi_partition "${output_device}" "${sector_size}" "${efi_part_num}" ||
+            proc::fatal "failed to grow the EFI partition for UKI mode"
+    fi
+
     log::info "source-read device: ${source_read_device}"
     log::info "source-write device: ${source_write_device}"
     log::info "output device: ${output_device}"
@@ -2096,9 +2263,40 @@ step::prepare_output_and_snapshots() {
 
 step::copy_partitions() {
 
-    # dd EFI partition (preserve UUID, labels, all metadata)
-    log::info "Copying EFI partition"
-    dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
+    if [ "${uki_efi_resized:-false}" = "true" ]; then
+        # The output ESP was enlarged: dd'ing the source partition would
+        # restore the small vfat superblock and leave dracut hitting ENOSPC
+        # inside a partition that looks full-size. Create a fresh filesystem
+        # spanning the whole partition and copy the source content instead.
+        # The vfat label matters (Ubuntu's fstab mounts the ESP by
+        # LABEL=UEFI); the FAT serial does not (nothing references it).
+        log::info "Creating vfat filesystem on enlarged EFI partition and copying source content"
+        local efi_label
+        efi_label=$(blkid -o value -s LABEL "${source_read_device}p${efi_part_num}")
+
+        local mkfs_vfat_args=(-I)
+        if [ -n "${efi_label}" ]; then
+            mkfs_vfat_args+=(-n "${efi_label}")
+        fi
+        mkfs.vfat "${mkfs_vfat_args[@]}" "${output_device}p${efi_part_num}"
+
+        local efi_src_mount="${workdir}/efi_src"
+        local efi_dst_mount="${workdir}/efi_dst"
+        mkdir -p "${efi_src_mount}" "${efi_dst_mount}"
+        proc::hook_exit "mountpoint -q ${efi_src_mount} && disk::umount_wait_busy ${efi_src_mount}"
+        proc::hook_exit "mountpoint -q ${efi_dst_mount} && disk::umount_wait_busy ${efi_dst_mount}"
+
+        mount -o ro "${source_read_device}p${efi_part_num}" "${efi_src_mount}"
+        mount "${output_device}p${efi_part_num}" "${efi_dst_mount}"
+        # vfat cannot store unix ownership, so -a alone fails on every file.
+        cp -a --no-preserve=ownership "${efi_src_mount}/." "${efi_dst_mount}/"
+        disk::umount_wait_busy "${efi_dst_mount}"
+        disk::umount_wait_busy "${efi_src_mount}"
+    else
+        # dd EFI partition (preserve UUID, labels, all metadata)
+        log::info "Copying EFI partition"
+        dd if="${source_read_device}p${efi_part_num}" of="${output_device}p${efi_part_num}" bs=4M status=progress
+    fi
 
     # Populate the output boot partition.
     # Cases:
@@ -2260,6 +2458,7 @@ main() {
     local source_read_device
     local source_write_device
     local uki=false
+    local uki_efi_resized=false
     local uki_append_cmdline="console=tty0 console=ttyS0,115200n8"
     local uki_stub_version="distro"
 
@@ -2395,7 +2594,9 @@ main() {
     if command -v apt-get >/dev/null 2>&1; then
         local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gdisk gawk udev)
         if [[ "$uki" == "true" ]]; then
-            tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+            # grub2-tools for the UKI boot setup; dosfstools (mkfs.vfat) to
+            # re-create an enlarged ESP (see disk::grow_uki_efi_partition).
+            tool_packages+=(grub2-tools dosfstools)
         fi
         # A pinned stub from the Arch Linux Archive is a .pkg.tar.zst, so the
         # Arch path needs curl (download), zstd + tar (extract), sha256sum (log).
@@ -2407,7 +2608,9 @@ main() {
     else
         local tool_packages=(qemu-img cryptsetup veritysetup lvm2 parted e2fsprogs lsof gdisk systemd-udev) # systemd-udev provides udevadm
         if [[ "$uki" == "true" ]]; then
-            tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
+            # grub2-tools for the UKI boot setup; dosfstools (mkfs.vfat) to
+            # re-create an enlarged ESP (see disk::grow_uki_efi_partition).
+            tool_packages+=(grub2-tools dosfstools)
         fi
         if [[ "$uki" == "true" && "$uki_stub_version" != "distro" ]]; then
             tool_packages+=(curl zstd tar)
