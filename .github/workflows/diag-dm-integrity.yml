@@ -90,6 +90,10 @@ jobs:
         - /dev:/dev
       options: --privileged --ipc=host
     steps:
+      - name: Install git (checkout needs it; the container has none)
+        run: |
+          sed -i -E 's|https?://mirrors.openanolis.cn/anolis/|https://mirrors.aliyun.com/anolis/|g' /etc/yum.repos.d/*.repo
+          yum install -y -q git
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
