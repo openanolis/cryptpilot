@@ -62,7 +62,7 @@ NOTES:
 - Requires libguestfs-tools (virt-customize). Install via:
     CentOS/RHEL: yum install -y libguestfs-tools
     Ubuntu:      apt-get install -y libguestfs-tools
-- By default, virt-customize uses the 'libvirt' backend (via libvirtd). For better performance 
+- By default, virt-customize uses the 'libvirt' backend (via libvirtd). For better performance
   or to avoid daemon dependencies, set the backend explicitly using LIBGUESTFS_BACKEND:
     - To use direct QEMU without libvirt (recommended for CI/containers):
         export LIBGUESTFS_BACKEND=direct
@@ -114,7 +114,6 @@ done
 }
 [[ -z "$IMAGE" ]] && {
     log::error "--image is required."
-    usage
     exit 1
 }
 [[ ! -f "$IMAGE" ]] && {
@@ -174,55 +173,64 @@ add_run_cmd() {
     VIRT_CMD+=(--run-command "$1")
 }
 
+# All commands below run inside the guest with the guest's /bin/sh, which is
+# dash on Ubuntu, so they must stay POSIX sh (no arrays, no [[ ]]). Package
+# operations dispatch on the guest's package manager so DEB guests go through
+# apt. The Alibaba-agent steps are guarded no-ops on images without them.
+
 # =============================
 # 1. Uninstall Cloud Assistant Agent (Aliyun Assist)
 # =============================
 add_run_cmd '
-# Stop Cloud Assistant daemon
-/usr/local/share/assist-daemon/assist_daemon --stop
-
-# Stop Cloud Assistant service
-systemctl stop aliyun.service
-
-# Remove Cloud Assistant daemon
-/usr/local/share/assist-daemon/assist_daemon --delete
-
-# Uninstall package
-rpm -qa | grep aliyun_assist | xargs rpm -e
-
-# Clean up leftover files and service configurations
-rm -rf /usr/local/share/aliyun-assist
-rm -rf /usr/local/share/assist-daemon
-rm -f /etc/systemd/system/aliyun.service
-rm -f /etc/init.d/aliyun-service
+if [ -d /usr/local/share/assist-daemon ] || [ -e /etc/systemd/system/aliyun.service ]; then
+    /usr/local/share/assist-daemon/assist_daemon --stop 2>/dev/null || true
+    systemctl stop aliyun.service 2>/dev/null || true
+    /usr/local/share/assist-daemon/assist_daemon --delete 2>/dev/null || true
+    rpm -qa 2>/dev/null | grep aliyun_assist | xargs -r rpm -e 2>/dev/null || true
+    rm -rf /usr/local/share/aliyun-assist
+    rm -rf /usr/local/share/assist-daemon
+    rm -f /etc/systemd/system/aliyun.service
+    rm -f /etc/init.d/aliyun-service
+fi
 '
 
 # =============================
 # 2. Uninstall Cloud Security Center (Aegis/AntiKnight)
 # =============================
 add_run_cmd '
-# Download and execute uninstall script
-wget "http://update.aegis.aliyun.com/download/uninstall.sh" && chmod +x uninstall.sh && ./uninstall.sh
+# The uninstall script only makes sense where the agent is installed; plain
+# Ubuntu images have none, and fetching it there would fail the run.
+if [ -d /usr/local/aegis ]; then
+    wget "http://update.aegis.aliyun.com/download/uninstall.sh" && chmod +x uninstall.sh && ./uninstall.sh
+    rm -f /uninstall.sh
+fi
 '
 
 # =============================
 # 3. Disable and Mask rpcbind Service
 # =============================
 add_run_cmd '
-systemctl stop rpcbind.service
-systemctl disable rpcbind.service
-systemctl mask rpcbind.service
+# rpcbind is not installed on every distro (e.g. Ubuntu cloud images), so each
+# step tolerates a missing unit instead of failing the whole hardening run.
+systemctl stop rpcbind.service 2>/dev/null || true
+systemctl disable rpcbind.service 2>/dev/null || true
+systemctl mask rpcbind.service 2>/dev/null || true
 
-systemctl stop rpcbind.socket
-systemctl disable rpcbind.socket
-systemctl mask rpcbind.socket
+systemctl stop rpcbind.socket 2>/dev/null || true
+systemctl disable rpcbind.socket 2>/dev/null || true
+systemctl mask rpcbind.socket 2>/dev/null || true
 '
 
 # =============================
 # 4. Remove cloud-init
 # =============================
 add_run_cmd '
-yum remove -y cloud-init
+if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y cloud-init
+    rm -rf /etc/cloud /var/lib/cloud
+else
+    yum remove -y cloud-init
+fi
 '
 
 # =============================
@@ -230,7 +238,11 @@ yum remove -y cloud-init
 # =============================
 if [[ "$MODE" == "full" ]]; then
     add_run_cmd '
-    yum remove -y openssh-server
+    if command -v apt-get >/dev/null 2>&1; then
+        DEBIAN_FRONTEND=noninteractive apt-get purge -y openssh-server
+    else
+        yum remove -y openssh-server
+    fi
     '
 elif [[ "$MODE" == "partial" ]]; then
     add_run_cmd '
@@ -252,67 +264,55 @@ fi
 # =============================
 # shellcheck disable=SC2016
 add_run_cmd '
-#!/bin/bash
-
-# 1. Lock root and admin account passwords:
+# 1. Lock root and admin account passwords
 echo "1. Locking root and admin account passwords..."
 sed -i "s/\(^root:\)[^:]*/\1!!/" /etc/shadow
 sed -i "s/\(^admin:\)[^:]*/\1!!/" /etc/shadow
 echo "1. Root and admin account passwords locked!"
 
 echo "2. Processing other user accounts (excluding root and admin)..."
-# Define list of excluded usernames
-exclude_users=("root" "admin")
-
+# Delete interactive-shell accounts that still have a usable password; keep
+# root/admin and anything already locked.
 while IFS=: read -r username _ _ _ _ homedir user_shell; do
-  # Check if shell is one of the interactive shells
-  case $user_shell in
-    "/bin/bash"|"/bin/sh"|"/bin/zsh" \
-    |"/usr/bin/bash"|"/usr/bin/sh"|"/usr/bin/zsh" \
-    |"/usr/local/bin/bash"|"/usr/local/bin/sh"|"/usr/local/bin/zsh")
-      
-      # Skip if username is in exclude list
-      if [[ " ${exclude_users[@]} " =~ " $username " ]]; then
-        continue
-      fi
-      
-      # Read password field from shadow
-      pass=$(grep "^$username:" /etc/shadow | cut -d: -f2)
-      
-      # If already locked (!, !!, *, etc.), skip deletion
-      if [[ "$pass" == "!" || "$pass" == "!!" || "$pass" == *\!* || "$pass" == "*" ]]; then
-        echo "Account $username is already locked or disabled, skipping."
-        continue
-      fi
-      
-      # Delete eligible user account and home directory
-      echo "Removing account: $username"
-      userdel -r "$username" 2>/dev/null || true
-      if [[ -d "$homedir" ]]; then
-        rm -rf "$homedir" 2>/dev/null || true
-      fi
-      ;;
+    case "$user_shell" in
+    */bash|*/sh|*/zsh) ;;
+    *) continue ;;
+    esac
 
-    *)
-      # Ignore users with non-interactive shells
-      continue
-      ;;
-  esac
+    case "$username" in
+    root|admin) continue ;;
+    esac
+
+    # Read password field from shadow
+    pass=$(grep "^$username:" /etc/shadow | cut -d: -f2)
+
+    # If already locked (!, !!, *, etc.), skip deletion
+    case "$pass" in
+    "!"|"!!"|"*") continue ;;
+    esac
+    case "$pass" in
+    *"!"*) continue ;;
+    esac
+
+    # Delete eligible user account and home directory
+    echo "Removing account: $username"
+    userdel -r "$username" 2>/dev/null || true
+    if [ -d "$homedir" ]; then
+        rm -rf "$homedir" 2>/dev/null || true
+    fi
 done < /etc/passwd
 echo "2. Other accounts (excluding root and admin) processed!"
 
 echo "3. Removing directories ending with .DEL in home folders..."
 # Scan /etc/passwd again and clean *.DEL directories in valid home paths
 while IFS=: read -r username _ _ _ _ homedir user_shell; do
-  case $user_shell in
-    "/bin/bash"|"/bin/sh"|"/bin/zsh" \
-    |"/usr/bin/bash"|"/usr/bin/sh"|"/usr/bin/zsh" \
-    |"/usr/local/bin/bash"|"/usr/local/bin/sh"|"/usr/local/bin/zsh")
-      if [[ -d "$homedir" ]]; then
+    case "$user_shell" in
+    */bash|*/sh|*/zsh) ;;
+    *) continue ;;
+    esac
+    if [ -d "$homedir" ]; then
         find "$homedir" -maxdepth 1 -type d -name "*.DEL" -exec rm -rf {} \;
-      fi
-      ;;
-  esac
+    fi
 done < /etc/passwd
 echo "3. Cleanup of *.DEL directories completed!"
 '
@@ -321,7 +321,10 @@ echo "3. Cleanup of *.DEL directories completed!"
 # 7. Clear Bash History
 # =============================
 add_run_cmd '
-history -c && history -w
+# history is a bash builtin; the guest /bin/sh (dash on Ubuntu) does not have
+# it, so a failure here is expected and ignored.
+history -c 2>/dev/null || true
+history -w 2>/dev/null || true
 '
 
 # =============================
