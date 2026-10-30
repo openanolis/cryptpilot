@@ -1097,6 +1097,21 @@ if [ "${uki:-false}" = false ]; then
         grub_add_args "GRUB_CMDLINE_LINUX_DEFAULT"
     fi
 
+    # Disable os-prober: it scans all block devices and fails with
+    # "Device or resource busy" when this script runs inside a container with
+    # NBD devices attached, and the failure makes grub2-mkconfig emit a
+    # grub.cfg without any menuentry.
+    if [ -f /etc/default/grub ]; then
+        if grep -q "^GRUB_DISABLE_OS_PROBER=" /etc/default/grub; then
+            sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=true/' /etc/default/grub
+        else
+            echo "GRUB_DISABLE_OS_PROBER=true" >> /etc/default/grub
+        fi
+    fi
+    if [ -d /etc/default/grub.d ]; then
+        echo "GRUB_DISABLE_OS_PROBER=true" > /etc/default/grub.d/99-disable-os-prober.cfg
+    fi
+
     echo "Updating grub2.cfg"
     grub2_cfg=""
     if [ -e /etc/grub2.cfg ] ; then
@@ -1188,6 +1203,68 @@ if [ "${uki:-false}" = false ]; then
                 "set prefix=(\$prefix)${_esp_main_dir}" \
                 "configfile \$prefix/grub.cfg" > "$_esp_early"
         fi
+    done
+
+    # Ensure grubenv exists with saved_entry set.
+    # RHEL-based images ship with a grubenv, but Ubuntu cloud images may not
+    # have one. cryptpilot-fde-host show-reference-value requires saved_entry
+    # to be present.
+    echo "Ensuring grubenv with saved_entry exists..."
+    grubenv_path=""
+    if [ -f /boot/grub2/grubenv ]; then
+        grubenv_path=/boot/grub2/grubenv
+    elif [ -f /boot/grub/grubenv ]; then
+        grubenv_path=/boot/grub/grubenv
+    fi
+    if [ -z "$grubenv_path" ]; then
+        # Create a fresh grubenv file (1024-byte GRUB environment block)
+        echo "Creating grubenv file..."
+        mkdir -p /boot/grub
+        grubenv_path=/boot/grub/grubenv
+        # grub-editenv create generates a valid 1024-byte grubenv file
+        if command -v grub-editenv >/dev/null 2>&1; then
+            grub-editenv "$grubenv_path" create
+        elif command -v grub2-editenv >/dev/null 2>&1; then
+            grub2-editenv "$grubenv_path" create
+        else
+            # Fallback: GRUB env header followed by zero padding to 1024 bytes
+            { printf '# GRUB Environment Version 1.0\n'; dd if=/dev/zero bs=1 count=992 2>/dev/null; } > "$grubenv_path"
+        fi
+    fi
+
+    # Determine the kernel entry to set as saved_entry.
+    # The value should match the menuentry title/id in grub.cfg.
+    # Ubuntu menuentries carry the version (e.g. "Ubuntu, with Linux
+    # 6.8.0-35-generic"), so strip the vmlinuz- prefix from the newest
+    # non-rescue kernel file.
+    kernel_entry=""
+    if [ -n "$(ls /boot/vmlinuz-* 2>/dev/null | grep -v rescue)" ]; then
+        kernel_file=$(ls /boot/vmlinuz-* 2>/dev/null | grep -v rescue | sort -V | tail -1)
+        kernel_entry=$(basename "$kernel_file" | sed 's/^vmlinuz-//')
+    else
+        kernel_file=$(ls /boot/vmlinuz* 2>/dev/null | sort -V | tail -1)
+        kernel_entry=$(basename "$kernel_file" | sed 's/^vmlinuz-//')
+    fi
+
+    if [ -n "$kernel_entry" ] && [ -f "$grubenv_path" ]; then
+        echo "Setting saved_entry to $kernel_entry"
+        if command -v grub-editenv >/dev/null 2>&1; then
+            grub-editenv "$grubenv_path" set saved_entry="$kernel_entry"
+        elif command -v grub2-editenv >/dev/null 2>&1; then
+            grub2-editenv "$grubenv_path" set saved_entry="$kernel_entry"
+        else
+            # Fallback: replace the text before the padding block
+            sed -i '/^saved_entry=/d' "$grubenv_path"
+            sed -i "1a saved_entry=$kernel_entry" "$grubenv_path"
+        fi
+    fi
+
+    # Also ensure GRUB_DEFAULT=saved so GRUB actually uses saved_entry
+    if [ -f /etc/default/grub ]; then
+        sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
+    fi
+    for f in /etc/default/grub.d/*.cfg; do
+        [ -f "$f" ] && sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' "$f"
     done
 
     echo "Cleaning up package manager cache..."
