@@ -1098,6 +1098,30 @@ if [ "${uki:-false}" = false ]; then
         }
 
         grub_add_args "GRUB_CMDLINE_LINUX_DEFAULT"
+
+        # Ubuntu cloud images default to GRUB_DEFAULT=0, which boots the first
+        # generated menuentry. The conversion rebuilds the initramfs for the
+        # newest kernel only, so switch the default to the saved-entry
+        # mechanism; the saved_entry itself is primed after grub.cfg is
+        # regenerated below. Drop-ins in /etc/default/grub.d are sourced after
+        # /etc/default/grub, so any of them that sets GRUB_DEFAULT would win
+        # over the main file: rewrite it in every file that defines it.
+        grub_set_default_saved() {
+            local file="$1"
+            local tmp
+            tmp=$(mktemp)
+            grep -v "^GRUB_DEFAULT=" "$file" > "$tmp" || true
+            echo 'GRUB_DEFAULT=saved' >>"$tmp"
+            cat "$tmp" >"$file" # in-place write keeps mode and ownership
+            rm -f "$tmp"
+        }
+        [ -f /etc/default/grub ] || touch /etc/default/grub
+        grub_set_default_saved /etc/default/grub
+        for dropin in /etc/default/grub.d/*.cfg; do
+            [ -f "$dropin" ] || continue
+            grep -q "^GRUB_DEFAULT=" "$dropin" || continue
+            grub_set_default_saved "$dropin"
+        done
     fi
 
     echo "Updating grub2.cfg"
@@ -1134,6 +1158,69 @@ if [ "${uki:-false}" = false ]; then
         fi
     fi
 
+    # Prime the GRUB environment block for Ubuntu guests. Noble cloud images
+    # ship no grubenv, and without one GRUB_DEFAULT=saved resolves to nothing.
+    # The block is created with the guest's own grub-editenv (grub2-editenv on
+    # some distros): it has a fixed 1024-byte binary layout that is easy to
+    # corrupt when hand-crafted. The saved_entry must match a menuentry title
+    # of the freshly generated grub.cfg verbatim (for entries nested in a
+    # submenu, the "submenu title>entry title" path form), otherwise GRUB
+    # cannot resolve it and falls back to the first entry.
+    if command -v apt-get >/dev/null 2>&1 && [ -n "${grub2_cfg:-}" ] && [ -f "$grub2_cfg" ]; then
+        grub_editenv=""
+        for candidate in grub-editenv grub2-editenv; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                grub_editenv="$candidate"
+                break
+            fi
+        done
+        if [ -z "$grub_editenv" ]; then
+            echo "ERROR: neither grub-editenv nor grub2-editenv is installed in the guest, cannot create the GRUB environment block" >&2
+            exit 1
+        fi
+
+        grubenv_file="$(dirname "$grub2_cfg")/grubenv"
+
+        # Same newest-kernel rule the initrd build uses later
+        newest_kernel=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | grep -v rescue | sort -V | tail -n1)
+        if [ -z "$newest_kernel" ]; then
+            echo "ERROR: no kernel image found in /boot, cannot select a default boot entry" >&2
+            exit 1
+        fi
+
+        saved_title=""
+        last_submenu=""
+        while read -r kind title; do
+            if [ "$kind" = "submenu" ]; then
+                last_submenu="$title"
+                continue
+            fi
+            case "$title" in
+            *"$newest_kernel"*)
+                case "$title" in
+                *recovery*) ;;
+                *)
+                    if [ -n "$last_submenu" ]; then
+                        saved_title="${last_submenu}>${title}"
+                    else
+                        saved_title="$title"
+                    fi
+                    break
+                    ;;
+                esac
+                ;;
+            esac
+        done < <(sed -n "s/^[[:space:]]*\(menuentry\|submenu\)[[:space:]]'\([^']*\)'.*/\1 \2/p" "$grub2_cfg")
+        if [ -z "$saved_title" ]; then
+            echo "ERROR: generated $grub2_cfg has no menuentry for kernel $newest_kernel, cannot select a default boot entry" >&2
+            exit 1
+        fi
+
+        echo "Priming $grubenv_file with saved_entry: $saved_title"
+        "$grub_editenv" "$grubenv_file" create
+        "$grub_editenv" "$grubenv_file" set "saved_entry=$saved_title"
+    fi
+
     # Some images keep a *separate*, full grub.cfg on the EFI System Partition that
     # the firmware reads directly (e.g. GCP Ubuntu cloud images read
     # /boot/efi/EFI/<distro>/grub.cfg, while the steps above only refreshed the
@@ -1149,6 +1236,14 @@ if [ "${uki:-false}" = false ]; then
         for esp_grub_cfg in /boot/efi/EFI/*/grub.cfg; do
             [ -f "$esp_grub_cfg" ] || continue
             [ "$grub2_cfg" -ef "$esp_grub_cfg" ] && continue
+            # Distro split: the ESP grub.cfg is either the full config (the
+            # case this sync handles) or a tiny *stub* (search.fs_uuid +
+            # configfile, as on Ubuntu) that redirects to the real grub.cfg on
+            # the boot partition. The raw partition copy preserves that boot
+            # partition verbatim, UUID included, so the stub stays valid;
+            # overwriting it with the full grub.cfg would break the redirect
+            # and the $prefix-relative grubenv.
+            grep -q "menuentry" "$esp_grub_cfg" || continue
             echo "Syncing regenerated grub.cfg to ESP: $esp_grub_cfg"
             cp -f "$grub2_cfg" "$esp_grub_cfg"
             esp_grub_dir=$(dirname "$esp_grub_cfg")
