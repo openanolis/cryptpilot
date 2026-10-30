@@ -7,7 +7,7 @@ This guide walks you through encrypting a bootable OS disk with full disk encryp
 - cryptpilot-fde-host installed on your system
 - A bootable qcow2 disk image
 
-> **Note**: The `--device` option for in-place disk encryption has been removed.
+> **Note**: The `--device` option for in-place disk encryption has been removed. Passing it now exits with an error pointing at the file-based flow (`--in`/`--out`); `--wipe-freed-space` is obsolete and is ignored with a warning.
 > Use `--in`/`--out` for file-based conversion only.
 
 ## Prepare Configuration

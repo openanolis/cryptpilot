@@ -298,6 +298,10 @@ proc::print_help_and_exit() {
     echo "                                                          matching package, e.g. '261' -> latest 261.x, '261.2-1' -> that exact package"
     echo "                                                          (fully pinned, so the PCR measurement reference stays stable). A pinned stub"
     echo "                                                          is downloaded, used, and removed so the converted image is unchanged."
+    echo "  -d, --device <device>                                  REMOVED. In-place device conversion is no longer supported; passing this"
+    echo "                                                          option exits with an error. Convert the disk to an image file first."
+    echo "      --wipe-freed-space                                  OBSOLETE. Freed space beyond the shrunk filesystem is never copied, so"
+    echo "                                                          nothing needs wiping; passing this option prints a warning and is ignored."
     echo "  -h, --help                                              Show this help message and exit."
     exit "$1"
 }
@@ -2184,6 +2188,20 @@ main() {
             rootfs_no_encryption=true
             shift 1
             ;;
+        -d | --device)
+            # Removed in the overlay rework: the pipeline is a qcow2 file chain
+            # (source-mod overlay, forked snapshots, freshly built output), which
+            # has no in-place write path. Accepted so old scripts get a clear
+            # error instead of "unexpected argument".
+            removed_device_mode=true
+            shift 2
+            ;;
+        --wipe-freed-space)
+            # Obsolete since the overlay rework: freed space beyond the shrunk
+            # filesystem is never copied, so there is nothing to wipe.
+            wipe_freed_space_requested=true
+            shift 1
+            ;;
         --rootfs-part-num)
             rootfs_part_num="$2"
             shift 2
@@ -2228,6 +2246,14 @@ main() {
     elif [ "${uki}" = false ] && [ "${uki_stub_version}" != "distro" ]; then
         log::warn "--uki-stub-version is ignored without --uki"
         uki_stub_version="distro"
+    fi
+
+    if [ "${removed_device_mode:-}" = true ]; then
+        proc::fatal "In-place device conversion (--device) is no longer supported: the conversion pipeline works on image files only. Convert the disk to an image file first (qemu-img convert), run cryptpilot-convert with --in/--out, then write the result back to the disk."
+    fi
+
+    if [ "${wipe_freed_space_requested:-}" = true ]; then
+        log::warn "--wipe-freed-space is obsolete and ignored: freed space beyond the shrunk filesystem is never copied into the output image"
     fi
 
     if [ -z "${input_file:-}" ] || [ -z "${output_file:-}" ]; then
