@@ -2559,8 +2559,13 @@ main() {
     if command -v apt-get >/dev/null 2>&1; then
         local tool_packages=(qemu-utils cryptsetup lvm2 parted grub2-common e2fsprogs lsof fdisk gdisk gawk udev)
         if [[ "$uki" == "true" ]]; then
-            tool_packages+=(grub2-tools) # Required for UKI (Unified Kernel Image) boot setup
-            tool_packages+=(dosfstools)  # mkfs.vfat recreates an enlarged output ESP
+            # The grub tools the UKI setup needs (grub-mkconfig, grub-editenv)
+            # live in grub2-common on DEB distros, already in the base list;
+            # grub2-tools is the RPM name and does not exist on apt. The UKI
+            # reassembly and PE-header patch also need binutils (objcopy,
+            # objdump) and python3, which the minimal Ubuntu runtime images
+            # do not ship.
+            tool_packages+=(dosfstools binutils python3)
         fi
         # A pinned stub from the Arch Linux Archive is a .pkg.tar.zst, so the
         # Arch path needs curl (download), zstd + tar (extract), sha256sum (log).
