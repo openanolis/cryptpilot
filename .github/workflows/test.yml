@@ -30,6 +30,16 @@ jobs:
             # that are not linked by gcc. Fixed in Rust 1.86.0.
             rust_version: "1.86.0"
     runs-on: ${{ matrix.runner }}
+    # rust-toolchain.toml pins the workspace toolchain and, as a directory
+    # override, silently beats the default toolchain the action installs,
+    # so the matrix rust_version never actually applied and every leg ran
+    # 1.85.0. RUSTUP_TOOLCHAIN outranks the file, making matrix.rust_version
+    # take effect: 1.85.0 on x86_64 (unchanged), 1.86.0 on aarch64, whose
+    # 1.85.0 libprofiler_builtins fails to link under cargo-llvm-cov
+    # instrumentation with the old alinux3 gcc that lacks the
+    # __aarch64_*_sync outline-atomics helpers.
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust_version }}
     defaults:
       run:
         shell: bash
