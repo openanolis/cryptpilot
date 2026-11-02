@@ -24,7 +24,6 @@ async-trait = "0.1.83"
 async-walkdir = "2.1.0"
 authenticode = {version = "0.4.3", features = ["object", "std"]}
 base64 = "0.22.1"
-bindgen = "0.71.0"
 block-devs = "0.1.0"
 cap-std = "4.0.0"
 clap = {version = "4.5.4", features = ["derive"]}

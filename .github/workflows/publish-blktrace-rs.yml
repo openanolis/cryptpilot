@@ -37,12 +37,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.85.0
 
-      - name: Install bindgen build dependencies
-        # cargo publish runs a verification build of the package, which
-        # needs libclang and the kernel UAPI headers (linux/blktrace_api.h
-        # ships with libc6-dev) for the build-time bindgen step.
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev
-
       - name: Compare version with crates.io
         id: version
         run: |

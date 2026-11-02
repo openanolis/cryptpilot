@@ -121,6 +121,67 @@ fn captures_reads_from_a_loop_device() {
     );
 }
 
+/// `fallocate --zero-range` on a block device goes through
+/// `blkdev_issue_zeroout`, which issues REQ_OP_WRITE_ZEROES bios (or
+/// plain zero writes when the device cannot offload them). Kernels from
+/// 6.19 on record those as the write-zeroes category in the v2 format;
+/// older kernels record them as writes, so the assertion accepts either.
+// Same Command lint exemption as the helpers above; a standalone test
+// crate cannot use cryptpilot-core's async CheckCommandOutput.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn captures_zero_range_events_from_a_loop_device() {
+    if !is_root() {
+        eprintln!("skipping: not root");
+        return;
+    }
+    let Some(loop_dev) = setup_loop_device("zero") else {
+        eprintln!("skipping: no loop device available");
+        return;
+    };
+
+    let session = BlkTrace::monitor(&loop_dev.device).expect("monitor starts");
+
+    // 1 MiB == 2048 sectors from the start of the device.
+    let status = Command::new("fallocate")
+        .args(["-z", "-o", "0", "-l", "1048576"])
+        .arg(&loop_dev.device)
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        // Older fallocate(1) or a device without zero-range support:
+        // nothing to assert against, the capability is environmental.
+        Ok(_) => {
+            eprintln!(
+                "skipping: fallocate zero-range failed on {}",
+                loop_dev.device.display()
+            );
+            return;
+        }
+        // No fallocate(1) at all; also a capability of the environment.
+        Err(_) => {
+            eprintln!("skipping: fallocate is not installed");
+            return;
+        }
+    }
+
+    let report = session.shutdown().expect("shutdown collects the report");
+
+    assert_eq!(report.dropped, 0);
+    let zeroed = report
+        .events
+        .iter()
+        .filter(|event| {
+            (event.is_write() || event.is_write_zeroes()) && event.bytes > 0 && event.sector < 2048
+        })
+        .count();
+    assert!(
+        zeroed > 0,
+        "expected write or write-zeroes events over the zeroed range, got {:?}",
+        report.events
+    );
+}
+
 #[cfg(feature = "async")]
 mod async_variant {
     use super::*;

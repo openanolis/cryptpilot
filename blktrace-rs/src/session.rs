@@ -17,7 +17,7 @@ use crate::debugfs::ensure_debugfs;
 use crate::error::BlktraceError;
 use crate::event::{read_event, BlkTraceEvent};
 use crate::uapi::{
-    blk_user_trace_setup, blktrace_cat_BLK_TC_READ, blktrace_cat_BLK_TC_WRITE, ioctl,
+    ioctl, BlkUserTraceSetup, BlkUserTraceSetup2, BLK_TC_READ, BLK_TC_WRITE, BLK_TC_WRITE_ZEROES,
 };
 
 /// Size of each relay buffer the kernel allocates, per CPU.
@@ -37,12 +37,14 @@ pub struct BlkTrace;
 impl BlkTrace {
     /// Starts tracing the block device at `path`.
     ///
-    /// Only read and write events are captured. Reads served from the page
-    /// cache never reach the block layer, so call
+    /// Read, write and write-zeroes events are captured. Kernels without
+    /// the v2 trace API (before 6.19) have no write-zeroes category;
+    /// there, write-zeroes requests are recorded as writes. Reads served
+    /// from the page cache never reach the block layer, so call
     /// [`BlkTrace::drop_page_cache`] before the reads you want traced.
     /// Stopping with [`BlkTraceSession::shutdown`] returns every event
-    /// recorded in between; dropping the session instead stops tracing but
-    /// discards the events.
+    /// recorded in between; dropping the session instead stops tracing
+    /// but discards the events.
     pub fn monitor(path: impl AsRef<Path>) -> Result<BlkTraceSession, BlktraceError> {
         BlkTraceSession::start(path.as_ref())
     }
@@ -88,31 +90,73 @@ impl BlkTraceSession {
         let device = File::open(path)?;
         let fd = device.as_fd();
 
-        let mut setup_data = blk_user_trace_setup {
-            // Capture read and write events only
-            // See: https://github.com/sdsc/blktrace/blob/dd093eb1c48e0d86b835758b96a9886fb7773aa4/act_mask.c#L40
-            act_mask: (blktrace_cat_BLK_TC_READ | blktrace_cat_BLK_TC_WRITE) as u16,
+        // Prefer the v2 trace format. Since commit bc49af56eea8 (6.19)
+        // write-zeroes requests carry their own trace category, above the
+        // v1 category ceiling BLK_TC_END_V1, and v1 sessions silently drop
+        // records whose category exceeds it.
+        //
+        // Kernels without the v2 API reject BLKTRACESETUP2 with ENOTTY (the
+        // VFS turns an unhandled block ioctl into it) or with EINVAL when
+        // the device driver answers unknown ioctls itself - the loop driver
+        // returns -EINVAL for anything it does not implement. Both trigger
+        // the v1 fallback: the v1 and v2 setups validate the same inputs,
+        // so a failing BLKTRACESETUP2 means either "no v2 here" (fall
+        // back) or "setup is broken" (v1 then fails loudly too); silently
+        // downgrading a request that v1 can serve is the safe reading.
+        let mut setup2 = BlkUserTraceSetup2 {
+            act_mask: BLK_TC_READ | BLK_TC_WRITE | BLK_TC_WRITE_ZEROES,
             buf_size: BLK_TRACE_BUF_SIZE,
             buf_nr: BLK_TRACE_BUF_COUNT,
             ..Default::default()
         };
-        // SAFETY: fd is an open block device fd; setup_data is a valid,
-        // fully initialized blk_user_trace_setup.
-        unsafe { ioctl::blktrace_setup(fd.as_raw_fd(), &mut setup_data) }
-            .map_err(BlktraceError::Setup)?;
-
-        // The kernel returns the name of the block device it registered
-        // the tracer under; relay channels and counters hang off it.
-        // SAFETY: `name` is a fixed-size array field of the live
-        // `setup_data`, so the slice covers aligned, in-bounds bytes;
-        // missing NUL is a `from_bytes_until_nul` error, not UB.
-        let block_name = CStr::from_bytes_until_nul(unsafe {
-            std::slice::from_raw_parts(setup_data.name.as_ptr() as *const u8, setup_data.name.len())
-        })
-        .map_err(|_| BlktraceError::InvalidBlockName)?
-        .to_str()
-        .map_err(|_| BlktraceError::InvalidBlockName)?
-        .to_owned();
+        // SAFETY: fd is an open block device fd; setup2 is fully
+        // initialized POD, and the kernel only writes the name array.
+        let block_name = match unsafe { ioctl::blktrace_setup2(fd.as_raw_fd(), &mut setup2) } {
+            Ok(_) => {
+                tracing::debug!("blktrace session using the v2 trace format");
+                // SAFETY: `name` is a fixed-size array field of the live
+                // `setup2`, so the slice covers aligned, in-bounds bytes.
+                let name = unsafe {
+                    std::slice::from_raw_parts(setup2.name.as_ptr() as *const u8, setup2.name.len())
+                };
+                parse_block_name(name)?
+            }
+            Err(e @ (nix::Error::ENOTTY | nix::Error::EINVAL)) => {
+                // Kernels before 6.19 trace write-zeroes requests with
+                // the plain BLK_TC_WRITE category, so the v1 READ|WRITE
+                // mask loses nothing on this path.
+                tracing::debug!(
+                    "BLKTRACESETUP2 unavailable ({e}), falling back to the v1 trace format"
+                );
+                let mut setup_data = BlkUserTraceSetup {
+                    // Capture read and write events only
+                    // See: https://github.com/sdsc/blktrace/blob/dd093eb1c48e0d86b835758b96a9886fb7773aa4/act_mask.c#L40
+                    act_mask: (BLK_TC_READ | BLK_TC_WRITE) as u16,
+                    buf_size: BLK_TRACE_BUF_SIZE,
+                    buf_nr: BLK_TRACE_BUF_COUNT,
+                    ..Default::default()
+                };
+                // SAFETY: fd is an open block device fd; setup_data is a
+                // valid, fully initialized BlkUserTraceSetup.
+                unsafe { ioctl::blktrace_setup(fd.as_raw_fd(), &mut setup_data) }
+                    .map_err(BlktraceError::Setup)?;
+                // The kernel returns the name of the block device it
+                // registered the tracer under; relay channels and
+                // counters hang off it.
+                // SAFETY: `name` is a fixed-size array field of the live
+                // `setup_data`, so the slice covers aligned, in-bounds
+                // bytes; missing NUL is a `from_bytes_until_nul` error,
+                // not UB.
+                let name = unsafe {
+                    std::slice::from_raw_parts(
+                        setup_data.name.as_ptr() as *const u8,
+                        setup_data.name.len(),
+                    )
+                };
+                parse_block_name(name)?
+            }
+            Err(e) => return Err(BlktraceError::Setup2(e)),
+        };
 
         // SAFETY: fd holds a configured blktrace from the setup ioctl above.
         unsafe { ioctl::blktrace_start(fd.as_raw_fd()) }.map_err(BlktraceError::Start)?;
@@ -235,6 +279,17 @@ impl Drop for BlkTraceSession {
             tracing::warn!("Failed to BLKTRACETEARDOWN: {e}");
         }
     }
+}
+
+/// Extracts the NUL-terminated block name the kernel wrote into the
+/// setup struct's `name` array (32 bytes in v1, 64 in v2).
+fn parse_block_name(name: &[u8]) -> Result<String, BlktraceError> {
+    let name = CStr::from_bytes_until_nul(name)
+        .map_err(|_| BlktraceError::InvalidBlockName)?
+        .to_str()
+        .map_err(|_| BlktraceError::InvalidBlockName)?
+        .to_owned();
+    Ok(name)
 }
 
 /// Reads events off one CPU's relay channel until the session is cancelled.

@@ -110,21 +110,30 @@ impl MakeFs for IntegrityNoWipeMakeFs {
         let mut rw_positions: OrderSet<_> = Default::default();
         let mut r_positions: OrderSet<_> = Default::default();
         let mut w_positions: OrderSet<_> = Default::default();
+        let mut wz_positions: OrderSet<_> = Default::default();
         for event in &events {
             // Refer to: https://github.com/sdsc/blktrace/blob/dd093eb1c48e0d86b835758b96a9886fb7773aa4/blkparse_fmt.c#L67-L74
-            /* We ignore Discard (TRIM) here */
-            if !event.is_discard() && (event.is_read() || event.is_write()) {
+            /* Discard (TRIM) resets the range to the unwritten state:
+             * nothing is written, so there is no content to migrate.
+             * Write-zeroes is the opposite: the range is guaranteed to
+             * read back as zeros, so migrating those zero pages from the
+             * dummy device to the real volume is what initializes the
+             * integrity tags there. */
+            if event.is_discard() {
+                continue;
+            }
+            if event.is_read() || event.is_write() || event.is_write_zeroes() {
                 tracing::trace!(
-                    "event action: {} sector: {}, bytes: {} bytes",
-                    event.event.action,
-                    event.event.sector,
-                    event.event.bytes
+                    "event kind: {:?} sector: {}, bytes: {} bytes",
+                    event.kind,
+                    event.sector,
+                    event.bytes
                 );
 
                 // Linux always considers sectors to be 512 bytes long independently
                 // https://github.com/torvalds/linux/blob/7839932417dd53bb09eb5a585a7a92781dfd7cb2/include/linux/types.h#L132
-                let bytes_start = event.event.sector * 512;
-                let bytes_end = bytes_start + (event.event.bytes as u64);
+                let bytes_start = event.sector * 512;
+                let bytes_end = bytes_start + (event.bytes as u64);
                 // The range [bytes_start, bytes_end) is touched by the operation
                 for i in (bytes_start / page_size)..bytes_end.div_ceil(page_size) {
                     rw_positions.insert(i);
@@ -134,14 +143,18 @@ impl MakeFs for IntegrityNoWipeMakeFs {
                     if event.is_write() {
                         w_positions.insert(i);
                     }
+                    if event.is_write_zeroes() {
+                        wz_positions.insert(i);
+                    }
                 }
             }
         }
         tracing::info!(
-            "Recording finished, num of pages need to update to volume: {} ({} reads, {} writes), total size: {} bytes",
+            "Recording finished, num of pages need to update to volume: {} ({} reads, {} writes, {} zeroed), total size: {} bytes",
             rw_positions.len(),
             r_positions.len(),
             w_positions.len(),
+            wz_positions.len(),
             rw_positions.len() as u64 * page_size
         );
 

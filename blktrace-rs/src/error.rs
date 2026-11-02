@@ -12,6 +12,10 @@ pub enum BlktraceError {
     /// The `BLKTRACESETUP` ioctl failed.
     #[error("BLKTRACESETUP failed")]
     Setup(#[source] nix::Error),
+    /// The `BLKTRACESETUP2` ioctl failed with something other than the
+    /// ENOTTY/EINVAL that trigger the v1 fallback.
+    #[error("BLKTRACESETUP2 failed")]
+    Setup2(#[source] nix::Error),
     /// The `BLKTRACESTART` ioctl failed.
     #[error("BLKTRACESTART failed")]
     Start(#[source] nix::Error),
@@ -27,6 +31,10 @@ pub enum BlktraceError {
     /// A trace record's magic number did not match the kernel UAPI value.
     #[error("blktrace event magic number mismatch")]
     MagicMismatch,
+    /// A trace record carries the blktrace magic but a format version
+    /// this crate cannot parse.
+    #[error("unsupported blktrace record version {0:#04x}")]
+    UnsupportedRecordVersion(u8),
     /// The block name the kernel returned is not valid UTF-8.
     #[error("invalid block name returned by the kernel")]
     InvalidBlockName,
