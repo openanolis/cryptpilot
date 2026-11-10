@@ -76,6 +76,17 @@ proc::fatal() {
     exit 1
 }
 
+# lsof's startup cost grows with RLIMIT_NOFILE; a container's ~1e9 fd limit
+# makes each call take minutes. Capping the limit only shortens that startup
+# work, not what lsof can see.
+proc::lsof_capped() {
+    (
+        ulimit -n 1024 2>/dev/null || true
+        # Keep a call stuck on a dead mount from hanging the caller.
+        exec timeout 10 lsof "$@"
+    )
+}
+
 # Internal: run before exiting due to error
 proc::_trap_cmd_pre() {
     local exit_status=$?
@@ -87,7 +98,7 @@ proc::_trap_cmd_pre() {
             echo "===== Diagnostic Info (begin) ====="
             lsblk
             mount
-            lsof /dev/nbd* /dev/mapper/* 2>/dev/null || true
+            proc::lsof_capped /dev/nbd* /dev/mapper/* 2>/dev/null || true
             echo "===== Diagnostic Info (end)   ====="
         ) >&3
         log::warn "Full logs saved to: ${log_file}"
@@ -163,6 +174,19 @@ disk::nbd_available() {
     [[ $(blockdev --getsize64 "$1") == 0 ]]
 }
 
+# Return the pids holding an image file; run this in a command substitution,
+# since it closes the caller's inherited descriptors.
+disk::_image_holders() {
+    local image="$1"
+
+    set +x
+    # main()'s flock guard keeps this script holding the image open, and
+    # children inherit it; close inherited descriptors so the probe does not
+    # count itself as a holder. The caller also drops its own pid.
+    for fd in {3..255}; do eval "exec ${fd}>&-" 2>/dev/null || true; done
+    proc::lsof_capped -t "${image}" 2>/dev/null
+}
+
 # Disconnect an NBD device and wait for the image lock to actually be
 # released, so a subsequent qemu-img convert does not race on the OFD write
 # lock ("Failed to get shared write lock").
@@ -171,15 +195,16 @@ disk::nbd_available() {
 # releasing the write lock it holds on the backing image. blockdev
 # --getsize64 is NOT a reliable signal here: the device reports size 0 while
 # the daemon still holds the file lock, so polling it exits immediately and
-# the race is back. Instead, poll lsof on the image file: once no process
-# holds it open, the daemon has exited and the lock is gone. Bounded by
-# interval + max attempts so we never block forever.
+# the race is back. Instead, poll the processes holding the image file open.
+# Bounded by wall-clock time so a slow probe cannot stretch the wait.
 disk::nbd_disconnect_and_wait() {
     local device="$1"
     local image="${2:-}"
-    local max_attempts="${3:-30}"
+    local max_seconds="${3:-30}"
     local interval="${4:-1}"
-    local i
+    local start=$SECONDS
+    local next_report=0
+    local elapsed holders rc other_holders holder
 
     qemu-nbd --disconnect "${device}" >/dev/null 2>&1 || true
 
@@ -187,29 +212,40 @@ disk::nbd_disconnect_and_wait() {
     # wait on the device itself.
     [[ -n "${image}" ]] || return 0
 
-    for ((i = 0; i < max_attempts; i++)); do
-        # main()'s flock guard fd keeps this script holding the image open,
-        # and forked children inherit a copy, so lsof would count our own
-        # probes as holders. Close the inherited descriptors inside the probe
-        # subshell (and keep it alive across the scan via "|| true" so it
-        # never execs into lsof), then ignore our pid: only genuine other
-        # holders keep the wait going.
-        local holders fd
-        holders="$(
-            set +x
-            for fd in {3..255}; do eval "exec ${fd}>&-" 2>/dev/null || true; done
-            lsof -t "${image}" 2>/dev/null || true
-        )"
-        local other_holders=""
-        local holder
-        for holder in ${holders}; do
-            [[ "${holder}" == "$$" ]] || other_holders="${other_holders}${holder}"
-        done
-        [[ -z "${other_holders}" ]] && return 0
+    while :; do
+        elapsed=$((SECONDS - start))
+        if ((elapsed >= max_seconds)); then
+            break
+        fi
+
+        rc=0
+        holders="$(disk::_image_holders "${image}")" || rc=$?
+
+        # lsof exits 0 when it found holders and 1 when none; anything else
+        # (notably timeout's 124) means the probe failed, not that the image
+        # was released.
+        if ((rc <= 1)); then
+            other_holders=""
+            for holder in ${holders}; do
+                [[ "${holder}" == "$$" ]] || other_holders+=" ${holder}"
+            done
+            [[ -z "${other_holders}" ]] && return 0
+        fi
+
+        elapsed=$((SECONDS - start))
+        if ((elapsed >= max_seconds)); then
+            break
+        fi
+
+        if ((elapsed >= next_report)); then
+            log::info "Waiting for ${image} to be released (${elapsed}s/${max_seconds}s)"
+            next_report=$((elapsed + 5))
+        fi
+
         sleep "${interval}"
     done
 
-    log::warn "Image ${image} still in use after ${max_attempts} attempts; proceeding anyway"
+    log::warn "Image ${image} not confirmed released after ${elapsed}s; proceeding anyway"
     return 0
 }
 
