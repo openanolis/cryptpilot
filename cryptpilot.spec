@@ -2,7 +2,7 @@
 %define release_num 1
 
 Name: cryptpilot
-Version: 0.9.3
+Version: 0.10.0
 Release: %{release_num}%{?dist}
 Summary: Full-disk encryption and data protection tool for confidential computing
 Group: Applications/System
@@ -392,6 +392,54 @@ fi
 
 
 %changelog
+* Wed Nov 11 2026 Kun Lai <laikun@linux.alibaba.com> - 0.10.0-1
+- fix(convert): cap lsof's fd limit and bound the NBD release wait
+- ci(test): make the aarch64 1.86.0 toolchain actually apply
+- feat(blktrace-rs): capture write-zeroes requests with the v2 trace API
+- fix(convert): install the UKI host tools that exist on DEB distros
+- ci(deb): gate the release job on test-convert
+- ci(test-image): add an ubuntu mode to the test image builder
+- ci(deb): add a test-convert job for Ubuntu guests
+- test(convert): add Ubuntu guest support to the convert integration harness
+- docs: list Ubuntu 24.04 LTS as a supported distribution
+- feat(convert): grow a small ESP for UKI mode
+- feat(convert): boot the converted kernel via grub saved_entry on Ubuntu
+- fix(convert): make the DEB guest install path robust
+- feat(enhance): harden Ubuntu guests with POSIX sh and apt
+- ci(release): gate the tag release on test-convert-persist
+- build(shadow-rs): use the external git command instead of libgit2
+- fix(deps): clear 12 of 13 dependabot security alerts
+- fix(convert): keep removed options with an explicit error or warning
+- fix(convert): exclude the script's own pid from the NBD disconnect wait
+- fix(convert): hold the source-mod lock for the run and flush before the snapshot fork
+- fix(convert): install udevadm's package in the tool dependency lists
+- docs: replace --device examples with --in/--out
+- feat(convert): run dracut against source-write and flush output directly
+- refactor(convert): read rootfs from source-read snapshot instead of rootfs.img
+- feat(convert): fork source-read/source-write snapshots and build output partition layout
+- refactor(convert): shrink in place, stop extracting rootfs.img
+- refactor(convert): rename work file to source-mod overlay and pre-create output
+- refactor(convert): drop --device and --wipe-freed-space, fix RPM version detection
+- fix(convert): fall back to a repo kernel flavor when zram module install fails
+- fix(fde): honor set default= index in the saved_entry fallback
+- fix(ci): repair test.yml workflow startup failure
+- fix(uki): stop baking build-host device paths into the initrd
+- docs(spec): correct the Alinux 4 libguestfs-tools-c notes
+- fix(blktrace-rs): repair the docs.rs build and document all features
+- ci: publish blktrace-rs to crates.io on version change
+- fix(blktrace-rs): polish for publishing
+- chore(blktrace-rs): add README, license and package metadata
+- refactor(core): consume blktrace-rs instead of the in-tree module
+- feat(blktrace-rs): optional async wrappers on the tokio blocking pool
+- test(blktrace-rs): live capture against a loop device
+- feat(blktrace-rs): drive a full blktrace session with reader threads
+- feat(blktrace-rs): ensure debugfs and expose drop_page_cache
+- feat(blktrace-rs): parse blk_io_trace records into events
+- feat(blktrace-rs): add kernel UAPI bindings and trace ioctls
+- feat(blktrace-rs): scaffold the crate with the error type
+- fix(convert): support GCP-style images with a separate ESP grub.cfg and vendor kernels
+- fix(fde): fall back to default GRUB menuentry when grubenv has no saved_entry
+
 * Tue Oct 13 2026 Kun Lai <laikun@linux.alibaba.com> - 0.9.3-1
 - fix(enhance): skip hardening when supermin cannot detect the package manager
 - test(convert): probe the root partition with blkid, not lsblk

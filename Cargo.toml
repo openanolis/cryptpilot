@@ -13,7 +13,7 @@ resolver = "2"
 [workspace.package]
 authors = ["Kun Lai <laikun@linux.alibaba.com>"]
 edition = "2021"
-version = "0.9.3"
+version = "0.10.0"
 
 [workspace.dependencies]
 # default-features off drops the optional rand 0.7 backoff jitter: only
